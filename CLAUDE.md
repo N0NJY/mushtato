@@ -87,11 +87,40 @@ CLAUDE.md
 > Update this section as phases complete.
 
 **Phase 1 (spec) — done. Phase 2 (repo scaffolding) — done. Phase 3
-(engine/net + engine/ansi, headless) — done.** Telnet IAC negotiation is
-hand-rolled on raw asyncio streams (not telnetlib3) — see the Phase 3
-discussion for reasoning. `scripts/console_client.py` is a throwaway
-dev tool for manually testing against a real server (e.g. Rick's
-RhostMUSH); it is not part of the shipped product. Next: Phase 4, the
-trigger/macro/scripting layer (`engine/scripting`) — sandboxed script
-execution, the scripting API, tested headless against captured MUD
-output.
+(engine/net + engine/ansi, headless) — done. Phase 4 (engine/scripting,
+headless) — done, including Phase 4b (on_alias, see below).** Telnet
+IAC negotiation is hand-rolled on raw asyncio streams (not telnetlib3)
+— see the Phase 3 discussion for reasoning. `scripts/console_client.py`
+is a throwaway dev tool for manually testing against a real server
+(e.g. Rick's RhostMUSH); it is not part of the shipped product.
+
+Phase 4 decisions (see SPEC.md sections 5/8 for the full reasoning):
+sandboxing is RestrictedPython; trigger patterns (`on_trigger()`)
+compile against `google-re2` specifically to structurally rule out
+catastrophic-backtracking ReDoS; persistence is JSON via
+`engine/storage/script_store.py`. Script/callback execution runs under
+a best-effort watchdog timeout that does *not* actually interrupt a
+true CPU-bound busy loop (GIL limitation, documented in SPEC.md section
+8) — that's an accepted, tracked gap, not an oversight. The trusted-
+mode escape hatch (`engine/scripting/trusted.py`) is never invoked
+automatically anywhere in the engine; it requires a caller to name it
+explicitly and pass two redundant confirmation keywords every time.
+
+Phase 4b added `on_alias()` (`engine/scripting/aliases.py`): TinyFugue/
+Potato-style outbound command aliases, matched via `fullmatch` (not
+`search`, to avoid a pattern like "n" firing on "nonsense") with
+first-match-wins dispatch, also on `google-re2` for consistency with
+`on_trigger()` and because the ReDoS risk isn't fully zero even for
+user-typed input (pasted text, a future speedwalking/batch-send
+feature). Reuses the existing sandbox/timeout/script-ownership
+machinery unchanged — an alias callback is code of uncertain origin
+exactly like a trigger callback, regardless of where the matched text
+came from. `send()` is never re-run through alias expansion, by
+construction (expand() is only ever meant to be called on raw user
+keystrokes, never on send()'s own output) — not a recursion-depth
+guard bolted on after the fact. The API surface is now 10 functions:
+send/echo/gag/highlight/set_var/get_var/timer/on_trigger/on_connect/
+on_alias.
+
+Next: Phase 5, the minimal Qt shell — one window, one connection,
+scrollback + input, wired to the validated engine.

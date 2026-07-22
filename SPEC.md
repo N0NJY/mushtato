@@ -80,9 +80,18 @@ Two cleanly separated layers:
   constraint now that this is open-source, but still the more permissive default)
 - **Networking:** asyncio + a telnet-aware layer (evaluate `telnetlib3` vs
   hand-rolled)
-- **Sandboxing:** `RestrictedPython` (evaluate) or custom AST-walk whitelist
-- **Persistence:** SQLite (via stdlib `sqlite3`) or plain JSON files — decide
-  during Phase 2 based on how complex world/script metadata gets
+- **Sandboxing:** `RestrictedPython` (decided, Phase 4) — see section 8 history
+- **Trigger pattern matching:** `google-re2` (decided, Phase 4) — trigger
+  patterns (`on_trigger()`) compile against RE2 rather than stdlib `re`,
+  which structurally rules out catastrophic-backtracking ReDoS for the one
+  place in the codebase where untrusted-origin patterns are matched against
+  untrusted-origin text. Other regex use in the codebase (e.g. the ANSI
+  parser's fixed, developer-authored patterns) has no such exposure and
+  stays on stdlib `re`.
+- **Persistence:** JSON files (decided, Phase 4) — script source (+ a
+  `trusted` flag) and per-world variables; simple enough a schema that
+  SQLite's extra structure wasn't worth it, and JSON fits the eventual
+  shareable-script-pack goal (section 2) better than a DB blob.
 - **Packaging:** PyInstaller, built via GitHub Actions matrix (windows-latest,
   ubuntu-latest, macos-latest)
 - **Testing:** pytest, with the engine layer fully testable headless (no GUI
@@ -129,9 +138,30 @@ Two cleanly separated layers:
 
 ## 8. Open questions to revisit
 
-- SQLite vs JSON for world/script storage.
-- Exact sandboxing library/approach (RestrictedPython vs custom AST whitelist)
-  — needs a spike before Phase 4.
+- ~~SQLite vs JSON for world/script storage.~~ **Decided (Phase 4): JSON.**
+  See section 5.
+- ~~Exact sandboxing library/approach (RestrictedPython vs custom AST
+  whitelist).~~ **Decided (Phase 4): RestrictedPython.** Mature,
+  purpose-built for running semi-trusted code inside a larger app (used by
+  Zope/Plone for this exact purpose for ~2 decades); a hand-rolled AST
+  whitelist would have to independently rediscover known sandbox-escape
+  techniques (dunder-attribute traversal, format-string tricks, etc.) that
+  RestrictedPython's guarded attribute/item access and maintained
+  safe-builtins baseline already close off. Relevant given this project
+  expects scripts from strangers once script-sharing exists (section 2).
+- **Known gap: runaway script execution isn't fully bounded (Phase 4).**
+  Script execution runs under a best-effort watchdog timeout, but a true
+  CPU-bound busy loop in restricted Python (e.g. `while True: pass`) is
+  *not* actually interrupted by that timeout — Python's GIL means a thread
+  running pure-Python CPU-bound code can't be preempted from outside it, so
+  the watchdog only protects against I/O-style stalls, not a genuine
+  infinite loop. (Catastrophic-backtracking ReDoS in trigger patterns is
+  separately closed off structurally by RE2 — see section 5 — rather than
+  relying on this timeout.) The real fix for the busy-loop gap is running
+  script execution in an isolated subprocess with a hard kill, which is
+  more scope than a single phase; revisit as a hardening pass once the
+  scripting layer sees real use, and especially before any script-sharing
+  feature (section 7, phase 8) ships.
 - macOS notarization: pursue Apple Developer Program membership, or ship
   unsigned with a documented Gatekeeper workaround?
 - Format/venue for the eventual script-sharing community.

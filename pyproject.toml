@@ -7,6 +7,8 @@ requires-python = ">=3.11"
 license = { file = "LICENSE" }
 dependencies = [
     "PySide6",
+    "RestrictedPython",
+    "google-re2",
 ]
 
 [project.optional-dependencies]
