@@ -14,8 +14,9 @@ from PySide6.QtGui import QFontDatabase, QKeySequence, QShortcut, QTextCursor
 from PySide6.QtWidgets import QMainWindow, QPushButton, QTextEdit, QVBoxLayout, QWidget
 
 from engine.ansi import AnsiParser
-from engine.storage import DEFAULT_HOTKEYS
+from engine.storage import DEFAULT_HOTKEYS, DEFAULT_THEME
 
+from ..theme import scrollback_palette
 from .history_line_edit import HistoryLineEdit
 from .spawn_window import SpawnWindow
 from .styled_text_qt import append_styled_segments
@@ -33,20 +34,23 @@ class MainWindow(QMainWindow):
         name: Optional[str] = None,
         bridge: Optional[TelnetBridge] = None,
         hotkeys: Optional[Dict[str, str]] = None,
+        theme: Optional[str] = None,
     ) -> None:
         super().__init__()
         self._host = host
         self._port = port
         self._parser = AnsiParser()
         self.spawn_windows: List[SpawnWindow] = []
-        # Defaults to the plain constant, never touching disk on its
-        # own -- MainWindow itself does no settings I/O. Callers that
-        # want the user's actually-saved hotkeys (gui/app.py's direct-
-        # connect path, AddressBookWindow.connect_to) load Settings
-        # themselves and pass hotkeys through explicitly. Keeps window
-        # construction side-effect-free for tests: nothing here reads
-        # ambient state from the real user-data directory.
+        # Same pattern as hotkeys below: defaults to the plain constant,
+        # never touching disk on its own -- MainWindow itself does no
+        # settings I/O. Callers that want the user's actually-saved
+        # values (gui/app.py's direct-connect path, AddressBookWindow.
+        # connect_to) load Settings themselves and pass them through
+        # explicitly. Keeps window construction side-effect-free for
+        # tests: nothing here reads ambient state from the real
+        # user-data directory.
         self._hotkeys = hotkeys if hotkeys is not None else DEFAULT_HOTKEYS
+        self._theme = theme if theme is not None else DEFAULT_THEME
 
         self.setWindowTitle(f"MushTato — {name or f'{host}:{port}'}")
 
@@ -56,6 +60,11 @@ class MainWindow(QMainWindow):
         # authored assuming a fixed-width terminal; the default
         # proportional GUI font breaks that alignment.
         self.scrollback.setFont(QFontDatabase.systemFont(QFontDatabase.SystemFont.FixedFont))
+        # Output pane gets its own dimmer Base/Text than the rest of the
+        # app's palette (matching Potato's own real distinction between
+        # its brighter input box and dimmer output pane) -- see
+        # gui/theme.py.
+        self.scrollback.setPalette(scrollback_palette(self._theme, self.palette()))
 
         # Dual input (Phase 6): two independent boxes, both sending to
         # this same connection, each with its own recall history.
@@ -169,7 +178,7 @@ class MainWindow(QMainWindow):
         feature; log-mirror is the concrete first example -- see
         CLAUDE.md's Phase 6 notes for why).
         """
-        window = SpawnWindow(f"{self.windowTitle()} — Log", parent=None)
+        window = SpawnWindow(f"{self.windowTitle()} — Log", parent=None, theme=self._theme)
         window.closed.connect(lambda: self._remove_spawn_window(window))
         self.spawn_windows.append(window)
         window.resize(500, 400)

@@ -5,6 +5,7 @@ AddressBookWindow.
 from pathlib import Path
 
 from PySide6.QtGui import QKeySequence
+from PySide6.QtWidgets import QLabel
 
 from engine.storage import DEFAULT_HOTKEYS, Settings, load_settings
 from gui.dialogs.settings_dialog import SettingsDialog
@@ -80,3 +81,47 @@ def test_connecting_passes_current_hotkeys_to_the_session_window(qapp, tmp_path:
     opened = window.connect_to(window.worlds[0])
 
     assert opened.hotkeys["close_window"] == "Ctrl+Q"
+
+
+def test_dialog_prefills_theme_combo_from_current_settings(qapp):
+    dialog = SettingsDialog(settings=Settings(theme="light"))
+    assert dialog._theme_combo.currentText() == "Light"
+
+    dialog_dark = SettingsDialog(settings=Settings(theme="dark"))
+    assert dialog_dark._theme_combo.currentText() == "Dark"
+
+
+def test_result_settings_reflects_selected_theme(qapp):
+    dialog = SettingsDialog(settings=Settings(theme="dark"))
+    dialog._theme_combo.setCurrentText("Light")
+
+    result = dialog.result_settings()
+
+    assert result.theme == "light"
+
+
+def test_first_run_mode_shows_an_intro_label(qapp):
+    first_run_dialog = SettingsDialog(settings=Settings(), first_run=True)
+    normal_dialog = SettingsDialog(settings=Settings(), first_run=False)
+
+    def has_welcome_label(dialog):
+        return any("Welcome" in label.text() for label in dialog.findChildren(QLabel))
+
+    assert has_welcome_label(first_run_dialog) is True
+    assert has_welcome_label(normal_dialog) is False
+
+
+def test_connecting_passes_current_theme_to_the_session_window(qapp, tmp_path: Path):
+    from engine.storage import WorldProfile, save_address_book, save_settings
+
+    ab_path = tmp_path / "address_book.json"
+    settings_path = tmp_path / "settings.json"
+    save_address_book(ab_path, [WorldProfile(name="X", host="h", port=1)])
+    save_settings(settings_path, Settings(theme="light"))
+
+    window = AddressBookWindow(
+        storage_path=ab_path, settings_storage_path=settings_path, window_factory=FakeSessionWindow
+    )
+    opened = window.connect_to(window.worlds[0])
+
+    assert opened.theme == "light"

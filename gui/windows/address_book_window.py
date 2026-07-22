@@ -15,6 +15,7 @@ from typing import List, Optional
 
 from PySide6.QtGui import QKeySequence, QShortcut
 from PySide6.QtWidgets import (
+    QApplication,
     QHBoxLayout,
     QListWidget,
     QMainWindow,
@@ -36,6 +37,7 @@ from engine.storage import (
 
 from ..dialogs.settings_dialog import SettingsDialog
 from ..dialogs.world_edit_dialog import WorldEditDialog
+from ..theme import apply_theme
 from .main_window import MainWindow
 
 
@@ -61,9 +63,15 @@ class AddressBookWindow(QMainWindow):
 
         self.worlds: List[WorldProfile] = load_address_book(self._path)
         self.open_windows: List[MainWindow] = []
-        # Loaded once at construction -- a Settings change applies to
-        # newly-opened windows, not ones already open. Live-reload
-        # across open windows is more machinery than v1 needs.
+        # Loaded once at construction. A hotkeys change always applies
+        # to newly-opened windows only (unchanged from Phase 7). A
+        # theme change is a mix, verified empirically (see
+        # _open_settings and CLAUDE.md's Phase 7b notes): chrome and
+        # input boxes update live on already-open windows too, since
+        # they just inherit the app-wide QPalette -- but the
+        # scrollback's own dimmer Base/Text override
+        # (gui/theme.scrollback_palette) is set once at construction
+        # and does NOT live-update, only the app-wide palette does.
         self.settings: Settings = load_settings(self._settings_path)
 
         self.list_widget = QListWidget(self)
@@ -107,6 +115,9 @@ class AddressBookWindow(QMainWindow):
         if dialog.exec():
             self.settings = dialog.result_settings()
             save_settings(self._settings_path, self.settings)
+            app = QApplication.instance()
+            if app is not None:
+                apply_theme(app, self.settings.theme)
 
     def _refresh_list(self) -> None:
         self.list_widget.clear()
@@ -157,7 +168,11 @@ class AddressBookWindow(QMainWindow):
 
     def connect_to(self, world: WorldProfile) -> MainWindow:
         window = self._window_factory(
-            world.host, world.port, name=world.name, hotkeys=self.settings.hotkeys
+            world.host,
+            world.port,
+            name=world.name,
+            hotkeys=self.settings.hotkeys,
+            theme=self.settings.theme,
         )
         window.closed.connect(lambda: self._remove_open_window(window))
         self.open_windows.append(window)

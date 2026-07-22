@@ -92,7 +92,8 @@ headless) — done, including Phase 4b (on_alias, see below). Phase 5
 (minimal Qt shell) — done, validated against both fake and real
 servers (see below). Phase 6 (address book, multi-window, spawn
 windows, dual input) — done, see below. Phase 7 (settings/hotkeys,
-CI packaging) — done, see below.** Telnet IAC negotiation is
+CI packaging) — done, see below. Phase 7b (theme support, first-run
+settings dialog) — done, see below.** Telnet IAC negotiation is
 hand-rolled on raw asyncio streams (not telnetlib3)
 — see the Phase 3 discussion for reasoning. `scripts/console_client.py`
 is a throwaway dev tool for manually testing against a real server
@@ -346,5 +347,84 @@ a packaged GUI build.
 Still NOT wiring `engine/scripting` into the GUI -- same deferred
 decision as every phase since Phase 4b, called out again so it stays
 visible rather than quietly dropped.
+
+**Phase 7b (theme support, first-run settings dialog) — done.**
+Extended `Settings` (`engine/storage/settings.py`) with a `theme`
+field (`"dark"`/`"light"`, default-merged like hotkeys so old settings
+files keep working), a new `gui/theme.py`, and a first-run flow in
+`gui/app.py`.
+
+Theme approach (checkpoint discussion before code): `QPalette` via
+`QApplication.setPalette()`, not Qt Style Sheets or a third-party theme
+library -- no new dependency, and it reaches chrome, dialogs, input
+boxes, *and* the scrollback for free, since nothing in this codebase
+had ever set an explicit palette/stylesheet override before this
+phase.
+
+The dark theme's scrollback/input colors are **Rick's own real Potato
+client's actual shipped defaults**, not invented -- pulled directly
+from `potato.vfs/lib/potato-config.tcl` on his machine: output pane
+`#000000` background / `#aeaeae` dimmed text, input box `#000000`
+background / `#ffffff` brighter text (Potato deliberately makes typed
+input brighter than server output). Chrome colors (dialogs/buttons/
+list) have no authentic Potato reference -- Potato's own skin system is
+about native ttk widget styles (xpnative/aqua), not a custom dark
+scheme for its own dialogs -- so those are this project's own design,
+called out as such in `gui/theme.py`'s docstring rather than presented
+as more "authentic" than they are. The light theme has no Potato
+precedent at all (Potato's own defaults are black-background); it's
+this project's own reasonable choice.
+
+**ANSI black-on-black checkpoint, explicitly declined:** Potato's own
+answer to the light/dark ANSI-legibility risk flagged before code was
+proposed -- its "black" ANSI color is `#222222`, not pure black,
+specifically so it isn't invisible against its own black output pane.
+Adopting the equivalent fix in `engine/ansi/palette.py`
+(`basic_color(0)`, currently pure `(0, 0, 0)`) was proposed and
+**declined** -- that file is Phase 3, a different layer than this
+phase's actual scope, and Rick chose to leave it untouched. The
+mitigation that *did* ship is scoped to the GUI/theme layer only: the
+dark theme's own background choice (Potato's `#000000`) is what keeps
+things legible for the overwhelmingly common case, not a change to the
+engine's color mapping. The broader risk (a server sending explicit
+light ANSI foreground colors against the light theme) remains an
+accepted, documented gap, same pattern as the GIL busy-loop timeout gap
+-- a full theme-aware ANSI remap was raised and explicitly scoped out
+as bigger than "a small addition."
+
+Live-reload, verified empirically rather than assumed: calling
+`apply_theme(app, new_theme)` again after startup **does** update
+already-open windows' chrome and input boxes (they just inherit the
+app-wide `QPalette`, and Qt's own event loop propagates the change) --
+confirmed both programmatically and with a real screenshot showing an
+already-open session window's input boxes and button switching from
+dark to light live. The scrollback's own dimmer Base/Text override
+(`gui/theme.scrollback_palette`, applied once per-widget at
+construction to get Potato's distinct output-vs-input colors) does
+**not** live-update on already-open windows -- confirmed by the same
+screenshot, which shows the scrollback still black after the app
+switched to light. Only newly-opened windows pick up a changed theme's
+scrollback colors, same limitation pattern as hotkeys from Phase 7.
+
+First-run detection: `not settings_path().exists()`, checked once in
+`gui/app.py` via a new `ensure_settings()` helper (split out from
+`main()` specifically so it's unit-testable without a real
+QApplication/event-loop run) -- applies before either the direct-
+connect or address-book path, so it's independent of which entry mode
+is used. Reuses `settings_dialog.py` as-is (a `first_run: bool` flag
+just adds one intro `QLabel`), not a separate onboarding dialog; a
+fuller "welcome tour" belongs to Phase 8 (documentation & onboarding),
+not this phase. Per Rick's choice, the dialog's result is saved
+whether OK or Cancel is clicked, so it's shown at most once ever, never
+nagging on a later launch.
+
+Manually validated end-to-end against the real local RhostMUSH
+(`127.0.0.1:4444`): dark theme applied at startup renders exactly like
+Potato's real client (black scrollback, dimmed output text, brighter
+input text); switching to light via the settings dialog updated the
+address book and an already-open session window's chrome/inputs live,
+while that window's scrollback correctly stayed on its
+construction-time theme, matching the verified/documented limitation
+precisely.
 
 Next: Phase 8, documentation.

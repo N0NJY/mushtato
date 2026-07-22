@@ -133,6 +133,10 @@ Two cleanly separated layers:
 6. **Layer in Potato's multi-window features** — address book, multi-connection,
    spawn windows, dual input.
 7. **Polish** — hotkeys, settings dialog, packaging via CI for all three OSes.
+7b. **Theme support (light/dark) and first-run settings dialog** — QPalette-based
+    light/dark theming covering both chrome (address book, dialogs) and session
+    windows (scrollback + input boxes) consistently; a first-run settings
+    dialog (reusing settings_dialog.py) shown when no settings file exists yet.
 8. **Documentation & onboarding** — INSTALL.md (novice-friendly: what
    MushTato is, where to download it, OS-specific install steps including
    Gatekeeper/SmartScreen unsigned-binary workarounds, uninstall

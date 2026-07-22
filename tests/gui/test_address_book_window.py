@@ -23,12 +23,15 @@ class FakeSessionWindow(QObject):
 
     closed = Signal()
 
-    def __init__(self, host: str, port: int, *, name=None, bridge=None, hotkeys=None) -> None:
+    def __init__(
+        self, host: str, port: int, *, name=None, bridge=None, hotkeys=None, theme=None
+    ) -> None:
         super().__init__()
         self.host = host
         self.port = port
         self.name = name
         self.hotkeys = hotkeys
+        self.theme = theme
         self.shown = False
 
     def resize(self, *args) -> None:

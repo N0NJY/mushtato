@@ -2,12 +2,13 @@
 
 from pathlib import Path
 
-from engine.storage import DEFAULT_HOTKEYS, Settings, load_settings, save_settings
+from engine.storage import DEFAULT_HOTKEYS, DEFAULT_THEME, Settings, load_settings, save_settings
 
 
 def test_loading_a_missing_file_returns_all_defaults(tmp_path: Path):
     settings = load_settings(tmp_path / "does_not_exist.json")
     assert settings.hotkeys == DEFAULT_HOTKEYS
+    assert settings.theme == DEFAULT_THEME == "dark"
 
 
 def test_save_then_load_round_trips(tmp_path: Path):
@@ -52,3 +53,38 @@ def test_save_is_atomic_no_leftover_tmp_file(tmp_path: Path):
     save_settings(path, Settings())
     assert path.exists()
     assert not (tmp_path / "settings.json.tmp").exists()
+
+
+def test_theme_round_trips(tmp_path: Path):
+    path = tmp_path / "settings.json"
+    save_settings(path, Settings(theme="light"))
+
+    reloaded = load_settings(path)
+
+    assert reloaded.theme == "light"
+
+
+def test_unrecognized_saved_theme_falls_back_to_default(tmp_path: Path):
+    """Simulates a hand-edited or future-version settings file with a
+    theme value this version doesn't recognize -- must not raise.
+    """
+    path = tmp_path / "settings.json"
+    import json
+
+    path.write_text(json.dumps({"theme": "solarized-nonexistent"}), encoding="utf-8")
+
+    settings = load_settings(path)
+
+    assert settings.theme == DEFAULT_THEME
+
+
+def test_theme_missing_from_saved_file_defaults(tmp_path: Path):
+    """Simulates a settings file saved before theme support existed."""
+    path = tmp_path / "settings.json"
+    import json
+
+    path.write_text(json.dumps({"hotkeys": DEFAULT_HOTKEYS}), encoding="utf-8")
+
+    settings = load_settings(path)
+
+    assert settings.theme == DEFAULT_THEME

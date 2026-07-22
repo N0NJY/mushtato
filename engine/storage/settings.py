@@ -27,10 +27,19 @@ DEFAULT_HOTKEYS: Dict[str, str] = {
     "close_window": "Ctrl+W",
 }
 
+# "dark" is the default (Phase 7b checkpoint): matches engine/ansi's
+# xterm-standard palette assumptions and the near-universal MUD/
+# terminal convention of a dark background, so it's the safer default
+# for typical server content. See gui/theme.py for what each value
+# actually renders as.
+THEMES = ("dark", "light")
+DEFAULT_THEME = "dark"
+
 
 @dataclass
 class Settings:
     hotkeys: Dict[str, str] = field(default_factory=lambda: dict(DEFAULT_HOTKEYS))
+    theme: str = DEFAULT_THEME
 
 
 def load_settings(path: Path) -> Settings:
@@ -40,19 +49,24 @@ def load_settings(path: Path) -> Settings:
     hotkey action missing from a saved file (e.g. one saved before a
     new configurable action existed) is filled in with its default
     rather than left unbound, so old settings files keep working as
-    new actions get added.
+    new actions get added. Same forward-compatible merge for `theme`:
+    an unrecognized or missing value falls back to the default rather
+    than raising.
     """
     if not path.exists():
         return Settings()
     data = json.loads(path.read_text(encoding="utf-8"))
     hotkeys = dict(DEFAULT_HOTKEYS)
     hotkeys.update(data.get("hotkeys", {}))
-    return Settings(hotkeys=hotkeys)
+    theme = data.get("theme", DEFAULT_THEME)
+    if theme not in THEMES:
+        theme = DEFAULT_THEME
+    return Settings(hotkeys=hotkeys, theme=theme)
 
 
 def save_settings(path: Path, settings: Settings) -> None:
     """Save ``settings`` to ``path``, atomically (write-then-rename)."""
-    data = {"hotkeys": settings.hotkeys}
+    data = {"hotkeys": settings.hotkeys, "theme": settings.theme}
     path.parent.mkdir(parents=True, exist_ok=True)
     tmp_path = path.with_suffix(path.suffix + ".tmp")
     tmp_path.write_text(json.dumps(data, indent=2, sort_keys=True), encoding="utf-8")
