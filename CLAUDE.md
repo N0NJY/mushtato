@@ -122,5 +122,61 @@ guard bolted on after the fact. The API surface is now 10 functions:
 send/echo/gag/highlight/set_var/get_var/timer/on_trigger/on_connect/
 on_alias.
 
-Next: Phase 5, the minimal Qt shell — one window, one connection,
-scrollback + input, wired to the validated engine.
+**Phase 5 (minimal Qt shell) — done.** One window
+(`gui/windows/main_window.py`), one connection, ANSI-rendered
+scrollback, single-line input. `python -m gui.app [host] [port]` is the
+entry point (prompts for host/port via a dialog if not given on the
+command line — no address book yet, that's Phase 6).
+
+Qt/asyncio architecture decision (see the Phase 5 discussion for the
+full reasoning): the asyncio event loop TelnetClient needs runs on its
+own background thread per connection (`gui/windows/telnet_bridge.py`,
+`TelnetBridge`), never the Qt/GUI thread. Incoming data crosses to the
+GUI thread via Qt signals (automatic `QueuedConnection` marshaling,
+since the bridge is constructed on the GUI thread before its
+background thread starts); outbound sends cross the other way via
+`asyncio.run_coroutine_threadsafe`. Rejected qasync (a combined
+Qt+asyncio loop on one thread) specifically because it would require a
+future scripting integration to remember to wrap
+`engine.scripting.sandbox.run_with_timeout` calls in
+`loop.run_in_executor(...)` to avoid freezing the GUI on a slow
+callback — under the chosen background-thread model, that watchdog's
+blocking wait naturally lands on the per-world background thread
+instead, by construction, so **no special-casing is needed when
+scripting gets wired in later.** No new dependency was needed either
+way in the end (background-thread approach uses only stdlib
+`threading`/`asyncio` + PySide6's existing signal/slot mechanism).
+
+**Scripting (`engine/scripting`, Phase 4/4b) is deliberately NOT wired
+into the GUI yet** — this phase is raw connect/display/send only, no
+`ScriptWorld`, no triggers, no aliases touching the GUI. That's an
+explicit deferral to a later phase, not an oversight; see the
+Qt/asyncio note above for why the current architecture should make
+that wiring safe when it happens.
+
+`engine/ansi`'s `StyledSegment` output is converted to Qt formatting in
+`gui/windows/styled_text_qt.py` (kept separate from `MainWindow`
+specifically because it's the one piece of this phase testable
+headless) — engine/ansi itself is reused as-is, no ANSI parsing
+duplicated in the GUI layer, per CLAUDE.md rule 2.
+
+The scrollback pane uses a fixed-width font
+(`QFontDatabase.SystemFont.FixedFont`), not Qt's default proportional
+font — found via manual testing against a real RhostMUSH server (see
+below), where the default font broke alignment of ASCII-art banners/
+borders that assume a fixed-width terminal.
+
+Manually validated end-to-end against two distinct real servers, not
+just fake loopback ones: `127.0.0.1:4444` (Rick's own local RhostMUSH,
+running on this machine) and `silvren.com:4444` (a separate, live
+third-party RhostMUSH elsewhere on the internet, *not* owned by
+Rick — happens to run the same welcome-banner theme, which is why the
+two looked identical at first glance; be considerate about how much
+automated/repeated testing hits that one going forward, same courtesy
+as any other real user's server). Confirmed real DNS + TCP + telnet
+negotiation, real ANSI colors rendering correctly, and a full
+interactive round-trip (guest login, `look`, server response) against
+both.
+
+Next: Phase 6, layering in Potato's multi-window features — address
+book, multi-connection, spawn windows, dual input.
