@@ -29,6 +29,10 @@ def address_book_path() -> Path:
     return user_data_dir() / "address_book.json"
 
 
+def settings_path() -> Path:
+    return user_data_dir() / "settings.json"
+
+
 def world_script_path(world_name: str) -> Path:
     return user_data_dir() / "scripts" / f"{safe_filename(world_name)}.json"
 

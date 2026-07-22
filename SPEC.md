@@ -133,7 +133,14 @@ Two cleanly separated layers:
 6. **Layer in Potato's multi-window features** — address book, multi-connection,
    spawn windows, dual input.
 7. **Polish** — hotkeys, settings dialog, packaging via CI for all three OSes.
-8. **(Post-1.0) Script-sharing ecosystem** — define a shareable script package
+8. **Documentation & onboarding** — INSTALL.md (novice-friendly: what
+   MushTato is, where to download it, OS-specific install steps including
+   Gatekeeper/SmartScreen unsigned-binary workarounds, uninstall
+   instructions), an in-app Help system (accessible via menu and a
+   client-side command, content covering the client's features end to
+   end), troubleshooting/FAQ, credits/attribution to Potato and
+   TinyFugue, and a CHANGELOG.md.
+9. **(Post-1.0) Script-sharing ecosystem** — define a shareable script package
    format, decide on a distribution point (repo, in-app browser, or both).
 
 ## 8. Open questions to revisit
@@ -161,7 +168,14 @@ Two cleanly separated layers:
   script execution in an isolated subprocess with a hard kill, which is
   more scope than a single phase; revisit as a hardening pass once the
   scripting layer sees real use, and especially before any script-sharing
-  feature (section 7, phase 8) ships.
-- macOS notarization: pursue Apple Developer Program membership, or ship
-  unsigned with a documented Gatekeeper workaround?
+  feature (section 7, phase 9) ships.
+- ~~macOS notarization: pursue Apple Developer Program membership, or ship
+  unsigned with a documented Gatekeeper workaround?~~ **Decided (Phase 7):
+  ship unsigned for now.** Not a technical call — section 3 already
+  non-goals full macOS QA until a real beta tester with actual Mac
+  hardware exists, so paying $99/year on an ongoing basis to remove a
+  Gatekeeper warning on a platform nobody's confirmed works well on yet
+  gets the priority backwards. Users get the standard right-click-Open
+  workaround in the meantime. Revisit once a real macOS user exists to
+  validate against.
 - Format/venue for the eventual script-sharing community.

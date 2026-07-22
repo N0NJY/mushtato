@@ -91,7 +91,8 @@ CLAUDE.md
 headless) — done, including Phase 4b (on_alias, see below). Phase 5
 (minimal Qt shell) — done, validated against both fake and real
 servers (see below). Phase 6 (address book, multi-window, spawn
-windows, dual input) — done, see below.** Telnet IAC negotiation is
+windows, dual input) — done, see below. Phase 7 (settings/hotkeys,
+CI packaging) — done, see below.** Telnet IAC negotiation is
 hand-rolled on raw asyncio streams (not telnetlib3)
 — see the Phase 3 discussion for reasoning. `scripts/console_client.py`
 is a throwaway dev tool for manually testing against a real server
@@ -253,5 +254,74 @@ letting the banner finish arriving — an earlier attempt typed too early
 and looked broken until the timing was fixed), and a spawn log window
 correctly receiving only text that arrived after it was created.
 
-Next: Phase 7, polish — hotkeys, settings dialog, packaging via CI for
-all three OSes.
+**Phase 7 (polish + packaging) — done.** Settings dialog
+(`gui/dialogs/settings_dialog.py`) for configurable hotkeys, and a
+GitHub Actions workflow (`.github/workflows/build.yml`) building
+PyInstaller packages for Windows/Linux/macOS.
+
+Settings/hotkey storage: a third sibling in `engine/storage`
+(`settings.py`), alongside `address_book.py`/`script_store.py` —
+already anticipated since Phase 2's repo-structure comment named
+"settings persistence" as one of engine/storage's three jobs, so this
+wasn't really a fresh architectural call. v1 content is hotkeys only
+(`Settings.hotkeys: Dict[str, str]`); loading merges in defaults for
+any action missing from a saved file, so adding a new configurable
+action later can't leave it unbound. Concrete starting keybindings:
+Add World `Ctrl+N`, Connect `Ctrl+Return` (address book); Spawn Log
+Window `Ctrl+L`, Switch Input Focus `Ctrl+Tab` (session window); Close
+Window `Ctrl+W` (both). `MainWindow` itself never touches disk for
+settings on its own -- it defaults to the plain `DEFAULT_HOTKEYS`
+constant if not given a `hotkeys` dict, so tests never depend on
+ambient real user-data state; the real disk-loaded settings are passed
+in explicitly by `gui/app.py`'s direct-connect path and by
+`AddressBookWindow.connect_to`. A settings change applies to
+newly-opened windows only, not ones already open -- live-reload across
+open windows was judged more machinery than v1 needs.
+
+macOS distribution (checkpoint discussion before code): shipping
+**unsigned** for now, not pursuing Apple Developer Program
+notarization ($99/year) yet. This isn't a technical call -- SPEC.md
+section 3 already non-goals full macOS QA until a real beta tester
+with actual Mac hardware exists, and section 8 already listed
+notarization as an explicitly open question; paying an ongoing fee to
+remove a Gatekeeper warning on a platform nobody's confirmed works well
+on yet gets the priority backwards. Revisit once a real macOS user
+exists to validate against. Users get the standard right-click-Open
+Gatekeeper workaround in the meantime.
+
+CI (`.github/workflows/build.yml`): two triggers -- every push to
+`main` builds all three OSes and uploads workflow artifacts only
+(catches packaging breakage early); pushing a `v*` tag does the same
+build and additionally attaches the artifacts to a GitHub Release.
+PyInstaller uses `--onedir` (the checked-in `packaging/mushtato.spec`,
+not a bare CLI flag), not `--onefile` -- more reliable Qt-plugin
+discovery for PySide6 at the cost of shipping a folder/zip instead of
+one exe. Packaging the build output is OS-specific: `ditto` on macOS
+(preserves `.app` bundle permissions/symlinks, which a generic zip
+would mangle), `7z` on Windows, `tar` on Linux.
+
+A real, separate packaging bug surfaced and got fixed while building
+the spec file locally: `pip install -e .` failed outright because
+setuptools couldn't auto-discover packages among the repo's multiple
+top-level directories (`engine`, `gui`, `tests`, `scripts`, `worlds`).
+Fixed via an explicit `[tool.setuptools.packages.find]` `include`
+pattern in `pyproject.toml` restricting discovery to `engine*`/`gui*` --
+otherwise this would have silently blocked any contributor trying to
+install the project for local development.
+
+Verified locally, honestly scoped: built the actual Linux PyInstaller
+artifact from the checked-in spec and confirmed it launches and stays
+running with no import errors (a real functional check, not just "the
+build didn't error") -- this only covers what `gui/app.py`'s import
+graph currently reaches (PySide6, engine/net, engine/ansi,
+engine/storage); `engine/scripting`'s RestrictedPython/`google-re2`
+aren't bundled by this build since nothing in the GUI imports them yet.
+Windows and macOS builds, and the GitHub Actions workflow itself, could
+not be verified locally -- Rick will check GitHub's Actions tab once
+this is pushed.
+
+Still NOT wiring `engine/scripting` into the GUI -- same deferred
+decision as every phase since Phase 4b, called out again so it stays
+visible rather than quietly dropped.
+
+Next: Phase 8, documentation.

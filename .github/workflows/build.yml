@@ -1,0 +1,87 @@
+name: Build
+
+# Two trigger conditions (Phase 7 checkpoint):
+# - Every push to main: build all three OSes and upload as workflow
+#   artifacts only. Catches packaging breakage early, at the point a
+#   change causes it, rather than only discovering it at release time.
+# - Pushing a `v*` tag: same build, plus attach the artifacts to a
+#   GitHub Release.
+on:
+  push:
+    branches: [main]
+    tags: ["v*"]
+  workflow_dispatch:
+
+jobs:
+  build:
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: windows-latest
+            artifact_name: MushTato-windows
+          - os: ubuntu-latest
+            artifact_name: MushTato-linux
+          - os: macos-latest
+            artifact_name: MushTato-macos
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+          cache: pip
+
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -e ".[build]"
+
+      - name: Build with PyInstaller
+        run: pyinstaller packaging/mushtato.spec --noconfirm
+
+      # macOS ships a .app bundle; regular zip mangles bundle
+      # permissions/symlinks, so use Apple's own `ditto` there instead
+      # of a generic archiver. --onedir (this project's spec, not
+      # --onefile) is more reliable for PySide6's Qt-plugin discovery
+      # than a single-file build, at the cost of shipping a folder.
+      - name: Package artifact (Windows)
+        if: runner.os == 'Windows'
+        shell: bash
+        run: |
+          cd dist
+          7z a ../${{ matrix.artifact_name }}.zip MushTato
+      - name: Package artifact (Linux)
+        if: runner.os == 'Linux'
+        run: |
+          cd dist
+          tar czf ../${{ matrix.artifact_name }}.tar.gz MushTato
+      - name: Package artifact (macOS)
+        if: runner.os == 'macOS'
+        run: |
+          cd dist
+          ditto -c -k --sequesterRsrc --keepParent MushTato ../${{ matrix.artifact_name }}.zip
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: ${{ matrix.artifact_name }}
+          path: |
+            ${{ matrix.artifact_name }}.zip
+            ${{ matrix.artifact_name }}.tar.gz
+          if-no-files-found: ignore
+
+  release:
+    needs: build
+    if: startsWith(github.ref, 'refs/tags/v')
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          path: artifacts
+      - name: Create Release
+        uses: softprops/action-gh-release@v2
+        with:
+          files: artifacts/**/*

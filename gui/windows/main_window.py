@@ -7,13 +7,14 @@ Phase 5/6 notes for why that's an explicit deferral, not an oversight.
 
 from __future__ import annotations
 
-from typing import List, Optional
+from typing import Dict, List, Optional
 
 from PySide6.QtCore import Signal
-from PySide6.QtGui import QFontDatabase, QTextCursor
+from PySide6.QtGui import QFontDatabase, QKeySequence, QShortcut, QTextCursor
 from PySide6.QtWidgets import QMainWindow, QPushButton, QTextEdit, QVBoxLayout, QWidget
 
 from engine.ansi import AnsiParser
+from engine.storage import DEFAULT_HOTKEYS
 
 from .history_line_edit import HistoryLineEdit
 from .spawn_window import SpawnWindow
@@ -31,12 +32,21 @@ class MainWindow(QMainWindow):
         *,
         name: Optional[str] = None,
         bridge: Optional[TelnetBridge] = None,
+        hotkeys: Optional[Dict[str, str]] = None,
     ) -> None:
         super().__init__()
         self._host = host
         self._port = port
         self._parser = AnsiParser()
         self.spawn_windows: List[SpawnWindow] = []
+        # Defaults to the plain constant, never touching disk on its
+        # own -- MainWindow itself does no settings I/O. Callers that
+        # want the user's actually-saved hotkeys (gui/app.py's direct-
+        # connect path, AddressBookWindow.connect_to) load Settings
+        # themselves and pass hotkeys through explicitly. Keeps window
+        # construction side-effect-free for tests: nothing here reads
+        # ambient state from the real user-data directory.
+        self._hotkeys = hotkeys if hotkeys is not None else DEFAULT_HOTKEYS
 
         self.setWindowTitle(f"MushTato — {name or f'{host}:{port}'}")
 
@@ -76,6 +86,8 @@ class MainWindow(QMainWindow):
         layout.addWidget(self.secondary_input)
         layout.addWidget(self.spawn_log_button)
         self.setCentralWidget(central)
+
+        self._apply_hotkeys()
 
         # Dependency-injectable so tests can supply a fake bridge that
         # never touches the network (see tests/gui) -- the real
@@ -133,6 +145,23 @@ class MainWindow(QMainWindow):
 
     def _on_secondary_send(self) -> None:
         self._send(self.secondary_input, apply_aliases=False)
+
+    def _apply_hotkeys(self) -> None:
+        QShortcut(
+            QKeySequence(self._hotkeys["spawn_log_window"]), self, activated=self.spawn_log_window
+        )
+        QShortcut(
+            QKeySequence(self._hotkeys["switch_input_focus"]),
+            self,
+            activated=self._switch_input_focus,
+        )
+        QShortcut(QKeySequence(self._hotkeys["close_window"]), self, activated=self.close)
+
+    def _switch_input_focus(self) -> None:
+        if self.input_line.hasFocus():
+            self.secondary_input.setFocus()
+        else:
+            self.input_line.setFocus()
 
     def spawn_log_window(self) -> SpawnWindow:
         """Pop a new window that live-mirrors this connection's

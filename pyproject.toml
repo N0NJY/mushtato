@@ -16,7 +16,18 @@ dependencies = [
 dev = [
     "pytest",
 ]
+build = [
+    "pyinstaller",
+]
 
 [build-system]
 requires = ["setuptools>=68"]
 build-backend = "setuptools.build_meta"
+
+[tool.setuptools.packages.find]
+# Only engine/ and gui/ are installable package code -- tests/,
+# scripts/, and worlds/ are dev-only/example content, not part of the
+# distributed package. Without this, setuptools' auto-discovery
+# refuses to guess among the multiple top-level directories and
+# `pip install -e .` fails outright.
+include = ["engine*", "gui*"]

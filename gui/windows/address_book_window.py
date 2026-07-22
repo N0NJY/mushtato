@@ -13,6 +13,7 @@ from __future__ import annotations
 from pathlib import Path
 from typing import List, Optional
 
+from PySide6.QtGui import QKeySequence, QShortcut
 from PySide6.QtWidgets import (
     QHBoxLayout,
     QListWidget,
@@ -22,8 +23,18 @@ from PySide6.QtWidgets import (
     QWidget,
 )
 
-from engine.storage import WorldProfile, address_book_path, load_address_book, save_address_book
+from engine.storage import (
+    Settings,
+    WorldProfile,
+    address_book_path,
+    load_address_book,
+    load_settings,
+    save_address_book,
+    save_settings,
+    settings_path,
+)
 
+from ..dialogs.settings_dialog import SettingsDialog
 from ..dialogs.world_edit_dialog import WorldEditDialog
 from .main_window import MainWindow
 
@@ -33,12 +44,16 @@ class AddressBookWindow(QMainWindow):
         self,
         *,
         storage_path: Optional[Path] = None,
+        settings_storage_path: Optional[Path] = None,
         window_factory=MainWindow,
     ) -> None:
         super().__init__()
         self.setWindowTitle("MushTato — Address Book")
 
         self._path = storage_path if storage_path is not None else address_book_path()
+        self._settings_path = (
+            settings_storage_path if settings_storage_path is not None else settings_path()
+        )
         # Injectable so tests can supply a fake in place of the real
         # MainWindow (which would otherwise open a real TelnetBridge) --
         # same pattern MainWindow itself uses for `bridge`.
@@ -46,6 +61,10 @@ class AddressBookWindow(QMainWindow):
 
         self.worlds: List[WorldProfile] = load_address_book(self._path)
         self.open_windows: List[MainWindow] = []
+        # Loaded once at construction -- a Settings change applies to
+        # newly-opened windows, not ones already open. Live-reload
+        # across open windows is more machinery than v1 needs.
+        self.settings: Settings = load_settings(self._settings_path)
 
         self.list_widget = QListWidget(self)
         self.list_widget.itemDoubleClicked.connect(self._connect_selected)
@@ -59,18 +78,35 @@ class AddressBookWindow(QMainWindow):
         delete_button.clicked.connect(self._delete_selected)
         connect_button = QPushButton("Connect")
         connect_button.clicked.connect(self._connect_selected)
+        settings_button = QPushButton("Settings")
+        settings_button.clicked.connect(self._open_settings)
 
         button_row = QHBoxLayout()
         button_row.addWidget(add_button)
         button_row.addWidget(edit_button)
         button_row.addWidget(delete_button)
         button_row.addWidget(connect_button)
+        button_row.addWidget(settings_button)
 
         central = QWidget(self)
         layout = QVBoxLayout(central)
         layout.addWidget(self.list_widget)
         layout.addLayout(button_row)
         self.setCentralWidget(central)
+
+        self._apply_hotkeys()
+
+    def _apply_hotkeys(self) -> None:
+        hotkeys = self.settings.hotkeys
+        QShortcut(QKeySequence(hotkeys["add_world"]), self, activated=self._add_world)
+        QShortcut(QKeySequence(hotkeys["connect"]), self, activated=self._connect_selected)
+        QShortcut(QKeySequence(hotkeys["close_window"]), self, activated=self.close)
+
+    def _open_settings(self) -> None:
+        dialog = SettingsDialog(self, settings=self.settings)
+        if dialog.exec():
+            self.settings = dialog.result_settings()
+            save_settings(self._settings_path, self.settings)
 
     def _refresh_list(self) -> None:
         self.list_widget.clear()
@@ -120,7 +156,9 @@ class AddressBookWindow(QMainWindow):
         self.connect_to(self.worlds[index])
 
     def connect_to(self, world: WorldProfile) -> MainWindow:
-        window = self._window_factory(world.host, world.port, name=world.name)
+        window = self._window_factory(
+            world.host, world.port, name=world.name, hotkeys=self.settings.hotkeys
+        )
         window.closed.connect(lambda: self._remove_open_window(window))
         self.open_windows.append(window)
         window.resize(800, 600)

@@ -13,6 +13,7 @@ import sys
 
 from PySide6.QtWidgets import QApplication
 
+from engine.storage import load_settings, settings_path
 from gui.windows.address_book_window import AddressBookWindow
 from gui.windows.main_window import MainWindow
 
@@ -26,7 +27,8 @@ def main() -> int:
     app = QApplication(sys.argv)
 
     if args.host and args.port:
-        window = MainWindow(args.host, args.port)
+        hotkeys = load_settings(settings_path()).hotkeys
+        window = MainWindow(args.host, args.port, hotkeys=hotkeys)
         window.resize(800, 600)
         window.show()
     else:
