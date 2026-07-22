@@ -320,6 +320,29 @@ Windows and macOS builds, and the GitHub Actions workflow itself, could
 not be verified locally -- Rick will check GitHub's Actions tab once
 this is pushed.
 
+A real bug in that "verified locally" claim surfaced once Rick actually
+ran the CI-built Linux artifact on a real desktop: it aborted on launch
+with "no Qt platform plugin could be initialized" -- since Qt 6.5, the
+xcb platform plugin requires `libxcb-cursor0` to load at all, and
+`ubuntu-latest` doesn't have it (or its usual xcb companions)
+pre-installed. The local build in this repo's dev sandbox had actually
+already warned about exactly this (`Library not found: could not
+resolve 'libxcb-cursor.so.0'`) during the PyInstaller build step, but
+local verification used `QT_QPA_PLATFORM=offscreen`, which bypasses the
+xcb platform entirely -- so the one thing that warning was about was
+never actually exercised before calling the build "verified." Fixed by
+installing `libxcb-cursor0` plus its standard xcb companions
+(`libxkbcommon-x11-0`, `libxcb-icccm4`, `libxcb-image0`,
+`libxcb-keysyms1`, `libxcb-randr0`, `libxcb-render-util0`,
+`libxcb-shape0`, `libxcb-xfixes0`, `libxcb-xinerama0`) on the CI runner
+*before* the PyInstaller build step, so they get bundled into the
+artifact itself rather than documented as a user-side `apt install`
+requirement -- PyInstaller can only bundle a shared library that's
+present on the machine doing the building. Lesson for future sessions:
+"offscreen" is fine for automated headless tests, but it is not a
+substitute for exercising the real platform plugin path when verifying
+a packaged GUI build.
+
 Still NOT wiring `engine/scripting` into the GUI -- same deferred
 decision as every phase since Phase 4b, called out again so it stays
 visible rather than quietly dropped.
