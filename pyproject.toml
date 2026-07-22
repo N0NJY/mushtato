@@ -1,0 +1,19 @@
+[project]
+name = "mushtato"
+version = "0.1.0"
+description = "A modern, cross-platform Python MUD/MUSH client with sandboxed Python scripting"
+readme = "README.md"
+requires-python = ">=3.11"
+license = { file = "LICENSE" }
+dependencies = [
+    "PySide6",
+]
+
+[project.optional-dependencies]
+dev = [
+    "pytest",
+]
+
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
