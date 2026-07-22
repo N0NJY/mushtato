@@ -86,6 +86,12 @@ CLAUDE.md
 
 > Update this section as phases complete.
 
-**Phase 1 (spec) — done. Phase 2 (repo scaffolding) — done.** Next: Phase 3,
-build the engine headless (asyncio telnet client, ANSI parsing, tested
-against Rick's own RhostMUSH server, console output only, no GUI).
+**Phase 1 (spec) — done. Phase 2 (repo scaffolding) — done. Phase 3
+(engine/net + engine/ansi, headless) — done.** Telnet IAC negotiation is
+hand-rolled on raw asyncio streams (not telnetlib3) — see the Phase 3
+discussion for reasoning. `scripts/console_client.py` is a throwaway
+dev tool for manually testing against a real server (e.g. Rick's
+RhostMUSH); it is not part of the shipped product. Next: Phase 4, the
+trigger/macro/scripting layer (`engine/scripting`) — sandboxed script
+execution, the scripting API, tested headless against captured MUD
+output.
