@@ -28,5 +28,8 @@ htmlcov/
 .idea/
 .DS_Store
 
+# Claude Code local settings
+.claude/
+
 # Local user data (not example world profiles under /worlds)
 *.log
