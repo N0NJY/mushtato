@@ -88,8 +88,10 @@ CLAUDE.md
 
 **Phase 1 (spec) — done. Phase 2 (repo scaffolding) — done. Phase 3
 (engine/net + engine/ansi, headless) — done. Phase 4 (engine/scripting,
-headless) — done, including Phase 4b (on_alias, see below).** Telnet
-IAC negotiation is hand-rolled on raw asyncio streams (not telnetlib3)
+headless) — done, including Phase 4b (on_alias, see below). Phase 5
+(minimal Qt shell) — done, validated against both fake and real
+servers (see below).** Telnet IAC negotiation is hand-rolled on raw
+asyncio streams (not telnetlib3)
 — see the Phase 3 discussion for reasoning. `scripts/console_client.py`
 is a throwaway dev tool for manually testing against a real server
 (e.g. Rick's RhostMUSH); it is not part of the shipped product.
@@ -166,17 +168,24 @@ font — found via manual testing against a real RhostMUSH server (see
 below), where the default font broke alignment of ASCII-art banners/
 borders that assume a fixed-width terminal.
 
-Manually validated end-to-end against two distinct real servers, not
-just fake loopback ones: `127.0.0.1:4444` (Rick's own local RhostMUSH,
-running on this machine) and `silvren.com:4444` (a separate, live
-third-party RhostMUSH elsewhere on the internet, *not* owned by
-Rick — happens to run the same welcome-banner theme, which is why the
-two looked identical at first glance; be considerate about how much
-automated/repeated testing hits that one going forward, same courtesy
-as any other real user's server). Confirmed real DNS + TCP + telnet
+Validated at two levels, not just one: (1) the automated headless test
+suite (`tests/gui/`) includes `test_telnet_bridge_integration.py`,
+which drives a real `TelnetBridge` (real background thread, real
+asyncio, real Qt signal marshaling) against a local fake asyncio
+server — no fakes at the bridge/architecture level, only the "MUD" on
+the other end is fake; and (2) beyond that, manual end-to-end
+validation against two distinct *real* MUSH servers, which is a
+stronger check than most earlier phases got and worth having on
+record: `127.0.0.1:4444` (Rick's own local RhostMUSH, running on this
+machine) and `silvren.com:4444` (a separate, live third-party RhostMUSH
+elsewhere on the internet, *not* owned by Rick — happens to run the
+same welcome-banner theme, which is why the two looked identical at
+first glance; be considerate about how much automated/repeated testing
+hits that one going forward, same courtesy as any other real user's
+server). The manual check confirmed real DNS + TCP + telnet
 negotiation, real ANSI colors rendering correctly, and a full
 interactive round-trip (guest login, `look`, server response) against
-both.
+both real servers.
 
 Next: Phase 6, layering in Potato's multi-window features — address
 book, multi-connection, spawn windows, dual input.
