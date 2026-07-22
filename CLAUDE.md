@@ -90,8 +90,9 @@ CLAUDE.md
 (engine/net + engine/ansi, headless) — done. Phase 4 (engine/scripting,
 headless) — done, including Phase 4b (on_alias, see below). Phase 5
 (minimal Qt shell) — done, validated against both fake and real
-servers (see below).** Telnet IAC negotiation is hand-rolled on raw
-asyncio streams (not telnetlib3)
+servers (see below). Phase 6 (address book, multi-window, spawn
+windows, dual input) — done, see below.** Telnet IAC negotiation is
+hand-rolled on raw asyncio streams (not telnetlib3)
 — see the Phase 3 discussion for reasoning. `scripts/console_client.py`
 is a throwaway dev tool for manually testing against a real server
 (e.g. Rick's RhostMUSH); it is not part of the shipped product.
@@ -187,5 +188,70 @@ negotiation, real ANSI colors rendering correctly, and a full
 interactive round-trip (guest login, `look`, server response) against
 both real servers.
 
-Next: Phase 6, layering in Potato's multi-window features — address
-book, multi-connection, spawn windows, dual input.
+**Phase 6 (multi-window Potato features) — done.** Address book
+(`gui/windows/address_book_window.py` + `gui/dialogs/world_edit_dialog.py`),
+multiple simultaneous connections, a spawn-window feature, and dual
+input, all layered on Phase 5's single-window shell without changing
+its core architecture.
+
+Storage decisions (checkpoint discussion before code): address book
+persistence lives in a **sibling module**,
+`engine/storage/address_book.py` (`WorldProfile`, `load_address_book`/
+`save_address_book`), not an extension of `script_store.py` — different
+data shape/access pattern (a browsed-as-a-whole list vs. independent
+per-world documents). Where the file actually lives was also decided
+now (Phase 4 had deferred it): `engine/storage/paths.py` uses
+`platformdirs` (new dependency) for OS-idiomatic locations
+(`%APPDATA%`/`~/Library/Application Support`/`~/.config`) rather than a
+single hardcoded path.
+
+Multi-window model: confirmed, not re-decided — each "Connect" from the
+address book opens its own independent `MainWindow` + `TelnetBridge`
+pair with its own background thread, exactly as Phase 5's checkpoint
+discussion already committed to. `AddressBookWindow` just holds
+references to the windows it opens (`open_windows`) so Qt doesn't
+garbage-collect them, and drops the reference again via each window's
+new `closed` signal. Closing the address book itself doesn't close open
+sessions — Qt's default `quitOnLastWindowClosed` behavior handles this
+correctly as long as nothing ties app-quit to that one window
+specifically, which nothing does.
+
+Dual input (`gui/windows/history_line_edit.py`'s `HistoryLineEdit`,
+used twice in `MainWindow`): two simultaneously-visible boxes, not a
+single toggled/mode-switched one — chosen because "replying while
+mid-pose" implies wanting both available at once, which a toggle would
+break. `input_line` (primary, "Command...") is where alias expansion
+would apply once scripting is wired into the GUI (still deferred, see
+below); `secondary_input` ("Pose/says...") is meant to bypass it then,
+so a pose starting with a word like "n" is never silently rewritten.
+Both currently send identically (`MainWindow._send`'s `apply_aliases`
+parameter is a documented no-op hook, not real behavior yet) and each
+box keeps its own independent recall history. Both always send to the
+same one connection regardless of which box was used.
+
+Spawn windows (`gui/windows/spawn_window.py`): concrete first example
+is a **log-mirror window** — `MainWindow.spawn_log_window()` pops a
+window that live-mirrors the connection's incoming text from the
+moment it's created onward, with no content parsing. A WHO-list- or
+channel-specific spawn window was considered and rejected for now: it
+would need server-format-specific string heuristics living in the GUI
+layer without triggers wired in yet, which is exactly the kind of
+fragile special-casing the engine/GUI split exists to avoid. Revisit
+once triggers can target a specific pane.
+
+**Scripting (`engine/scripting`) is still deliberately NOT wired into
+the GUI** — Phase 6, like Phase 5, is connect/display/send/multi-window
+only. This is called out explicitly (again) so it stays a visible,
+revisited-every-phase deferral rather than something that quietly never
+gets addressed.
+
+Manually validated end-to-end against the real local RhostMUSH
+(`127.0.0.1:4444`): address book add/connect, two simultaneous
+independent connections to the same server, dual input (both boxes
+echoing and sending correctly, confirmed via full-text search after
+letting the banner finish arriving — an earlier attempt typed too early
+and looked broken until the timing was fixed), and a spawn log window
+correctly receiving only text that arrived after it was created.
+
+Next: Phase 7, polish — hotkeys, settings dialog, packaging via CI for
+all three OSes.

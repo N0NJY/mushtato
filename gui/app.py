@@ -1,12 +1,9 @@
-"""Phase 5 GUI entry point: one window, one connection.
+"""GUI entry point.
 
 Usage:
-    python -m gui.app [host] [port]
-
-If host/port aren't given on the command line, prompts for them with a
-simple dialog -- no address book yet (that's Phase 6), so this is
-intentionally the "hardcoded or prompted" minimum SPEC.md's roadmap
-calls for at this phase.
+    python -m gui.app             # opens the address book (Phase 6)
+    python -m gui.app host port   # direct-connect, bypassing the
+                                  # address book (handy for dev/testing)
 """
 
 from __future__ import annotations
@@ -14,19 +11,10 @@ from __future__ import annotations
 import argparse
 import sys
 
-from PySide6.QtWidgets import QApplication, QInputDialog
+from PySide6.QtWidgets import QApplication
 
+from gui.windows.address_book_window import AddressBookWindow
 from gui.windows.main_window import MainWindow
-
-
-def _prompt_for_host_port(app: QApplication) -> tuple[str, int] | None:
-    host, ok = QInputDialog.getText(None, "MushTato", "Host:")
-    if not ok or not host:
-        return None
-    port, ok = QInputDialog.getInt(None, "MushTato", "Port:", value=23, minValue=1, maxValue=65535)
-    if not ok:
-        return None
-    return host, port
 
 
 def main() -> int:
@@ -38,16 +26,14 @@ def main() -> int:
     app = QApplication(sys.argv)
 
     if args.host and args.port:
-        host, port = args.host, args.port
+        window = MainWindow(args.host, args.port)
+        window.resize(800, 600)
+        window.show()
     else:
-        prompted = _prompt_for_host_port(app)
-        if prompted is None:
-            return 0
-        host, port = prompted
+        window = AddressBookWindow()
+        window.resize(500, 400)
+        window.show()
 
-    window = MainWindow(host, port)
-    window.resize(800, 600)
-    window.show()
     return app.exec()
 
 

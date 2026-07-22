@@ -9,6 +9,7 @@ dependencies = [
     "PySide6",
     "RestrictedPython",
     "google-re2",
+    "platformdirs",
 ]
 
 [project.optional-dependencies]
