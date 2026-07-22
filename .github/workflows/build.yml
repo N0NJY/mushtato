@@ -26,9 +26,14 @@ jobs:
             artifact_name: MushTato-macos
     runs-on: ${{ matrix.os }}
     steps:
-      - uses: actions/checkout@v4
+      # Pinned to these specific majors (not v4/v5) because they're the
+      # first ones that actually default to Node 24 rather than just
+      # having "preliminary" support while still defaulting to Node 20
+      # (which GitHub is retiring during 2026 -- see
+      # https://github.blog/changelog/2025-09-19-deprecation-of-node-20-on-github-actions-runners/).
+      - uses: actions/checkout@v5
 
-      - uses: actions/setup-python@v5
+      - uses: actions/setup-python@v7
         with:
           python-version: "3.11"
           cache: pip
@@ -63,7 +68,7 @@ jobs:
           cd dist
           ditto -c -k --sequesterRsrc --keepParent MushTato ../${{ matrix.artifact_name }}.zip
 
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v6
         with:
           name: ${{ matrix.artifact_name }}
           path: |
@@ -78,10 +83,10 @@ jobs:
     permissions:
       contents: write
     steps:
-      - uses: actions/download-artifact@v4
+      - uses: actions/download-artifact@v7
         with:
           path: artifacts
       - name: Create Release
-        uses: softprops/action-gh-release@v2
+        uses: softprops/action-gh-release@v3
         with:
           files: artifacts/**/*
