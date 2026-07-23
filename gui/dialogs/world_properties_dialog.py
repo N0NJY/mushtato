@@ -22,6 +22,7 @@ from __future__ import annotations
 
 from typing import List, Optional
 
+from PySide6.QtCore import Signal
 from PySide6.QtWidgets import (
     QCheckBox,
     QComboBox,
@@ -51,6 +52,8 @@ class _CharactersPage(QWidget):
     populates the fields, Save/Cancel commits or discards, rather than
     editing the list inline.
     """
+
+    characterAdded = Signal(str)  # emitted with the new name -- NOT emitted on edit
 
     def __init__(self, parent: Optional[QWidget], characters: List[CharacterProfile]) -> None:
         super().__init__(parent)
@@ -132,11 +135,14 @@ class _CharactersPage(QWidget):
         if not name:
             return
         profile = CharacterProfile(name=name, password=self.password_edit.text())
-        if self._editing_index == -1:
+        was_adding = self._editing_index == -1
+        if was_adding:
             self.characters.append(profile)
         else:
             self.characters[self._editing_index] = profile
         self._finish_editing()
+        if was_adding:
+            self.characterAdded.emit(profile.name)
 
     def _cancel_edit(self) -> None:
         self._finish_editing()
@@ -191,10 +197,24 @@ class WorldPropertiesDialog(QDialog):
         layout.addWidget(buttons)
 
         self._load_from_world(world)
+        self._characters_page.characterAdded.connect(self._on_character_added)
 
     def _add_page(self, title: str, widget: QWidget) -> None:
         self.category_list.addItem(title)
         self.pages.addWidget(widget)
+
+    def _on_character_added(self, name: str) -> None:
+        # Rick's real-world report: adding a Character on this page
+        # didn't do anything on connect until he *also* went to Basic
+        # and picked it from Default Character -- an easy-to-miss
+        # second step on a different page. If nothing is set as
+        # default yet, the first Character you add becomes it
+        # automatically; adding a second one later never overrides an
+        # existing default -- that stays an explicit choice.
+        was_none = self.default_character_combo.currentText() in ("(None)", "")
+        self._refresh_default_character_combo()
+        if was_none:
+            self.default_character_combo.setCurrentText(name)
 
     # -- Basic -----------------------------------------------------------
 

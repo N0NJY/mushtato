@@ -1101,6 +1101,43 @@ Still NOT wiring `engine/scripting` into the GUI -- same deferred
 decision as every phase since Phase 4b, called out again so it stays
 visible rather than quietly dropped.
 
+**Post-8b fixes: two real issues Rick found testing the actual build.**
+
+1. **Address book buttons silently no-op'd with nothing selected.** A
+   freshly-opened `QListWidget` starts with `currentRow() == -1` even
+   when worlds already exist -- clicking Properties/Edit/Delete/Connect
+   before ever clicking a row did nothing, with zero feedback. Rick's
+   report ("Properties... showed nothing until I'd already connected
+   to something") traced directly to this: double-clicking to connect
+   also happens to select the row, which is why it "started working"
+   only after that. Fixed by disabling those four buttons whenever
+   nothing is selected (`AddressBookWindow._refresh_selection_dependent_buttons`,
+   wired to `list_widget.currentRowChanged` and re-run after every list
+   rebuild) -- makes the requirement visible instead of silent, the
+   same principle Phase 7e's chrome already uses for actions that need
+   an active tab.
+
+2. **Adding a Character didn't do anything on connect by itself.** Not
+   a bug -- confirmed against the code and the original checkpoint --
+   but a real UX gap: `default_character` is a separate field set on
+   the *Basic* page, a different page from where you *add* a Character
+   on the *Characters* page. Rick added one and reasonably expected it
+   to just be used; nothing fired until he manually duplicated the
+   login line into the Auto-Sends "connect" box himself. Resolved via
+   a quick follow-up checkpoint (not silently picked): auto-default the
+   *first* Character added to a world with no default set yet
+   (`_CharactersPage.characterAdded` signal ->
+   `WorldPropertiesDialog._on_character_added`) -- adding a second
+   Character later never overrides an existing default, that stays an
+   explicit choice on the Basic page.
+
+Both re-verified against the real local RhostMUSH, not just the
+headless tests: Properties correctly stays disabled until a world row
+is actually clicked, and connecting with only a freshly-added "guest"
+Character (zero manually-typed Auto-Sends text) still sent the masked
+`connect guest ●●●●●` login line automatically. 289 tests passing (120
+engine + 169 GUI, up from 283).
+
 Next: Rick has his own phase document for what comes after Phase 8b --
 not yet assigned a phase number here.
 

@@ -137,3 +137,44 @@ def test_open_properties_saves_edited_world(qapp, tmp_path: Path, monkeypatch):
     assert window.worlds[0].name == "Renamed"
     assert window.worlds[0].autosend_connect == "look"
     assert load_address_book(window._path)[0].name == "Renamed"
+
+
+# -- Regression: selection-dependent buttons must not silently no-op ----
+
+
+def test_selection_dependent_buttons_start_disabled_even_with_worlds_present(qapp, tmp_path: Path):
+    # The real bug: a freshly-opened address book has nothing selected
+    # in the list (currentRow() == -1) even when worlds exist, and
+    # clicking Properties/Edit/Delete/Connect used to silently do
+    # nothing -- no dialog, no error, no feedback at all.
+    worlds = [WorldProfile(name="Only World", host="example.com", port=1)]
+    window = make_address_book(tmp_path, worlds)
+
+    assert window.list_widget.currentRow() == -1
+    assert window.edit_button.isEnabled() is False
+    assert window.delete_button.isEnabled() is False
+    assert window.connect_button.isEnabled() is False
+    assert window.properties_button.isEnabled() is False
+
+
+def test_selection_dependent_buttons_enable_once_a_row_is_selected(qapp, tmp_path: Path):
+    worlds = [WorldProfile(name="Only World", host="example.com", port=1)]
+    window = make_address_book(tmp_path, worlds)
+
+    window.list_widget.setCurrentRow(0)
+
+    assert window.edit_button.isEnabled() is True
+    assert window.delete_button.isEnabled() is True
+    assert window.connect_button.isEnabled() is True
+    assert window.properties_button.isEnabled() is True
+
+
+def test_buttons_disable_again_after_deleting_the_last_world(qapp, tmp_path: Path):
+    worlds = [WorldProfile(name="Only World", host="example.com", port=1)]
+    window = make_address_book(tmp_path, worlds)
+    window.list_widget.setCurrentRow(0)
+
+    window._delete_selected()
+
+    assert window.edit_button.isEnabled() is False
+    assert window.properties_button.isEnabled() is False

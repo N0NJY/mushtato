@@ -182,3 +182,50 @@ def test_switching_category_switches_the_visible_page(qapp):
     dialog = WorldPropertiesDialog(None, world=world)
     dialog.category_list.setCurrentRow(1)
     assert dialog.pages.currentWidget() is dialog._characters_page
+
+
+# -- Regression: adding a Character should be enough to use it on connect --
+
+
+def test_adding_the_first_character_becomes_the_default_automatically(qapp):
+    # Rick's real report: he added a Character and expected it to be
+    # used on connect, but nothing happened until he also visited the
+    # separate Basic page and picked it from Default Character by hand.
+    world = make_world()  # no characters, no default
+    dialog = WorldPropertiesDialog(None, world=world)
+
+    dialog._characters_page._start_add()
+    dialog._characters_page.name_edit.setText("Thoran")
+    dialog._characters_page.password_edit.setText("hunter2")
+    dialog._characters_page._save_current()
+
+    assert dialog.default_character_combo.currentText() == "Thoran"
+    assert dialog.result_profile().default_character == "Thoran"
+
+
+def test_adding_a_second_character_does_not_override_an_existing_default(qapp):
+    world = make_world(
+        characters=[CharacterProfile(name="First", password="")], default_character="First"
+    )
+    dialog = WorldPropertiesDialog(None, world=world)
+
+    dialog._characters_page._start_add()
+    dialog._characters_page.name_edit.setText("Second")
+    dialog._characters_page.password_edit.setText("")
+    dialog._characters_page._save_current()
+
+    assert dialog.default_character_combo.currentText() == "First"
+
+
+def test_editing_an_existing_character_does_not_trigger_auto_default(qapp):
+    world = make_world(characters=[CharacterProfile(name="Original", password="")])
+    dialog = WorldPropertiesDialog(None, world=world)
+    assert dialog.default_character_combo.currentText() == "(None)"
+
+    dialog._characters_page.list_widget.setCurrentRow(0)
+    dialog._characters_page._start_edit()
+    dialog._characters_page.name_edit.setText("Renamed")
+    dialog._characters_page._save_current()
+
+    # Editing isn't adding -- the default should still be unset.
+    assert dialog.default_character_combo.currentText() == "(None)"

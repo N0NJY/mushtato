@@ -48,25 +48,34 @@ class AddressBookWindow(QMainWindow):
 
         self.list_widget = QListWidget(self)
         self.list_widget.itemDoubleClicked.connect(self._connect_selected)
-        self._refresh_list()
+        self.list_widget.currentRowChanged.connect(self._refresh_selection_dependent_buttons)
 
         add_button = QPushButton("Add")
         add_button.clicked.connect(self._add_world)
-        edit_button = QPushButton("Edit")
-        edit_button.clicked.connect(self._edit_selected)
-        delete_button = QPushButton("Delete")
-        delete_button.clicked.connect(self._delete_selected)
-        connect_button = QPushButton("Connect")
-        connect_button.clicked.connect(self._connect_selected)
-        properties_button = QPushButton("Properties...")
-        properties_button.clicked.connect(self._open_properties)
+        self.edit_button = QPushButton("Edit")
+        self.edit_button.clicked.connect(self._edit_selected)
+        self.delete_button = QPushButton("Delete")
+        self.delete_button.clicked.connect(self._delete_selected)
+        self.connect_button = QPushButton("Connect")
+        self.connect_button.clicked.connect(self._connect_selected)
+        self.properties_button = QPushButton("Properties...")
+        self.properties_button.clicked.connect(self._open_properties)
 
         button_row = QHBoxLayout()
         button_row.addWidget(add_button)
-        button_row.addWidget(edit_button)
-        button_row.addWidget(delete_button)
-        button_row.addWidget(connect_button)
-        button_row.addWidget(properties_button)
+        button_row.addWidget(self.edit_button)
+        button_row.addWidget(self.delete_button)
+        button_row.addWidget(self.connect_button)
+        button_row.addWidget(self.properties_button)
+
+        # A fresh QListWidget starts with nothing selected even if
+        # worlds exist -- clicking Edit/Delete/Connect/Properties at
+        # that point used to silently no-op (currentRow() == -1), with
+        # zero feedback that a selection was even needed. Disabling
+        # these buttons until something is actually selected makes that
+        # visible instead of silent. Buttons must exist before this
+        # call, since it's what enables/disables them.
+        self._refresh_list()
 
         central = QWidget(self)
         layout = QVBoxLayout(central)
@@ -86,6 +95,17 @@ class AddressBookWindow(QMainWindow):
         self.list_widget.clear()
         for world in self.worlds:
             self.list_widget.addItem(f"{world.name} ({world.host}:{world.port})")
+        self._refresh_selection_dependent_buttons()
+
+    def _refresh_selection_dependent_buttons(self, *_args) -> None:
+        has_selection = self._selected_index() is not None
+        for button in (
+            self.edit_button,
+            self.delete_button,
+            self.connect_button,
+            self.properties_button,
+        ):
+            button.setEnabled(has_selection)
 
     def _save(self) -> None:
         save_address_book(self._path, self.worlds)
