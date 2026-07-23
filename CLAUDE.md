@@ -620,4 +620,31 @@ Still NOT wiring `engine/scripting` into the GUI -- same deferred
 decision as every phase since Phase 4b, called out again so it stays
 visible rather than quietly dropped.
 
+**Post-7d fix: scrollback ignored the theme on a real desktop.** Rick
+downloaded and ran the actual packaged build and reported that the
+theme reached the window chrome but not "the actual terminal" (the
+scrollback pane stayed on default light colors instead of Potato's
+dark/dimmed output colors) -- a real bug this session's own headless
+tests and offscreen-platform screenshots never caught, because Qt's
+`offscreen` QPA platform doesn't load a real platform theme plugin at
+all, so it can't reproduce this. Same category of gap as the Phase 7
+`libxcb-cursor0` packaging bug: verification that only ever exercised
+`offscreen` isn't a substitute for a real desktop's platform
+integration. Root cause: on several real Linux desktops (KDE/qt6ct-
+style platform theme integration in particular), Qt's native style
+pulls its own palette from the system theme and can silently override
+an app's own `QApplication.setPalette()` for individual widgets --
+Fusion is the one built-in Qt style that reliably honors an explicitly
+-set palette everywhere. Fixed in `gui/theme.py`'s `apply_theme()` by
+calling `app.setStyle(QStyleFactory.create("Fusion"))` before
+`setPalette()` (order matters: Qt resets to a new style's own default
+palette on a style change, so setting the palette first would just get
+overwritten). No new dependency -- `QStyleFactory` is stdlib PySide6.
+Two new headless tests assert the style is actually forced to Fusion
+and that the palette is set after (not before) that style change;
+neither test can prove the real-desktop rendering is fixed, only that
+the code takes the documented order-dependent path -- Rick will
+re-verify this against a fresh download, same as any other
+can't-verify-headless GUI change in this project.
+
 Next: Phase 8, documentation.

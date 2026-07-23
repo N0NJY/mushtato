@@ -31,7 +31,7 @@ bigger scope than this phase.
 from __future__ import annotations
 
 from PySide6.QtGui import QColor, QPalette
-from PySide6.QtWidgets import QApplication
+from PySide6.QtWidgets import QApplication, QStyleFactory
 
 LIGHT = "light"
 DARK = "dark"
@@ -90,7 +90,24 @@ def apply_theme(app: QApplication, theme: str) -> None:
     the settings dialog saves a change) to attempt a live update --
     see gui/windows/main_window.py and CLAUDE.md for how much of that
     actually reaches already-open windows.
+
+    Forces the Fusion style before setting the palette. On several
+    real Linux desktops (KDE/qt6ct-style platform theme integration in
+    particular), a native style pulls its own palette from the system
+    theme and can silently override an app's own QApplication palette
+    for individual widgets -- Fusion is the one built-in Qt style that
+    reliably honors an explicitly-set palette everywhere, which is why
+    a real-desktop test showed correct dark chrome but a scrollback
+    pane that stayed on the system's own light colors instead of this
+    module's explicit dark override, despite headless tests and
+    offscreen-platform screenshots showing the right colors (the
+    offscreen QPA platform doesn't load a real platform theme plugin,
+    so it never reproduced this). ``setStyle()`` must come before
+    ``setPalette()`` here -- Qt resets to the new style's own default
+    palette when the style changes, so setting the palette first would
+    just get overwritten.
     """
+    app.setStyle(QStyleFactory.create("Fusion"))
     app.setPalette(build_app_palette(theme))
 
 

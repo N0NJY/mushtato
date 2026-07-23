@@ -7,6 +7,7 @@ from gui.theme import (
     DARK_SCROLLBACK_TEXT,
     LIGHT_SCROLLBACK_BASE,
     LIGHT_SCROLLBACK_TEXT,
+    apply_theme,
     build_app_palette,
     scrollback_palette,
 )
@@ -48,3 +49,21 @@ def test_scrollback_palette_preserves_other_roles_from_base_palette(qapp):
     assert palette.color(QPalette.ColorRole.Highlight) == app_palette.color(
         QPalette.ColorRole.Highlight
     )
+
+
+def test_apply_theme_forces_fusion_style(qapp):
+    # Fusion is the one built-in Qt style that reliably honors an
+    # explicitly-set QPalette on every widget -- native styles on some
+    # real Linux desktops (KDE/qt6ct platform theme integration) can
+    # silently override individual widgets' palettes with the system
+    # theme instead, which is exactly what a real-desktop test caught.
+    apply_theme(qapp, "dark")
+    assert qapp.style().objectName().lower() == "fusion"
+
+
+def test_apply_theme_sets_the_palette_after_the_style_change(qapp):
+    # setStyle() resets to the new style's own default palette, so
+    # setPalette() must run after it -- otherwise our explicit colors
+    # would be immediately overwritten.
+    apply_theme(qapp, "dark")
+    assert qapp.palette().color(QPalette.ColorRole.Base) == QColor(DARK_INPUT_BASE)
