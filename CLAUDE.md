@@ -832,3 +832,59 @@ decision as every phase since Phase 4b, called out again so it stays
 visible rather than quietly dropped.
 
 Next: Phase 8, documentation.
+
+## Standing rules: verification and assumptions
+
+These apply to every session, every phase, not just security-sensitive ones.
+
+1. **Verify before claiming.** For any factual statement about how an
+   existing library, format, protocol, or piece of reference material
+   (e.g. TinyFugue's or Potato's real source) actually behaves — check it
+   against the real source/docs before stating it as fact. If you're
+   recalling from training rather than having just checked, say so
+   explicitly ("recalling from memory, not verified this session") rather
+   than presenting it with the same confidence as something you just read.
+
+2. **Surface every fork in the road, not just the big ones.** If there is
+   more than one reasonable way to implement any part of a task — however
+   minor it seems — stop and list the options with trade-offs before
+   writing code. Do not silently pick one. "This seemed too small to ask
+   about" is not a valid reason to skip this.
+
+3. **Name your own uncertainty before starting.** Before beginning
+   implementation on anything nontrivial, list anything in the prompt
+   that's ambiguous, underspecified, or that you're inferring rather than
+   being told directly. Get confirmation before proceeding on those points.
+
+4. **"I'm not sure" is a fully acceptable answer.** If you're not confident
+   something is correct, say so rather than guessing. An admitted gap is
+   more useful than a confident wrong answer, and never counts against you.
+
+5. **Restate the ask before big work.** Before starting a new phase or any
+   substantial chunk of work, summarize your understanding of what's being
+   asked, in your own words. Wait for confirmation or correction before
+   proceeding. This is cheaper than discovering a misreading after the
+   code is written.
+
+6. **Check for existing machinery before building new machinery.** Before
+   adding a feature, check whether it needs to reuse or wire into
+   something that already exists elsewhere in the codebase (another
+   window, an existing handler, an existing data path, an existing
+   pattern like the engine/GUI split) rather than assuming a fresh,
+   parallel implementation is fine. If two places in the app do "the same
+   conceptual thing" (e.g. a button and a command), they should call the
+   same underlying code, not reimplement it twice.
+
+7. **Back claims with tests that would fail if the claim were false.** A
+   claim like "X works correctly" or "Y is prevented" needs an
+   accompanying test exercising that specific claim — not just a
+   description of intended behavior, and not just "existing tests still
+   pass." (E.g.: don't just say a sandbox blocks dangerous code — write a
+   test that tries the dangerous thing and confirms it's blocked.)
+
+8. **Distinguish "I built this" from "I verified this against the real
+   thing."** Running code locally, running it against a fake/mock server,
+   and running it against a real server (or a real CI pipeline, or a real
+   downloaded artifact) are three different levels of verification. State
+   plainly which one happened — don't let a local success imply a
+   stronger claim than it supports.
