@@ -137,6 +137,11 @@ Two cleanly separated layers:
     light/dark theming covering both chrome (address book, dialogs) and session
     windows (scrollback + input boxes) consistently; a first-run settings
     dialog (reusing settings_dialog.py) shown when no settings file exists yet.
+7c. **Built-in client command system** (`/help`, `/connect`, and similar),
+    informed by a review of the real TinyFugue source.
+7d. **Menu bar, toolbar, and status bar chrome**, modeled on a review of
+    Potato's real GUI (screenshot), exposing the built-in commands/handlers
+    from Phase 7c as first-class menu/toolbar items rather than typed-only.
 8. **Documentation & onboarding** — INSTALL.md (novice-friendly: what
    MushTato is, where to download it, OS-specific install steps including
    Gatekeeper/SmartScreen unsigned-binary workarounds, uninstall

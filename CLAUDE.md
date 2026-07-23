@@ -93,7 +93,9 @@ headless) — done, including Phase 4b (on_alias, see below). Phase 5
 servers (see below). Phase 6 (address book, multi-window, spawn
 windows, dual input) — done, see below. Phase 7 (settings/hotkeys,
 CI packaging) — done, see below. Phase 7b (theme support, first-run
-settings dialog) — done, see below.** Telnet IAC negotiation is
+settings dialog) — done, see below. Phase 7c (built-in client command
+system) — done, see below. Phase 7d (menu bar, toolbar, status bar
+chrome) — done, see below.** Telnet IAC negotiation is
 hand-rolled on raw asyncio streams (not telnetlib3)
 — see the Phase 3 discussion for reasoning. `scripts/console_client.py`
 is a throwaway dev tool for manually testing against a real server
@@ -426,5 +428,196 @@ address book and an already-open session window's chrome/inputs live,
 while that window's scrollback correctly stayed on its
 construction-time theme, matching the verified/documented limitation
 precisely.
+
+**Phase 7c (built-in client command system) — done.** New
+`engine/commands.py` (`CommandTable`/`CommandOutcome`) plus command
+registrations in `gui/windows/main_window.py`.
+
+**The real TinyFugue source (`/home/rick/git/tinyfugue`) was consulted
+before any design or code** — reference-only, same approach CLAUDE.md
+already establishes for Potato, not code to port. Concretely useful
+findings, verified in the actual C source rather than assumed from
+memory:
+- Prefix/collision convention (`src/expand.c`'s `statement()`): no
+  leading `/` sends the line to the MUD verbatim; a single leading `/`
+  is a command (stripped, rest is `name args`); a leading `//` is the
+  escape hatch -- one `/` is stripped and the remainder (still
+  starting with a `/`) is sent as literal data. TF's actual,
+  decades-old answer to "the MUD server also uses this prefix" —
+  adopted exactly in `engine/commands.py`.
+- Command lookup (`src/command.c`'s `find_builtin_cmd`): exact,
+  case-insensitive name match via binary search over an alphabetically
+  sorted table -- **no abbreviation support**, contrary to a
+  half-remembered assumption going in. An unrecognized `/word` is an
+  error ("no such command or macro"), never silently forwarded as
+  plain text. Both behaviors adopted exactly.
+- Argument parsing: no single uniform scheme in TF -- each command
+  handler gets the raw remainder-of-line string and parses its own
+  arguments however it needs. `engine/commands.py`'s handlers follow
+  the same flexibility rather than forcing one universal
+  split-by-whitespace convention.
+- Help system (`src/help.c`): an external indexed help-text file with
+  major/minor topic markup and its own index-builder tool -- real
+  precedent for Phase 8's Help system, deliberately not built now (see
+  below).
+- Command set (`src/cmdlist.h`, ~60 entries): TF's own scripting-
+  language directives (`DEF`/`EVAL`/`LET`/`SHIFT`/`REPEAT`) and
+  process-management commands (`KILL`/`PS`/`SH`) don't apply here --
+  Python is the scripting language (SPEC.md non-goals) and this
+  sandboxing model doesn't spawn subprocesses. Confirms *not* porting
+  TF's command set wholesale was the right call, not just a
+  simplification for convenience.
+
+**Design principle applied throughout, not just noted once (Rick's
+explicit correction after the first proposal missed it in two
+places):** every built-in command must call the *exact same handler*
+its GUI equivalent (button/hotkey) already calls -- never a parallel
+reimplementation. This actually changed the v1 list during review, not
+just after it:
+- `/quit` -> `self.close()` (same as the Ctrl+W hotkey and the
+  window's own close button) and `/spawnlog` -> `self.spawn_log_window()`
+  (same as the button and Ctrl+L) were solid matches from the start.
+- `/connect` and `/settings`'s real GUI equivalents
+  (`AddressBookWindow.connect_to()` / `._open_settings()`) live on a
+  *different window* than the one commands are typed into. Fixed by
+  adding an optional `MainWindow(..., address_book=None)` reference --
+  set by `AddressBookWindow.connect_to()` when it opens a session
+  window, `None` in direct-connect mode (`gui/app.py host port`, which
+  has no address book at all). Both commands check for `None` and
+  report "not available in this session" rather than erroring, instead
+  of pretending the capability exists where it doesn't.
+- `/help` has no GUI equivalent yet, by design: SPEC.md's own Phase 8
+  entry already pairs a menu-accessible Help system with the client-
+  side command as *that* phase's joint deliverable. Building the menu
+  now would be scope creep into Phase 8, so `/help` ships as an
+  explicit, acknowledged command-only exception for this phase --
+  currently just a placeholder listing registered commands, per the
+  explicit instruction that rich help content is Phase 8's job.
+- `/version` had no GUI equivalent either -- fixed by adding a small
+  "About" button (next to "Spawn Log Window") that shares a single
+  `mushtato_version()` helper (reads `pyproject.toml`'s version via
+  `importlib.metadata`, not a second hardcoded copy that could drift)
+  with the command handler, rather than adding the button as an
+  afterthought disconnected from the command.
+- `/theme <dark|light>` has no single dedicated button, but calls the
+  identical `Settings`/`save_settings`/`apply_theme` chain the settings
+  dialog's OK button already triggers -- judged "the same handler, a
+  faster route to it" rather than a parallel implementation, and kept
+  on that basis.
+
+Dual input wiring: only the primary (`input_line`) checks for `/`
+commands; the secondary (`secondary_input`, poses/says) always
+bypasses command processing entirely, for the identical reason it's
+already meant to bypass alias expansion once that's wired in -- a pose
+starting with `/` must never be silently reinterpreted. Verified with
+a test that types `/quit` into the secondary box and confirms it's
+sent to the MUD literally, not executed.
+
+Manually validated end-to-end against the real local RhostMUSH: `/help`,
+`/version`, `/spawnlog`, `/theme light`, and the `//` escape hatch (sent
+`/notacommand` literally, visible in the scrollback) all worked
+correctly; `/connect` from a session window opened a second window via
+the address book's real `connect_to()` (confirmed by the address
+book's own open-window count); and switching theme via `/theme`
+propagated live to the address book window exactly as Phase 7b's
+verified live-reload behavior predicts, not a new/different code path.
+
+Still NOT wiring `engine/scripting` into the GUI -- same deferred
+decision as every phase since Phase 4b, called out again so it stays
+visible rather than quietly dropped.
+
+**Phase 7d (menu bar, toolbar, status bar chrome) — done.** Extended
+`gui/windows/main_window.py` (`MainWindow._build_chrome()`) and
+`gui/windows/address_book_window.py` (`AddressBookWindow._build_menu()`).
+
+Triggered by Rick sharing a real screenshot of Potato's actual GUI
+(menu bar: File/Edit/View/Logging/Options/Tools/Help; a grouped
+toolbar; a tab bar for multiple worlds; a status bar) and asking for
+something "similar" -- a menu bar plus buttons exposing MushTato's
+internal commands, not just typed `/commands`. Two checkpoint questions
+before code, both resolved by Rick directly rather than needing the
+full multi-choice tool: (1) Potato's tab bar implies multiple worlds
+live in *one* window, which conflicts with MushTato's Phase 5 decision
+(separate top-level window per connection) -- Rick clarified that in
+Potato itself, each toolbar button (Conf, Events, Log, Upload, Editor,
+Mail Window, Find, Help) already opens its own separate window, so
+there's no real conflict: MushTato keeps one-window-per-connection,
+and the tab bar simply isn't replicated -- confirmed as correct rather
+than needing to reopen the Phase 5 decision. (2) which of Potato's
+toolbar/menu actions get built for real this phase, chosen via
+AskUserQuestion: grayed-out disabled placeholders for the ones with no
+backing MushTato feature yet (Editor, Upload, Mail Window, Events,
+Find), rather than leaving them out of the chrome entirely -- so the
+menu visually previews Potato's fuller feature set for later phases to
+enable, without pretending they work now.
+
+Same "same handler, not parallel implementation" principle as Phase 7c,
+applied throughout: every enabled menu/toolbar `QAction` calls the
+exact same method its typed `/` command (or existing button/hotkey)
+already calls. This extended the command set, not just the GUI --
+`/disconnect` and `/reconnect` are new built-in commands added
+specifically so the new Reconnect/Disconnect actions have a single
+shared handler (`MainWindow._disconnect()`/`_reconnect()`) rather than
+the GUI action being the only path to that behavior. `_reconnect()`
+calls `stop()` then `start()` on the *same* `TelnetBridge` instance
+(rather than constructing a new one) since `TelnetBridge.start()`
+already spins up a fresh background thread/loop/client each call (see
+`telnet_bridge.py`'s `_thread_main`) -- reusing the instance means the
+signal connections made once in the constructor never need redoing.
+`/theme`'s logic was extracted into a shared `_set_theme()` helper so
+both the text command and the new View > Theme > Dark/Light checkable
+menu actions (a `QActionGroup`, mutually exclusive) go through one
+code path; this also fixed a latent gap where `_cmd_theme` previously
+never updated `self._theme`, so a spawn-log window opened after a
+`/theme` change would have inherited the session's original theme
+instead of the current one.
+
+The old Phase 7c button row (`spawn_log_button`, `about_button`) was
+removed, not kept alongside the new toolbar -- keeping both would have
+meant two separate widgets triggering the same action, which is exactly
+the kind of redundant chrome this phase exists to replace with a single
+coherent set of entry points.
+
+New status bar (`MainWindow`): world name, host:port, connection state
+(Connecting/Connected/Disconnected, updated by the same bridge signal
+handlers that already drove scrollback messages), a live "Connected
+For: Xh Ym" duration counter, and a clock -- both ticked by one
+`QTimer` (`_update_clock`, 1s interval), mirroring Potato's real status
+bar layout from the reviewed screenshot.
+
+`AddressBookWindow` also gained a menu bar (File: Add/Edit/Delete
+World, Connect, Settings, Close; Help: About) -- no new toolbar there,
+since Phase 6 already gave it a button row for the same actions, so
+"buttons for the internal commands" was already satisfied on that
+window; only the menu bar was new.
+
+A real PySide6/shiboken wrapper-lifetime quirk surfaced writing this
+phase's tests: a `QMenu` or `QAction` returned by `addMenu()`/
+`addAction()` and kept only as a bare local variable can have its
+underlying C++ object garbage-collected once the enclosing method
+returns, causing `RuntimeError: Internal C++ object already deleted`
+on a later `menuBar().actions()[i].menu()`-style lookup -- reproduced
+directly, not assumed. Fixed by keeping every menu and action as a
+named `self.*` attribute in both `MainWindow` and `AddressBookWindow`
+(e.g. `self.file_menu`, `self.connect_menu_action`), and writing tests
+to reach them via those attributes directly rather than by walking
+`menuBar().actions()`.
+
+Manually validated end-to-end against the real local RhostMUSH
+(`127.0.0.1:4444`), including a real disconnect/reconnect cycle (not
+just a fake-bridge test): menu bar and toolbar populated correctly with
+placeholders visibly grayed out, status bar showed live host/state/
+duration/clock, About and Help both showed correct content, Disconnect
+followed by Reconnect via the toolbar actually dropped and
+re-established the live telnet connection (visible in the scrollback:
+"[Disconnected]" then a fresh "Welcome to..." banner replay), and
+switching theme via the View menu applied live -- screenshotted for the
+record (session window: menu bar, toolbar with grayed placeholders,
+status bar, and the disconnect/reconnect transcript all visible in one
+capture).
+
+Still NOT wiring `engine/scripting` into the GUI -- same deferred
+decision as every phase since Phase 4b, called out again so it stays
+visible rather than quietly dropped.
 
 Next: Phase 8, documentation.

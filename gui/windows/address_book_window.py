@@ -19,6 +19,7 @@ from PySide6.QtWidgets import (
     QHBoxLayout,
     QListWidget,
     QMainWindow,
+    QMessageBox,
     QPushButton,
     QVBoxLayout,
     QWidget,
@@ -38,7 +39,7 @@ from engine.storage import (
 from ..dialogs.settings_dialog import SettingsDialog
 from ..dialogs.world_edit_dialog import WorldEditDialog
 from ..theme import apply_theme
-from .main_window import MainWindow
+from .main_window import MainWindow, mushtato_version
 
 
 class AddressBookWindow(QMainWindow):
@@ -103,6 +104,39 @@ class AddressBookWindow(QMainWindow):
         self.setCentralWidget(central)
 
         self._apply_hotkeys()
+        self._build_menu()
+
+    def _build_menu(self) -> None:
+        """Menu bar mirroring Potato's real chrome (this phase's
+        checkpoint screenshot) -- every item calls the exact same
+        method its existing button already calls, never a parallel
+        implementation. The address book already has a button row for
+        these actions (Phase 6), so unlike MainWindow it doesn't also
+        need a separate toolbar to satisfy "buttons for the internal
+        commands" -- the buttons already exist.
+        """
+        menu_bar = self.menuBar()
+        # Kept as attributes (self.file_menu/help_menu, self.*_action)
+        # rather than only local variables -- a bare local QMenu/QAction
+        # returned by addMenu()/addAction() can be garbage-collected out
+        # from under its own C++ object once this method returns (a
+        # known PySide6 wrapper-lifetime quirk), and tests need a
+        # reliable way to reach these without walking menuBar().actions().
+        self.file_menu = menu_bar.addMenu("&File")
+        self.add_world_action = self.file_menu.addAction("Add World", self._add_world)
+        self.edit_world_action = self.file_menu.addAction("Edit World", self._edit_selected)
+        self.delete_world_action = self.file_menu.addAction("Delete World", self._delete_selected)
+        self.file_menu.addSeparator()
+        self.connect_menu_action = self.file_menu.addAction("Connect", self._connect_selected)
+        self.settings_menu_action = self.file_menu.addAction("Settings...", self._open_settings)
+        self.file_menu.addSeparator()
+        self.close_menu_action = self.file_menu.addAction("Close", self.close)
+
+        self.help_menu = menu_bar.addMenu("&Help")
+        self.about_menu_action = self.help_menu.addAction("About", self._show_about)
+
+    def _show_about(self) -> None:
+        QMessageBox.information(self, "About MushTato", f"MushTato {mushtato_version()}")
 
     def _apply_hotkeys(self) -> None:
         hotkeys = self.settings.hotkeys
@@ -173,6 +207,7 @@ class AddressBookWindow(QMainWindow):
             name=world.name,
             hotkeys=self.settings.hotkeys,
             theme=self.settings.theme,
+            address_book=self,
         )
         window.closed.connect(lambda: self._remove_open_window(window))
         self.open_windows.append(window)
