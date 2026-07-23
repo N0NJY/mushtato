@@ -1,12 +1,13 @@
 """Headless tests for Phase 6's dual input: two simultaneous boxes,
 both sending to the same connection, each with independent history.
+Now lives on SessionTab (Phase 9) rather than MainWindow itself.
 """
 
 from PySide6.QtCore import Qt
 from PySide6.QtGui import QKeyEvent
 
 from gui.windows.history_line_edit import HistoryLineEdit
-from gui.windows.main_window import MainWindow
+from gui.windows.session_tab import SessionTab
 from tests.gui.test_main_window_smoke import FakeBridge
 
 
@@ -17,35 +18,35 @@ def _press(widget, key):
 
 def test_both_boxes_send_to_the_same_connection(qapp):
     bridge = FakeBridge()
-    window = MainWindow("example.com", 4201, bridge=bridge)
+    tab = SessionTab("example.com", 4201, bridge=bridge)
 
-    window.input_line.setText("look")
-    window.input_line.returnPressed.emit()
-    window.secondary_input.setText("waves hello")
-    window.secondary_input.returnPressed.emit()
+    tab.input_line.setText("look")
+    tab.input_line.returnPressed.emit()
+    tab.secondary_input.setText("waves hello")
+    tab.secondary_input.returnPressed.emit()
 
     assert bridge.sent == ["look", "waves hello"]
 
 
 def test_secondary_input_echoes_locally_and_clears(qapp):
     bridge = FakeBridge()
-    window = MainWindow("example.com", 4201, bridge=bridge)
+    tab = SessionTab("example.com", 4201, bridge=bridge)
 
-    window.secondary_input.setText("waves hello")
-    window.secondary_input.returnPressed.emit()
+    tab.secondary_input.setText("waves hello")
+    tab.secondary_input.returnPressed.emit()
 
-    assert "waves hello" in window.scrollback.toPlainText()
-    assert window.secondary_input.text() == ""
+    assert "waves hello" in tab.scrollback.toPlainText()
+    assert tab.secondary_input.text() == ""
 
 
 def test_connection_closed_disables_both_inputs(qapp):
     bridge = FakeBridge()
-    window = MainWindow("example.com", 4201, bridge=bridge)
+    tab = SessionTab("example.com", 4201, bridge=bridge)
 
     bridge.connectionClosed.emit()
 
-    assert window.input_line.isEnabled() is False
-    assert window.secondary_input.isEnabled() is False
+    assert tab.input_line.isEnabled() is False
+    assert tab.secondary_input.isEnabled() is False
 
 
 def test_history_line_edit_recalls_previous_entries():
@@ -66,34 +67,34 @@ def test_history_line_edit_recalls_previous_entries():
 
 
 def test_scrollback_and_input_area_are_resizable_via_a_splitter(qapp):
-    window = MainWindow("example.com", 4201, bridge=FakeBridge())
-    window.show()
-    window.resize(800, 600)
+    tab = SessionTab("example.com", 4201, bridge=FakeBridge())
+    tab.show()
+    tab.resize(800, 600)
 
-    assert window.splitter.count() == 2
-    assert window.splitter.widget(0) is window.scrollback
+    assert tab.splitter.count() == 2
+    assert tab.splitter.widget(0) is tab.scrollback
     # input_line/secondary_input live in a container that's the
     # splitter's second pane, not added to it directly.
-    input_container = window.splitter.widget(1)
-    assert window.input_line in input_container.findChildren(type(window.input_line))
-    assert window.secondary_input in input_container.findChildren(type(window.secondary_input))
+    input_container = tab.splitter.widget(1)
+    assert tab.input_line in input_container.findChildren(type(tab.input_line))
+    assert tab.secondary_input in input_container.findChildren(type(tab.secondary_input))
 
-    original_sizes = window.splitter.sizes()
-    window.splitter.setSizes([50, 400])
-    assert window.splitter.sizes() != original_sizes
+    original_sizes = tab.splitter.sizes()
+    tab.splitter.setSizes([50, 400])
+    assert tab.splitter.sizes() != original_sizes
 
 
 def test_primary_and_secondary_history_are_independent(qapp):
-    window = MainWindow("example.com", 4201, bridge=FakeBridge())
+    tab = SessionTab("example.com", 4201, bridge=FakeBridge())
 
-    window.input_line.setText("north")
-    window.input_line.returnPressed.emit()
+    tab.input_line.setText("north")
+    tab.input_line.returnPressed.emit()
 
-    window.secondary_input.setText("smiles")
-    window.secondary_input.returnPressed.emit()
+    tab.secondary_input.setText("smiles")
+    tab.secondary_input.returnPressed.emit()
 
-    _press(window.input_line, Qt.Key.Key_Up)
-    assert window.input_line.text() == "north"
+    _press(tab.input_line, Qt.Key.Key_Up)
+    assert tab.input_line.text() == "north"
 
-    _press(window.secondary_input, Qt.Key.Key_Up)
-    assert window.secondary_input.text() == "smiles"
+    _press(tab.secondary_input, Qt.Key.Key_Up)
+    assert tab.secondary_input.text() == "smiles"

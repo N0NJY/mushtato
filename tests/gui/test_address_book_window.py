@@ -1,60 +1,36 @@
 """Headless tests for the address book window: list population, add/
-edit/delete round-tripping through storage, and "Connect" opening an
-independent session window per world.
-
-Uses an injected fake window factory (mirroring how MainWindow itself
-accepts an injectable ``bridge``) so these never open a real
-TelnetBridge/network connection.
+edit/delete round-tripping through storage, and "Connect" asking the
+host shell to open (or switch to) a tab -- Phase 9 changed this from
+opening its own independent MainWindow to delegating to the persistent
+host window that spawned it.
 """
 
 from pathlib import Path
 
-from PySide6.QtCore import QObject, Signal
-
-from engine.storage import WorldProfile, load_address_book, save_address_book
+from engine.storage import DEFAULT_HOTKEYS, WorldProfile, load_address_book, save_address_book
 from gui.dialogs.world_edit_dialog import WorldEditDialog
 from gui.windows.address_book_window import AddressBookWindow
 
 
-class FakeSessionWindow(QObject):
-    """Stands in for MainWindow: same closed signal/resize/show shape,
-    never opens a real connection.
+class FakeHostWindow:
+    """Stands in for MainWindow -- records open_tab() calls instead of
+    actually creating a SessionTab/TelnetBridge.
     """
 
-    closed = Signal()
+    def __init__(self, hotkeys=None) -> None:
+        self._hotkeys = hotkeys if hotkeys is not None else dict(DEFAULT_HOTKEYS)
+        self.open_tab_calls = []
 
-    def __init__(
-        self,
-        host: str,
-        port: int,
-        *,
-        name=None,
-        bridge=None,
-        hotkeys=None,
-        theme=None,
-        address_book=None,
-    ) -> None:
-        super().__init__()
-        self.host = host
-        self.port = port
-        self.name = name
-        self.hotkeys = hotkeys
-        self.theme = theme
-        self.address_book = address_book
-        self.shown = False
-
-    def resize(self, *args) -> None:
-        pass
-
-    def show(self) -> None:
-        self.shown = True
+    def open_tab(self, host, port, *, name=None, bridge=None):
+        self.open_tab_calls.append((host, port, name))
+        return (host, port, name)
 
 
-def make_address_book(tmp_path: Path, worlds=None) -> AddressBookWindow:
+def make_address_book(tmp_path: Path, worlds=None, host_window=None) -> AddressBookWindow:
     path = tmp_path / "address_book.json"
     if worlds is not None:
         save_address_book(path, worlds)
-    return AddressBookWindow(storage_path=path, window_factory=FakeSessionWindow)
+    return AddressBookWindow(host_window or FakeHostWindow(), storage_path=path)
 
 
 def test_loads_existing_worlds_into_the_list(qapp, tmp_path: Path):
@@ -113,41 +89,29 @@ def test_delete_selected_removes_from_list_and_storage(qapp, tmp_path: Path):
     assert load_address_book(window._path) == [WorldProfile(name="Keep", host="a.example.com", port=1)]
 
 
-def test_connect_opens_an_independent_session_window(qapp, tmp_path: Path):
+def test_connect_asks_the_host_to_open_a_tab(qapp, tmp_path: Path):
     worlds = [WorldProfile(name="Estrellita", host="silvren.com", port=4444)]
-    window = make_address_book(tmp_path, worlds)
+    host = FakeHostWindow()
+    window = make_address_book(tmp_path, worlds, host_window=host)
 
     window.list_widget.setCurrentRow(0)
     window._connect_selected()
 
-    assert len(window.open_windows) == 1
-    opened = window.open_windows[0]
-    assert opened.host == "silvren.com"
-    assert opened.port == 4444
-    assert opened.shown is True
+    assert host.open_tab_calls == [("silvren.com", 4444, "Estrellita")]
 
 
-def test_connecting_to_two_worlds_opens_two_independent_windows(qapp, tmp_path: Path):
+def test_connecting_to_two_worlds_asks_the_host_twice(qapp, tmp_path: Path):
     worlds = [
         WorldProfile(name="World A", host="a.example.com", port=1),
         WorldProfile(name="World B", host="b.example.com", port=2),
     ]
-    window = make_address_book(tmp_path, worlds)
+    host = FakeHostWindow()
+    window = make_address_book(tmp_path, worlds, host_window=host)
 
     window.connect_to(worlds[0])
     window.connect_to(worlds[1])
 
-    assert len(window.open_windows) == 2
-    assert window.open_windows[0].host != window.open_windows[1].host
-
-
-def test_closing_a_session_window_removes_it_from_open_windows(qapp, tmp_path: Path):
-    worlds = [WorldProfile(name="Estrellita", host="silvren.com", port=4444)]
-    window = make_address_book(tmp_path, worlds)
-
-    opened = window.connect_to(worlds[0])
-    assert opened in window.open_windows
-
-    opened.closed.emit()
-
-    assert opened not in window.open_windows
+    assert host.open_tab_calls == [
+        ("a.example.com", 1, "World A"),
+        ("b.example.com", 2, "World B"),
+    ]

@@ -1,15 +1,20 @@
-"""Smoke test: the main window constructs correctly and wires up its
+"""Smoke test: a SessionTab constructs correctly and wires up its
 widgets/signals -- using an injected fake bridge so this stays fully
 offline (no real TelnetClient/network involved), per CLAUDE.md's rule
 that engine features (and by extension, GUI smoke tests) shouldn't
 need a live server.
+
+FakeBridge lives here because it's imported by many other test files
+(Phase 9 renamed MainWindow's old "one connection" role to SessionTab,
+but kept this fixture's import path stable rather than force-updating
+every importer's path just for a rename).
 """
 
 from PySide6.QtCore import QObject, Signal
 from PySide6.QtGui import QColor, QPalette
 
 from gui.theme import DARK_SCROLLBACK_BASE, DARK_SCROLLBACK_TEXT
-from gui.windows.main_window import MainWindow
+from gui.windows.session_tab import SessionTab
 
 
 class FakeBridge(QObject):
@@ -38,76 +43,69 @@ class FakeBridge(QObject):
         self.stopped = True
 
 
-def test_window_constructs_with_expected_widgets(qapp):
-    window = MainWindow("example.com", 4201, bridge=FakeBridge())
-    assert "example.com:4201" in window.windowTitle()
-    assert window.scrollback.isReadOnly() is True
-    assert window.input_line is not None
+def test_tab_constructs_with_expected_widgets(qapp):
+    tab = SessionTab("example.com", 4201, bridge=FakeBridge())
+    assert "example.com:4201" in tab.name
+    assert tab.scrollback.isReadOnly() is True
+    assert tab.input_line is not None
 
 
-def test_window_starts_the_bridge_on_construction(qapp):
+def test_tab_starts_the_bridge_on_construction(qapp):
     bridge = FakeBridge()
-    MainWindow("example.com", 4201, bridge=bridge)
+    SessionTab("example.com", 4201, bridge=bridge)
     assert bridge.started is True
 
 
 def test_typing_and_pressing_enter_echoes_locally_and_sends(qapp):
     bridge = FakeBridge()
-    window = MainWindow("example.com", 4201, bridge=bridge)
+    tab = SessionTab("example.com", 4201, bridge=bridge)
 
-    window.input_line.setText("look")
-    window.input_line.returnPressed.emit()
+    tab.input_line.setText("look")
+    tab.input_line.returnPressed.emit()
 
     assert bridge.sent == ["look"]
-    assert "look" in window.scrollback.toPlainText()
-    assert window.input_line.text() == ""  # cleared after send
+    assert "look" in tab.scrollback.toPlainText()
+    assert tab.input_line.text() == ""  # cleared after send
 
 
 def test_incoming_text_is_rendered_in_scrollback(qapp):
     bridge = FakeBridge()
-    window = MainWindow("example.com", 4201, bridge=bridge)
+    tab = SessionTab("example.com", 4201, bridge=bridge)
 
     bridge.textReceived.emit("You see a dusty road.\r\n")
 
-    assert "You see a dusty road." in window.scrollback.toPlainText()
+    assert "You see a dusty road." in tab.scrollback.toPlainText()
 
 
 def test_connection_closed_disables_input(qapp):
     bridge = FakeBridge()
-    window = MainWindow("example.com", 4201, bridge=bridge)
+    tab = SessionTab("example.com", 4201, bridge=bridge)
 
     bridge.connectionClosed.emit()
 
-    assert window.input_line.isEnabled() is False
-    assert "Connection closed" in window.scrollback.toPlainText()
+    assert tab.input_line.isEnabled() is False
+    assert "Connection closed" in tab.scrollback.toPlainText()
 
 
 def test_connection_failed_disables_input_and_shows_message(qapp):
     bridge = FakeBridge()
-    window = MainWindow("example.com", 4201, bridge=bridge)
+    tab = SessionTab("example.com", 4201, bridge=bridge)
 
     bridge.connectionFailed.emit("Connection refused")
 
-    assert window.input_line.isEnabled() is False
-    assert "Connection refused" in window.scrollback.toPlainText()
+    assert tab.input_line.isEnabled() is False
+    assert "Connection refused" in tab.scrollback.toPlainText()
 
 
-def test_close_event_stops_the_bridge(qapp):
+def test_shutdown_stops_the_bridge(qapp):
     bridge = FakeBridge()
-    window = MainWindow("example.com", 4201, bridge=bridge)
-    window.close()
+    tab = SessionTab("example.com", 4201, bridge=bridge)
+    tab.shutdown()
     assert bridge.stopped is True
 
 
-def test_scrollback_palette_still_matches_theme_after_chrome_is_built(qapp):
-    # Regression guard: the scrollback's palette override is applied
-    # after _build_chrome() specifically because building the menu
-    # bar/toolbar/status bar was found (on a real desktop) to reset an
-    # earlier override -- see main_window.py's __init__ comment. This
-    # doesn't reproduce that real-desktop bug (this suite runs on the
-    # offscreen QPA platform), but it does guard against a future edit
-    # re-introducing the wrong ordering.
-    window = MainWindow("example.com", 4201, bridge=FakeBridge(), theme="dark")
-    palette = window.scrollback.palette()
+def test_scrollback_palette_matches_theme_after_construction(qapp):
+    tab = SessionTab("example.com", 4201, bridge=FakeBridge(), theme="dark")
+    palette = tab.scrollback.palette()
     assert palette.color(QPalette.ColorRole.Base) == QColor(DARK_SCROLLBACK_BASE)
     assert palette.color(QPalette.ColorRole.Text) == QColor(DARK_SCROLLBACK_TEXT)

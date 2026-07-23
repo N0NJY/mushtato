@@ -1,11 +1,13 @@
 """Address book: browse/add/edit/delete saved worlds, connect to open
-an independent session window per world (Phase 6).
+a tab in the host MainWindow (Phase 9 -- previously this opened its own
+independent MainWindow per world; now MainWindow is the persistent
+root and this is a satellite picker spawned *from* it, per Rick's
+explicit design call).
 
-Each "Connect" spawns its own MainWindow + TelnetBridge pair with its
-own background thread -- the multi-window model Phase 5's checkpoint
-discussion already committed to. This window just needs to keep
-references to the ones it opens so Qt doesn't garbage-collect them,
-and remove that reference again once a session window closes.
+Settings/About/general chrome deliberately do NOT live here anymore --
+those are host-level concerns now that the host always exists. This
+window's only job is picking a saved world to connect to and managing
+the saved list itself.
 """
 
 from __future__ import annotations
@@ -15,65 +17,33 @@ from typing import List, Optional
 
 from PySide6.QtGui import QKeySequence, QShortcut
 from PySide6.QtWidgets import (
-    QApplication,
     QHBoxLayout,
     QListWidget,
     QMainWindow,
-    QMessageBox,
     QPushButton,
     QVBoxLayout,
     QWidget,
 )
 
-from engine.storage import (
-    Settings,
-    WorldProfile,
-    address_book_path,
-    load_address_book,
-    load_settings,
-    save_address_book,
-    save_settings,
-    settings_path,
-)
+from engine.storage import WorldProfile, address_book_path, load_address_book, save_address_book
 
-from ..dialogs.settings_dialog import SettingsDialog
 from ..dialogs.world_edit_dialog import WorldEditDialog
-from ..theme import apply_theme
-from .main_window import MainWindow, mushtato_version
 
 
 class AddressBookWindow(QMainWindow):
     def __init__(
         self,
+        host_window,
         *,
         storage_path: Optional[Path] = None,
-        settings_storage_path: Optional[Path] = None,
-        window_factory=MainWindow,
     ) -> None:
         super().__init__()
         self.setWindowTitle("MushTato — Address Book")
 
+        self.host_window = host_window
         self._path = storage_path if storage_path is not None else address_book_path()
-        self._settings_path = (
-            settings_storage_path if settings_storage_path is not None else settings_path()
-        )
-        # Injectable so tests can supply a fake in place of the real
-        # MainWindow (which would otherwise open a real TelnetBridge) --
-        # same pattern MainWindow itself uses for `bridge`.
-        self._window_factory = window_factory
 
         self.worlds: List[WorldProfile] = load_address_book(self._path)
-        self.open_windows: List[MainWindow] = []
-        # Loaded once at construction. A hotkeys change always applies
-        # to newly-opened windows only (unchanged from Phase 7). A
-        # theme change is a mix, verified empirically (see
-        # _open_settings and CLAUDE.md's Phase 7b notes): chrome and
-        # input boxes update live on already-open windows too, since
-        # they just inherit the app-wide QPalette -- but the
-        # scrollback's own dimmer Base/Text override
-        # (gui/theme.scrollback_palette) is set once at construction
-        # and does NOT live-update, only the app-wide palette does.
-        self.settings: Settings = load_settings(self._settings_path)
 
         self.list_widget = QListWidget(self)
         self.list_widget.itemDoubleClicked.connect(self._connect_selected)
@@ -87,15 +57,12 @@ class AddressBookWindow(QMainWindow):
         delete_button.clicked.connect(self._delete_selected)
         connect_button = QPushButton("Connect")
         connect_button.clicked.connect(self._connect_selected)
-        settings_button = QPushButton("Settings")
-        settings_button.clicked.connect(self._open_settings)
 
         button_row = QHBoxLayout()
         button_row.addWidget(add_button)
         button_row.addWidget(edit_button)
         button_row.addWidget(delete_button)
         button_row.addWidget(connect_button)
-        button_row.addWidget(settings_button)
 
         central = QWidget(self)
         layout = QVBoxLayout(central)
@@ -104,54 +71,12 @@ class AddressBookWindow(QMainWindow):
         self.setCentralWidget(central)
 
         self._apply_hotkeys()
-        self._build_menu()
-
-    def _build_menu(self) -> None:
-        """Menu bar mirroring Potato's real chrome (this phase's
-        checkpoint screenshot) -- every item calls the exact same
-        method its existing button already calls, never a parallel
-        implementation. The address book already has a button row for
-        these actions (Phase 6), so unlike MainWindow it doesn't also
-        need a separate toolbar to satisfy "buttons for the internal
-        commands" -- the buttons already exist.
-        """
-        menu_bar = self.menuBar()
-        # Kept as attributes (self.file_menu/help_menu, self.*_action)
-        # rather than only local variables -- a bare local QMenu/QAction
-        # returned by addMenu()/addAction() can be garbage-collected out
-        # from under its own C++ object once this method returns (a
-        # known PySide6 wrapper-lifetime quirk), and tests need a
-        # reliable way to reach these without walking menuBar().actions().
-        self.file_menu = menu_bar.addMenu("&File")
-        self.add_world_action = self.file_menu.addAction("Add World", self._add_world)
-        self.edit_world_action = self.file_menu.addAction("Edit World", self._edit_selected)
-        self.delete_world_action = self.file_menu.addAction("Delete World", self._delete_selected)
-        self.file_menu.addSeparator()
-        self.connect_menu_action = self.file_menu.addAction("Connect", self._connect_selected)
-        self.settings_menu_action = self.file_menu.addAction("Settings...", self._open_settings)
-        self.file_menu.addSeparator()
-        self.close_menu_action = self.file_menu.addAction("Close", self.close)
-
-        self.help_menu = menu_bar.addMenu("&Help")
-        self.about_menu_action = self.help_menu.addAction("About", self._show_about)
-
-    def _show_about(self) -> None:
-        QMessageBox.information(self, "About MushTato", f"MushTato {mushtato_version()}")
 
     def _apply_hotkeys(self) -> None:
-        hotkeys = self.settings.hotkeys
+        hotkeys = self.host_window._hotkeys
         QShortcut(QKeySequence(hotkeys["add_world"]), self, activated=self._add_world)
         QShortcut(QKeySequence(hotkeys["connect"]), self, activated=self._connect_selected)
         QShortcut(QKeySequence(hotkeys["close_window"]), self, activated=self.close)
-
-    def _open_settings(self) -> None:
-        dialog = SettingsDialog(self, settings=self.settings)
-        if dialog.exec():
-            self.settings = dialog.result_settings()
-            save_settings(self._settings_path, self.settings)
-            app = QApplication.instance()
-            if app is not None:
-                apply_theme(app, self.settings.theme)
 
     def _refresh_list(self) -> None:
         self.list_widget.clear()
@@ -200,21 +125,8 @@ class AddressBookWindow(QMainWindow):
             return
         self.connect_to(self.worlds[index])
 
-    def connect_to(self, world: WorldProfile) -> MainWindow:
-        window = self._window_factory(
-            world.host,
-            world.port,
-            name=world.name,
-            hotkeys=self.settings.hotkeys,
-            theme=self.settings.theme,
-            address_book=self,
-        )
-        window.closed.connect(lambda: self._remove_open_window(window))
-        self.open_windows.append(window)
-        window.resize(800, 600)
-        window.show()
-        return window
-
-    def _remove_open_window(self, window: MainWindow) -> None:
-        if window in self.open_windows:
-            self.open_windows.remove(window)
+    def connect_to(self, world: WorldProfile):
+        """Ask the host shell to open (or switch to) a tab for this
+        world -- the host owns tab creation, not this window.
+        """
+        return self.host_window.open_tab(world.host, world.port, name=world.name)

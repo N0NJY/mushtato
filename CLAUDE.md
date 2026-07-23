@@ -95,7 +95,8 @@ windows, dual input) — done, see below. Phase 7 (settings/hotkeys,
 CI packaging) — done, see below. Phase 7b (theme support, first-run
 settings dialog) — done, see below. Phase 7c (built-in client command
 system) — done, see below. Phase 7d (menu bar, toolbar, status bar
-chrome) — done, see below.** Telnet IAC negotiation is
+chrome) — done, see below. Phase 7e (tabbed session host window) —
+done, see below.** Telnet IAC negotiation is
 hand-rolled on raw asyncio streams (not telnetlib3)
 — see the Phase 3 discussion for reasoning. `scripts/console_client.py`
 is a throwaway dev tool for manually testing against a real server
@@ -711,5 +712,123 @@ actually changes their visible height, not just invisible layout
 padding around a fixed-size box. `input_line`/`secondary_input` remain
 the same objects at the same attribute names, so no existing test or
 GUI-wiring code needed to change.
+
+**Phase 7e (tabbed session host window) — done.** New
+`gui/windows/session_tab.py` (`SessionTab`), rewritten
+`gui/windows/main_window.py` (`MainWindow`) and
+`gui/windows/address_book_window.py` (`AddressBookWindow`), new
+`gui/version.py`.
+
+Triggered by Rick asking to examine whether connections could be tabs
+instead of separate windows -- flagged up front (per this file's rule
+1) that it's a cross-cutting change spanning every GUI phase since 5,
+then resolved via a checkpoint before any code: Rick's answer reframed
+the whole model, not just "tabs vs. windows" -- **the main connection
+window is the persistent root of the app**, opened at launch whether
+or not anything is connected yet; the address book is a satellite
+picker spawned *from* it (`File > Address Book...`), not the app's
+entry point; closing the last tab leaves the (now empty) host window
+open, ready for a new connection -- only the window's own X button or
+`File > Exit` actually quits the program; a spawned log window stays
+bound to the one tab it was opened from, unaffected by tab-switching
+afterward. This is the reverse of every prior phase's model (Phase 5's
+MainWindow was one connection; AddressBookWindow was the thing you
+started from) -- confirmed as an intentional, explicit reversal, not
+scope creep.
+
+Architecture split, following from that: `MainWindow` used to be both
+"one connection" and "the window chrome" in the same class. Phase 9
+splits those: **`SessionTab`** (`QWidget`, not a window) now owns
+exactly what MainWindow used to own per-connection -- scrollback, dual
+input + splitter, `TelnetBridge`, `CommandTable`, spawn windows, own
+theme captured at construction. **`MainWindow`** now owns exactly one
+`QTabWidget` of `SessionTab`s plus the Phase 7d chrome (menu bar,
+toolbar, status bar), all of which now act on *whichever tab is
+currently active* (`tab_widget.currentWidget()`) rather than on "this
+one connection." `SessionTab` is constructible with `host_window=None`
+for standalone headless tests (mirroring the `address_book=None`
+pattern Phase 7c already used) -- `/connect`, `/settings`, `/theme`
+degrade to "not available" in that case, which only happens in tests;
+the real app always supplies a host.
+
+Close semantics, precisely per Rick's answer: `Ctrl+W`/toolbar
+"Close"/`/quit` now close the *active tab* (`MainWindow.close_tab`),
+never the host window itself, even when it's the last tab
+(`close_current_tab` just leaves `tab_widget` at zero tabs, host stays
+visible -- covered by
+`test_multi_window_smoke.test_closing_the_last_tab_keeps_the_host_window_open`).
+The host window's own `closeEvent` is the one place a real "exit"
+happens: it explicitly shuts down every open tab's bridge and calls
+`QApplication.quit()` directly, rather than relying on Qt's
+`quitOnLastWindowClosed` default -- the address book or a spawn window
+might still be open when the root window closes, and Rick's answer was
+explicit that closing the root should exit "completely" regardless.
+
+Connecting to an already-open world switches to the existing tab
+instead of opening a duplicate (`MainWindow.open_tab` checks
+`tab_widget` for a matching host:port first) -- not explicitly
+requested, but a small, obviously-correct addition once tabs made
+"the same world twice" a real possibility that didn't exist under the
+one-window-per-connection model.
+
+Settings/About moved to be host-only, not duplicated on the address
+book: since the host now always exists, `AddressBookWindow` no longer
+loads/saves `Settings` at all (`MainWindow.open_settings()` is the one
+implementation, reused by the `Options` menu action and the `/settings`
+command alike) and lost its own `Help > About` menu entirely --
+matches Rick's own framing ("I'd like everything to reside in the
+connection window unless we spawn something like log, editor, etc").
+`AddressBookWindow` is now a lean picker: browse/add/edit/delete saved
+worlds, `Connect` delegates to `host_window.open_tab(...)`, nothing
+else.
+
+Hotkeys consolidated to one owner for the same reason: previously each
+per-connection `MainWindow` built its own `QShortcut`s at construction,
+so a `Settings` change only ever reached the *next* window opened
+(documented as an accepted limitation in Phase 7's notes). With exactly
+one host window now, `MainWindow._apply_hotkeys()` tears down and
+rebuilds its `QShortcut`s on every `open_settings()` save, so a hotkey
+change takes effect immediately in the same running session -- a real
+improvement made possible by the architecture simplification, not a
+deliberate goal going in.
+
+Test impact was as large as flagged up front: roughly 60 of the ~105
+GUI tests directly instantiated the old per-connection `MainWindow`.
+Rewrote `test_main_window_smoke.py`/`test_dual_input.py`/
+`test_spawn_window.py`/`test_commands_wiring.py` against `SessionTab`
+directly (`FakeBridge` kept in `test_main_window_smoke.py` at its
+original import path so other files' imports didn't need touching);
+`test_multi_window_smoke.py` rewritten around one host with multiple
+tabs; `test_hotkeys.py`/`test_chrome.py` rewritten for host-level
+chrome acting on the active tab; `test_address_book_window.py` now
+uses a `FakeHostWindow` recording `open_tab()` calls instead of a fake
+session-window factory; four `test_settings_dialog.py` tests that
+exercised `AddressBookWindow`'s now-removed settings ownership were
+deleted outright rather than adapted, since that capability no longer
+exists there by design. New `test_host_window.py` covers the host-only
+behaviors that have no Phase-7d equivalent: closing the host stops
+every tab's bridge and force-quits the app, and a settings save live-
+reloads hotkeys. Full suite: 224 passing (up from 219 pre-Phase-9,
+net new coverage despite the large rewrite).
+
+Manually validated end-to-end against the real local RhostMUSH
+(`127.0.0.1:4444`) and a second real connection to `silvren.com:4444`
+in a second tab, in the same run: host starts with zero tabs; opening
+the address book and connecting added a labeled tab and updated the
+status bar; connecting to the same host:port again switched to the
+existing tab rather than duplicating it (confirmed by tab count
+staying at 1); opening a second, different world added a second tab;
+switching tabs updated the status bar to match; a spawned log window
+bound correctly to whichever tab was active when it was spawned;
+`/quit` closed just that one tab; Disconnect/Reconnect via the toolbar
+actually dropped and re-established the live connection on whichever
+tab was then active; switching theme applied live; closing every tab
+one at a time via the Close action left the host window open and
+visible throughout, with the status bar correctly falling back to "No
+connection" at zero tabs -- screenshotted for the record.
+
+Still NOT wiring `engine/scripting` into the GUI -- same deferred
+decision as every phase since Phase 4b, called out again so it stays
+visible rather than quietly dropped.
 
 Next: Phase 8, documentation.

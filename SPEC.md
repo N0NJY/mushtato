@@ -142,6 +142,11 @@ Two cleanly separated layers:
 7d. **Menu bar, toolbar, and status bar chrome**, modeled on a review of
     Potato's real GUI (screenshot), exposing the built-in commands/handlers
     from Phase 7c as first-class menu/toolbar items rather than typed-only.
+7e. **Tabbed session host window** — MainWindow becomes the persistent
+    root shell (a QTabWidget of connections plus the Phase 7d chrome),
+    replacing the one-window-per-connection model from Phase 5/6. The
+    address book becomes a satellite picker spawned from the host rather
+    than the app's entry point.
 8. **Documentation & onboarding** — INSTALL.md (novice-friendly: what
    MushTato is, where to download it, OS-specific install steps including
    Gatekeeper/SmartScreen unsigned-binary workarounds, uninstall

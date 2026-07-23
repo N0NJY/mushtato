@@ -1,17 +1,25 @@
 """GUI entry point.
 
 Usage:
-    python -m gui.app             # opens the address book (Phase 6)
-    python -m gui.app host port   # direct-connect, bypassing the
-                                  # address book (handy for dev/testing)
+    python -m gui.app             # opens the main window with no tabs
+                                   # open yet -- use File > Address Book
+    python -m gui.app host port   # main window with one tab already
+                                   # open, connected directly (handy for
+                                   # dev/testing)
+
+Phase 9: MainWindow is now the persistent root/shell (a tabbed
+connection host), not one connection itself -- see
+gui/windows/main_window.py's module docstring. The address book is a
+satellite window opened *from* the main window, not the app's entry
+point.
 
 First run (Phase 7b): if no settings file exists yet at
 settings_path(), shows the settings dialog in first-run mode (theme +
 hotkeys, reusing settings_dialog.py rather than a separate onboarding
-flow) before either the direct-connect or address-book path. The
-result is saved regardless of whether the user clicks OK or Cancel, so
-this is only ever shown once -- see engine/storage/settings.py and
-CLAUDE.md's Phase 7b notes for the reasoning.
+flow) before the main window is created. The result is saved
+regardless of whether the user clicks OK or Cancel, so this is only
+ever shown once -- see engine/storage/settings.py and CLAUDE.md's
+Phase 7b notes for the reasoning.
 """
 
 from __future__ import annotations
@@ -25,7 +33,6 @@ from PySide6.QtWidgets import QApplication
 from engine.storage import Settings, load_settings, save_settings, settings_path
 from gui.dialogs.settings_dialog import SettingsDialog
 from gui.theme import apply_theme
-from gui.windows.address_book_window import AddressBookWindow
 from gui.windows.main_window import MainWindow
 
 
@@ -58,16 +65,12 @@ def main() -> int:
     settings = ensure_settings(settings_path())
     apply_theme(app, settings.theme)
 
+    window = MainWindow(hotkeys=settings.hotkeys, theme=settings.theme)
+    window.resize(900, 700)
+    window.show()
+
     if args.host and args.port:
-        window = MainWindow(
-            args.host, args.port, hotkeys=settings.hotkeys, theme=settings.theme
-        )
-        window.resize(800, 600)
-        window.show()
-    else:
-        window = AddressBookWindow()
-        window.resize(500, 400)
-        window.show()
+        window.open_tab(args.host, args.port)
 
     return app.exec()
 

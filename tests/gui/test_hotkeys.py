@@ -3,11 +3,16 @@ dispatch (not just calling the underlying method directly) -- proving
 the QShortcut wiring itself works, not just that the action it triggers
 works.
 
+Phase 9: hotkeys are host-level (MainWindow), acting on whichever tab
+is currently active, rather than per-connection-window as before.
+
 Under the offscreen test platform, a shortcut only dispatches once its
 window is registered as the *active* window -- ``activateWindow()``
 must be called explicitly (a real window manager would do this on
 show()/click(), which offscreen doesn't emulate).
 """
+
+from pathlib import Path
 
 from PySide6.QtCore import Qt
 from PySide6.QtTest import QTest
@@ -15,7 +20,6 @@ from PySide6.QtWidgets import QApplication
 
 from gui.windows.address_book_window import AddressBookWindow
 from gui.windows.main_window import MainWindow
-from tests.gui.test_address_book_window import FakeSessionWindow
 from tests.gui.test_main_window_smoke import FakeBridge
 
 
@@ -26,37 +30,44 @@ def _fire(window, key, modifier=Qt.KeyboardModifier.ControlModifier):
     QApplication.processEvents()
 
 
-def test_close_window_hotkey_closes_the_window(qapp, tmp_path):
-    window = MainWindow("example.com", 4201, bridge=FakeBridge())
-    window.show()
-    _fire(window, Qt.Key.Key_W)
-    assert window.isVisible() is False
+def test_close_window_hotkey_closes_the_active_tab(qapp, tmp_path: Path):
+    host = MainWindow(address_book_storage_path=tmp_path / "ab.json")
+    host.open_tab("example.com", 4201, bridge=FakeBridge())
+    host.show()
+
+    assert host.tab_widget.count() == 1
+    _fire(host, Qt.Key.Key_W)
+    assert host.tab_widget.count() == 0
+    assert host.isVisible() is True  # closing the tab, not the host window
 
 
-def test_spawn_log_window_hotkey_creates_a_spawn_window(qapp):
-    window = MainWindow("example.com", 4201, bridge=FakeBridge())
-    window.show()
-    assert window.spawn_windows == []
-    _fire(window, Qt.Key.Key_L)
-    assert len(window.spawn_windows) == 1
+def test_spawn_log_window_hotkey_creates_a_spawn_window_for_the_active_tab(qapp, tmp_path: Path):
+    host = MainWindow(address_book_storage_path=tmp_path / "ab.json")
+    tab = host.open_tab("example.com", 4201, bridge=FakeBridge())
+    host.show()
+
+    assert tab.spawn_windows == []
+    _fire(host, Qt.Key.Key_L)
+    assert len(tab.spawn_windows) == 1
 
 
-def test_switch_input_focus_hotkey_moves_focus_between_boxes(qapp):
-    window = MainWindow("example.com", 4201, bridge=FakeBridge())
-    window.show()
-    window.input_line.setFocus()
-    window.activateWindow()
+def test_switch_input_focus_hotkey_moves_focus_between_boxes(qapp, tmp_path: Path):
+    host = MainWindow(address_book_storage_path=tmp_path / "ab.json")
+    tab = host.open_tab("example.com", 4201, bridge=FakeBridge())
+    host.show()
+    tab.input_line.setFocus()
+    host.activateWindow()
     QApplication.processEvents()
-    assert window.input_line.hasFocus() is True
+    assert tab.input_line.hasFocus() is True
 
-    _fire(window, Qt.Key.Key_Tab)
-    assert window.secondary_input.hasFocus() is True
+    _fire(host, Qt.Key.Key_Tab)
+    assert tab.secondary_input.hasFocus() is True
 
-    _fire(window, Qt.Key.Key_Tab)
-    assert window.input_line.hasFocus() is True
+    _fire(host, Qt.Key.Key_Tab)
+    assert tab.input_line.hasFocus() is True
 
 
-def test_custom_hotkey_binding_is_honored_not_just_the_default(qapp):
+def test_custom_hotkey_binding_is_honored_not_just_the_default(qapp, tmp_path: Path):
     """Confirms the shortcut actually reads from the injected hotkeys
     dict rather than being hardcoded to the default binding.
     """
@@ -64,28 +75,32 @@ def test_custom_hotkey_binding_is_honored_not_just_the_default(qapp):
         "spawn_log_window": "Ctrl+Shift+G",
         "switch_input_focus": "Ctrl+Tab",
         "close_window": "Ctrl+W",
+        "add_world": "Ctrl+N",
+        "connect": "Ctrl+Return",
     }
-    window = MainWindow("example.com", 4201, bridge=FakeBridge(), hotkeys=custom_hotkeys)
-    window.show()
+    host = MainWindow(hotkeys=custom_hotkeys, address_book_storage_path=tmp_path / "ab.json")
+    tab = host.open_tab("example.com", 4201, bridge=FakeBridge())
+    host.show()
 
     # The old default (Ctrl+L) must no longer do anything.
-    _fire(window, Qt.Key.Key_L)
-    assert window.spawn_windows == []
+    _fire(host, Qt.Key.Key_L)
+    assert tab.spawn_windows == []
 
     # The newly-configured binding must work.
-    window.activateWindow()
+    host.activateWindow()
     QApplication.processEvents()
     QTest.keyClick(
-        window,
+        host,
         Qt.Key.Key_G,
         Qt.KeyboardModifier.ControlModifier | Qt.KeyboardModifier.ShiftModifier,
     )
     QApplication.processEvents()
-    assert len(window.spawn_windows) == 1
+    assert len(tab.spawn_windows) == 1
 
 
 def test_address_book_add_world_hotkey_opens_the_dialog(qapp, tmp_path, monkeypatch):
-    window = AddressBookWindow(storage_path=tmp_path / "ab.json", window_factory=FakeSessionWindow)
+    host = MainWindow(address_book_storage_path=tmp_path / "ab.json")
+    window = AddressBookWindow(host, storage_path=tmp_path / "ab.json")
     window.show()
 
     calls = []
@@ -96,7 +111,8 @@ def test_address_book_add_world_hotkey_opens_the_dialog(qapp, tmp_path, monkeypa
 
 
 def test_address_book_close_window_hotkey_closes_it(qapp, tmp_path):
-    window = AddressBookWindow(storage_path=tmp_path / "ab.json", window_factory=FakeSessionWindow)
+    host = MainWindow(address_book_storage_path=tmp_path / "ab.json")
+    window = AddressBookWindow(host, storage_path=tmp_path / "ab.json")
     window.show()
     _fire(window, Qt.Key.Key_W)
     assert window.isVisible() is False
