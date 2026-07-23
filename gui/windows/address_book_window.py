@@ -28,6 +28,7 @@ from PySide6.QtWidgets import (
 from engine.storage import WorldProfile, address_book_path, load_address_book, save_address_book
 
 from ..dialogs.world_edit_dialog import WorldEditDialog
+from ..dialogs.world_properties_dialog import WorldPropertiesDialog
 
 
 class AddressBookWindow(QMainWindow):
@@ -57,12 +58,15 @@ class AddressBookWindow(QMainWindow):
         delete_button.clicked.connect(self._delete_selected)
         connect_button = QPushButton("Connect")
         connect_button.clicked.connect(self._connect_selected)
+        properties_button = QPushButton("Properties...")
+        properties_button.clicked.connect(self._open_properties)
 
         button_row = QHBoxLayout()
         button_row.addWidget(add_button)
         button_row.addWidget(edit_button)
         button_row.addWidget(delete_button)
         button_row.addWidget(connect_button)
+        button_row.addWidget(properties_button)
 
         central = QWidget(self)
         layout = QVBoxLayout(central)
@@ -127,6 +131,20 @@ class AddressBookWindow(QMainWindow):
 
     def connect_to(self, world: WorldProfile):
         """Ask the host shell to open (or switch to) a tab for this
-        world -- the host owns tab creation, not this window.
+        world -- the host owns tab creation, not this window. Passes
+        the full profile through (Phase 8b) so the tab can fire
+        auto-sends/character login, not just host/port/name.
         """
-        return self.host_window.open_tab(world.host, world.port, name=world.name)
+        return self.host_window.open_tab(world.host, world.port, name=world.name, world=world)
+
+    def _open_properties(self) -> None:
+        index = self._selected_index()
+        if index is None:
+            return
+        dialog = WorldPropertiesDialog(self, world=self.worlds[index])
+        if dialog.exec():
+            profile = dialog.result_profile()
+            if profile is not None:
+                self.worlds[index] = profile
+                self._save()
+                self._refresh_list()

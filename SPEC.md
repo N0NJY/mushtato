@@ -154,6 +154,9 @@ Two cleanly separated layers:
    client-side command, content covering the client's features end to
    end), troubleshooting/FAQ, credits/attribution to Potato and
    TinyFugue, and a CHANGELOG.md.
+8b. **Address book / World Properties overhaul** (Potato parity:
+    characters, auto-sends, notes, connection specifics) + corresponding
+    Help content update.
 9. **(Post-1.0) Script-sharing ecosystem** — define a shareable script package
    format, decide on a distribution point (repo, in-app browser, or both).
 

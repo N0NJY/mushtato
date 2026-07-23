@@ -11,14 +11,14 @@ from __future__ import annotations
 
 from typing import List, Optional
 
-from PySide6.QtCore import QDateTime, Qt, Signal
+from PySide6.QtCore import QDateTime, QTimer, Qt, Signal
 from PySide6.QtGui import QTextCursor
 from PySide6.QtGui import QFontDatabase
 from PySide6.QtWidgets import QSizePolicy, QSplitter, QTextEdit, QVBoxLayout, QWidget
 
 from engine.ansi import AnsiParser
 from engine.commands import CommandTable
-from engine.storage import DEFAULT_THEME
+from engine.storage import DEFAULT_THEME, CharacterProfile, WorldProfile
 
 from ..help.markdown_tools import strip_markdown
 from ..help.topics import COMMAND_HELP, HelpContext, TOPICS, get_topic
@@ -51,12 +51,14 @@ class SessionTab(QWidget):
         bridge: Optional[TelnetBridge] = None,
         theme: Optional[str] = None,
         host_window=None,  # the MainWindow shell; None only in standalone tests
+        world: Optional[WorldProfile] = None,  # Phase 8b: auto-sends/login need the saved profile
     ) -> None:
         super().__init__()
         self.host = host
         self.port = port
         self.name = name or f"{host}:{port}"
         self.host_window = host_window
+        self.world = world
         self._theme = theme if theme is not None else DEFAULT_THEME
         self.connected_at: Optional[QDateTime] = None
         self.connection_state = "Connecting"
@@ -161,6 +163,79 @@ class SessionTab(QWidget):
         self._append_plain("Connected.\n")
         self.connected_at = QDateTime.currentDateTime()
         self._set_connection_state("Connected")
+        self._fire_autosends()
+
+    # -- Phase 8b: world-level auto-sends + character login ------------
+    # Verified against Potato's real dispatch (potato.tcl's
+    # sendLoginInfoSub), not invented: after login_delay, in this exact
+    # order -- firstconnect (only the world's very first-ever connect,
+    # tracked by a persisted counter) -> connect -> character login
+    # line -> login. Reuses self.bridge.send_line()/_send_to_bridge()
+    # directly, the same path normal typed input already uses -- no
+    # engine/scripting involvement, since this is fixed saved text, not
+    # user-provided code to sandbox.
+
+    def _fire_autosends(self) -> None:
+        if self.world is None:
+            return
+        is_first_connect = self.world.connect_count == 0
+        if self.host_window is not None:
+            self.host_window.record_world_connected(self.world)
+        delay_ms = max(0, int(self.world.login_delay * 1000))
+        QTimer.singleShot(delay_ms, lambda: self._send_autosends(is_first_connect))
+
+    def _send_autosends(self, is_first_connect: bool) -> None:
+        if self.world is None:
+            return
+        if is_first_connect and self.world.autosend_firstconnect:
+            self._send_autosend_block(self.world.autosend_firstconnect)
+        if self.world.autosend_connect:
+            self._send_autosend_block(self.world.autosend_connect)
+        character = self._resolve_default_character()
+        if character is not None:
+            self._send_login_line(character)
+        if self.world.autosend_login:
+            self._send_autosend_block(self.world.autosend_login)
+
+    def _send_autosend_block(self, block: str) -> None:
+        # Matches Potato's own dispatch splitting a multi-line autosend
+        # block into one send per line -- but sent as literal raw text
+        # via _send_to_bridge, deliberately NOT run through MushTato's
+        # own "/" command dispatcher the way Potato's send_to (which
+        # calls process_input) does. Autosends are automated,
+        # non-interactive text; reinterpreting them as client commands
+        # would be a real footgun (a saved autosend line that happens
+        # to start with "/quit" would close the tab instead of reaching
+        # the server) -- the same reasoning the secondary pose/says
+        # input box already uses to always bypass command processing.
+        for line in block.splitlines():
+            if line:
+                self._send_to_bridge(line, apply_aliases=False)
+
+    def _resolve_default_character(self) -> Optional[CharacterProfile]:
+        if self.world is None or not self.world.default_character:
+            return None
+        return next(
+            (c for c in self.world.characters if c.name == self.world.default_character), None
+        )
+
+    def _send_login_line(self, character: CharacterProfile) -> None:
+        try:
+            line = self.world.login_format.format(name=character.name, password=character.password)
+        except (KeyError, IndexError):
+            self._append_plain(
+                f"\n[Invalid login format for this world: {self.world.login_format!r}]\n"
+            )
+            return
+        # Echoed locally with the password masked (matching Potato's
+        # own real behavior: sendLoginInfoSub echoes a bullet-masked
+        # copy while sending the real string to the server), but the
+        # actual line sent to the server has the real password.
+        masked = self.world.login_format.format(
+            name=character.name, password="●" * len(character.password)
+        )
+        self._append_plain(masked + "\n")
+        self.bridge.send_line(line)
 
     def _on_text_received(self, text: str) -> None:
         segments = self._parser.feed(text)

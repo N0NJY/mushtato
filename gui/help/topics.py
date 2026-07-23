@@ -108,12 +108,14 @@ it's a picker that adds a tab to the main window when you connect.
 **Opening it:** File menu -> Address Book..., or the Address Book
 toolbar button.
 
-**Saved worlds:**
+**Saved worlds (quick edit):**
 - **Add** -- create a new saved world (name, host, port, notes).
-- **Edit** -- change a selected world's details.
+- **Edit** -- quickly change a selected world's name/host/port/notes.
 - **Delete** -- remove a selected world from the list.
 - **Connect** -- open (or switch to) a tab for the selected world.
   Double-clicking a world in the list does the same thing.
+- **Properties...** -- open the full World Properties window (below)
+  for a selected world's deeper settings.
 
 If you connect to a world that's already open in a tab, MushTato
 switches to that existing tab instead of opening a second connection
@@ -123,6 +125,38 @@ to the same place.
 by name and connects to it (or switches to its tab if already open),
 from any tab's input line -- exactly the same underlying action as
 clicking Connect in the Address Book.
+
+## World Properties
+
+Properties... opens a separate window with five sections (a category
+list on the left, that section's fields on the right):
+
+- **Basic** -- world name, host, port, and which saved Character (if
+  any) connects automatically by default.
+- **Characters** -- a world can have multiple saved Characters, each
+  just a name and password. Two different worlds can each have a
+  Character with the same name and a different password -- Characters
+  are scoped to their own world's list, never shared globally. Add/
+  Edit/Delete a Character, then Save or Cancel that one change.
+- **Connection** -- the *Login Format* (e.g. `connect {name}
+  {password}`, sent with the default Character's name/password
+  substituted in) and *Login Delay* (how long to wait after connecting
+  before sending it, giving the server time to show its own banner
+  first) are real and functional. The rest of this section (SSL, a 2nd
+  address/port, proxy, and several Telnet-specific options) mirrors
+  real settings from Potato but is shown **disabled** -- MushTato's
+  connection engine doesn't support them yet. Visible on purpose, so
+  it's clear what's planned versus what's broken.
+- **Auto-Sends** -- three optional blocks of text (one line each) sent
+  automatically on connect, in this order: *first connect ever*
+  (tracked per world -- only ever fires once, the very first time you
+  successfully connect to this world), *every connect, before login*,
+  the Character login line itself (if a default Character is set), then
+  *every connect, after login*. Auto-sent lines always go to the server
+  literally -- never reinterpreted as a `/` client command, the same
+  principle the Pose/says... box already follows.
+- **Notes** -- one free-text block for anything you want to remember
+  about this world.
 """
 
 

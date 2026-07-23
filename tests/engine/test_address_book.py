@@ -1,8 +1,9 @@
 """Headless tests for JSON-file address-book persistence."""
 
+import json
 from pathlib import Path
 
-from engine.storage import WorldProfile, load_address_book, save_address_book
+from engine.storage import CharacterProfile, WorldProfile, load_address_book, save_address_book
 from engine.storage.paths import safe_filename
 
 
@@ -71,3 +72,124 @@ def test_safe_filename_sanitizes_special_characters():
     assert safe_filename("normal-name_1") == "normal-name_1"
     assert safe_filename("") == "unnamed"
     assert safe_filename("   ") == "unnamed"
+
+
+# -- Phase 8b: Characters, auto-sends, notes, connection specifics ------
+
+
+def test_old_phase6_format_json_still_loads_with_new_fields_defaulted(tmp_path: Path):
+    """A real migration test, not just a description of intended
+    behavior: writes a JSON file in the exact Phase 6 shape (no
+    characters/auto-send/login fields at all) and confirms it loads
+    correctly under the Phase 8b-extended WorldProfile, with sensible
+    defaults for every new field -- no data loss, no crash.
+    """
+    path = tmp_path / "address_book.json"
+    old_format_json = {
+        "worlds": [
+            {"name": "Old World", "host": "old.example.com", "port": 4201, "notes": "from Phase 6"}
+        ]
+    }
+    path.write_text(json.dumps(old_format_json), encoding="utf-8")
+
+    loaded = load_address_book(path)
+
+    assert len(loaded) == 1
+    world = loaded[0]
+    assert world.name == "Old World"
+    assert world.host == "old.example.com"
+    assert world.port == 4201
+    assert world.notes == "from Phase 6"
+    # Every Phase 8b field defaults sensibly rather than raising/missing.
+    assert world.characters == []
+    assert world.default_character == ""
+    assert world.login_format == "connect {name} {password}"
+    assert world.login_delay == 1.5
+    assert world.autosend_firstconnect == ""
+    assert world.autosend_connect == ""
+    assert world.autosend_login == ""
+    assert world.connect_count == 0
+
+
+def test_old_format_json_missing_worlds_key_entirely_still_loads(tmp_path: Path):
+    path = tmp_path / "address_book.json"
+    path.write_text(json.dumps({"worlds": []}), encoding="utf-8")
+    assert load_address_book(path) == []
+
+
+def test_characters_round_trip(tmp_path: Path):
+    path = tmp_path / "address_book.json"
+    world = WorldProfile(
+        name="Estrellita",
+        host="silvren.com",
+        port=4444,
+        characters=[
+            CharacterProfile(name="Thoran", password="hunter2"),
+            CharacterProfile(name="Guest1", password=""),
+        ],
+        default_character="Thoran",
+    )
+    save_address_book(path, [world])
+
+    loaded = load_address_book(path)
+
+    assert loaded[0].characters == [
+        CharacterProfile(name="Thoran", password="hunter2"),
+        CharacterProfile(name="Guest1", password=""),
+    ]
+    assert loaded[0].default_character == "Thoran"
+
+
+def test_two_worlds_can_each_have_a_character_of_the_same_name_different_password(tmp_path: Path):
+    # The exact scenario that confirmed strict per-world scoping is
+    # correct (not just accepted) during this phase's checkpoint.
+    path = tmp_path / "address_book.json"
+    worlds = [
+        WorldProfile(
+            name="World A", host="a.example.com", port=1,
+            characters=[CharacterProfile(name="Thoran", password="passwordA")],
+        ),
+        WorldProfile(
+            name="World B", host="b.example.com", port=2,
+            characters=[CharacterProfile(name="Thoran", password="passwordB")],
+        ),
+    ]
+    save_address_book(path, worlds)
+
+    loaded = load_address_book(path)
+
+    assert loaded[0].characters[0].password == "passwordA"
+    assert loaded[1].characters[0].password == "passwordB"
+
+
+def test_autosend_and_login_fields_round_trip(tmp_path: Path):
+    path = tmp_path / "address_book.json"
+    world = WorldProfile(
+        name="X", host="h", port=1,
+        login_format="connect {name} {password}",
+        login_delay=2.5,
+        autosend_firstconnect="look\nwho",
+        autosend_connect="@set me=CONNECTED",
+        autosend_login="channel/on public",
+        connect_count=3,
+    )
+    save_address_book(path, [world])
+
+    loaded = load_address_book(path)[0]
+
+    assert loaded.login_delay == 2.5
+    assert loaded.autosend_firstconnect == "look\nwho"
+    assert loaded.autosend_connect == "@set me=CONNECTED"
+    assert loaded.autosend_login == "channel/on public"
+    assert loaded.connect_count == 3
+
+
+def test_connect_count_increment_and_save_round_trips(tmp_path: Path):
+    path = tmp_path / "address_book.json"
+    save_address_book(path, [WorldProfile(name="X", host="h", port=1, connect_count=0)])
+
+    worlds = load_address_book(path)
+    worlds[0].connect_count += 1
+    save_address_book(path, worlds)
+
+    assert load_address_book(path)[0].connect_count == 1

@@ -21,8 +21,8 @@ class FakeHostWindow:
         self._hotkeys = hotkeys if hotkeys is not None else dict(DEFAULT_HOTKEYS)
         self.open_tab_calls = []
 
-    def open_tab(self, host, port, *, name=None, bridge=None):
-        self.open_tab_calls.append((host, port, name))
+    def open_tab(self, host, port, *, name=None, bridge=None, world=None):
+        self.open_tab_calls.append((host, port, name, world))
         return (host, port, name)
 
 
@@ -97,7 +97,7 @@ def test_connect_asks_the_host_to_open_a_tab(qapp, tmp_path: Path):
     window.list_widget.setCurrentRow(0)
     window._connect_selected()
 
-    assert host.open_tab_calls == [("silvren.com", 4444, "Estrellita")]
+    assert host.open_tab_calls == [("silvren.com", 4444, "Estrellita", worlds[0])]
 
 
 def test_connecting_to_two_worlds_asks_the_host_twice(qapp, tmp_path: Path):
@@ -112,6 +112,28 @@ def test_connecting_to_two_worlds_asks_the_host_twice(qapp, tmp_path: Path):
     window.connect_to(worlds[1])
 
     assert host.open_tab_calls == [
-        ("a.example.com", 1, "World A"),
-        ("b.example.com", 2, "World B"),
+        ("a.example.com", 1, "World A", worlds[0]),
+        ("b.example.com", 2, "World B", worlds[1]),
     ]
+
+
+def test_open_properties_saves_edited_world(qapp, tmp_path: Path, monkeypatch):
+    from PySide6.QtWidgets import QDialog
+
+    from gui.dialogs.world_properties_dialog import WorldPropertiesDialog
+
+    worlds = [WorldProfile(name="Original", host="example.com", port=1)]
+    window = make_address_book(tmp_path, worlds)
+    window.list_widget.setCurrentRow(0)
+
+    def fake_exec(self):
+        self.name_edit.setText("Renamed")
+        self.autosend_connect_edit.setPlainText("look")
+        return QDialog.DialogCode.Accepted
+
+    monkeypatch.setattr(WorldPropertiesDialog, "exec", fake_exec)
+    window._open_properties()
+
+    assert window.worlds[0].name == "Renamed"
+    assert window.worlds[0].autosend_connect == "look"
+    assert load_address_book(window._path)[0].name == "Renamed"

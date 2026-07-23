@@ -30,8 +30,10 @@ from engine.storage import (
     DEFAULT_HOTKEYS,
     DEFAULT_THEME,
     Settings,
+    WorldProfile,
     address_book_path,
     load_address_book,
+    save_address_book,
     save_settings,
     settings_path,
 )
@@ -82,10 +84,20 @@ class MainWindow(QMainWindow):
     # -- tab management -----------------------------------------------
 
     def open_tab(
-        self, host: str, port: int, *, name: Optional[str] = None, bridge: Optional[TelnetBridge] = None
+        self,
+        host: str,
+        port: int,
+        *,
+        name: Optional[str] = None,
+        bridge: Optional[TelnetBridge] = None,
+        world: Optional[WorldProfile] = None,
     ) -> SessionTab:
         """Open a new connection tab, or switch to an existing one for
         the same host:port rather than opening a duplicate.
+
+        ``world`` (Phase 8b), when given, is the full saved profile --
+        SessionTab needs it for auto-sends/character login, not just
+        the host/port/name a direct-connect (no address book) tab has.
         """
         for index in range(self.tab_widget.count()):
             existing = self.tab_widget.widget(index)
@@ -93,7 +105,9 @@ class MainWindow(QMainWindow):
                 self.tab_widget.setCurrentIndex(index)
                 return existing
 
-        tab = SessionTab(host, port, name=name, bridge=bridge, theme=self._theme, host_window=self)
+        tab = SessionTab(
+            host, port, name=name, bridge=bridge, theme=self._theme, host_window=self, world=world
+        )
         tab.connectionStateChanged.connect(lambda state, t=tab: self._on_tab_state_changed(t, state))
         index = self.tab_widget.addTab(tab, tab.name)
         self.tab_widget.setCurrentIndex(index)
@@ -120,8 +134,35 @@ class MainWindow(QMainWindow):
         world = next((w for w in worlds if w.name.lower() == name.lower()), None)
         if world is None:
             return f"No saved world named {name!r}."
-        self.open_tab(world.host, world.port, name=world.name)
+        self.open_tab(world.host, world.port, name=world.name, world=world)
         return f"Connecting to {name}..."
+
+    def record_world_connected(self, world: WorldProfile) -> None:
+        """Persist an incremented connect_count for ``world`` (Phase
+        8b) -- called by SessionTab right as a connection succeeds, so
+        "first connect ever" auto-sends correctly never fire again
+        after the real first connection, even across app restarts.
+
+        Reloads the address book fresh and matches by name+host+port
+        rather than relying on ``world`` being the same object already
+        held by AddressBookWindow's in-memory list -- a tab opened via
+        ``/connect <name>`` gets a freshly-loaded WorldProfile that
+        isn't that same object, so this has to work for both paths.
+        """
+        world.connect_count += 1
+        worlds = load_address_book(self._address_book_path)
+        for candidate in worlds:
+            if (
+                candidate.name.lower() == world.name.lower()
+                and candidate.host == world.host
+                and candidate.port == world.port
+            ):
+                candidate.connect_count = world.connect_count
+                break
+        save_address_book(self._address_book_path, worlds)
+        if self._address_book_window is not None:
+            self._address_book_window.worlds = worlds
+            self._address_book_window._refresh_list()
 
     def _on_current_tab_changed(self, index: int) -> None:  # noqa: ARG002
         self._refresh_status_bar()

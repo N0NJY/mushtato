@@ -97,7 +97,8 @@ settings dialog) — done, see below. Phase 7c (built-in client command
 system) — done, see below. Phase 7d (menu bar, toolbar, status bar
 chrome) — done, see below. Phase 7e (tabbed session host window) —
 done, see below. Phase 8 (documentation & onboarding) — done, see
-below.** Telnet IAC negotiation is
+below. Phase 8b (address book / World Properties overhaul) — done,
+see below.** Telnet IAC negotiation is
 hand-rolled on raw asyncio streams (not telnetlib3)
 — see the Phase 3 discussion for reasoning. `scripts/console_client.py`
 is a throwaway dev tool for manually testing against a real server
@@ -995,7 +996,112 @@ decision as every phase since Phase 4b, called out again so it stays
 visible rather than quietly dropped, and now has its own in-app Help
 topic saying exactly that.
 
-Next: Rick has his own phase document for what comes after Phase 8 --
+**Phase 8b (address book / World Properties overhaul) — done.**
+Extended `engine/storage/address_book.py` (`WorldProfile`, new
+`CharacterProfile`), new `gui/dialogs/world_properties_dialog.py`
+(`WorldPropertiesDialog`), extended `gui/windows/session_tab.py` (auto-
+sends/character login) and `gui/windows/main_window.py`
+(`record_world_connected`), fixed a real data-loss bug in
+`gui/dialogs/world_edit_dialog.py`, updated `gui/help/topics.py`'s
+Address Book section.
+
+Two checkpoints before code (this file's standing rules again put to
+immediate use). First: research. `~/git/potato/potato.vfs` (the real,
+canonical `potatomushclient/potato` repo, confirmed via its own
+`README.md`/git log, not a stub) was read before any design was
+proposed -- and it directly overturned part of Rick's own initial
+framing, surfaced explicitly rather than silently followed: a Potato
+"Character" is verified (via `configureWorldCharsFinish`'s `list
+$newChar $newPw`) to be *only* a name+password pair -- auto-sends,
+notes, and login format are all World-level in the real source, not
+per-Character as first described. Rick confirmed strict parity on
+review, with a concrete reason: two different worlds can each have a
+Character named the same thing with a different password, which only
+works cleanly under per-world scoping. Also found only after
+discovering `grep` was silently treating `potato.tcl` as binary (a
+stray non-UTF8 byte; `-a` fixed it): the real dispatch order and timing
+in `sendLoginInfoSub` -- after a world's `loginDelay`, firstconnect
+(only if `numConnects == 1`, a persisted counter) -> connect -> the
+formatted Character login line -> login. And the real World Properties
+window's shape: a `ttk::panedwindow` with a category `treeview` on the
+left and a swappable canvas on the right (13 real sections in Potato;
+scoped to 5 here -- Basic/Characters/Connection/Auto-Sends/Notes -- the
+rest either duplicate MushTato's own theme/hotkey system or need real
+`engine/net` work out of scope this phase).
+
+Second checkpoint, informed by that research: data model (strict
+parity, approved), auto-send mechanism (reuse
+`SessionTab.bridge.send_line()` directly via `QTimer.singleShot`, no
+`engine/scripting` involvement since this is fixed saved text, not
+user-provided code to sandbox), UI shape (`WorldPropertiesDialog`, a
+`QListWidget` category list + `QStackedWidget` pages -- the direct Qt
+equivalent of Potato's real tree+canvas split -- reached via a new
+"Properties..." button on `AddressBookWindow`, additive to the existing
+quick `WorldEditDialog`), and storage (kept the existing single-list
+`address_book.json`/`address_book.py`, just extended `WorldProfile`'s
+shape -- Potato's own real on-disk shape, one `.wld` file per world
+under `~/.potato/worlds/`, checked for filenames/structure only, per
+Rick's explicit instruction never to read or reproduce actual saved-
+world content -- doesn't override the original Phase 6 reasoning that
+the address book is browsed as one list).
+
+Deliberate deviation from Potato, called out explicitly rather than
+silently copied: Potato's own `send_to` (used for autosends) routes
+through `process_input`, which also parses for Potato's own slash
+commands -- MushTato's autosends are sent as literal raw text via
+`_send_to_bridge(..., apply_aliases=False)` instead, *never* through
+`CommandTable`, for the same reason the secondary pose/says input box
+already bypasses command processing: a saved autosend line that happens
+to start with `/quit` must reach the server literally, not silently
+close the tab. Covered by a test
+(`test_autosend_lines_bypass_slash_command_processing`) using exactly
+that `/quit` scenario, not just asserted safe by design.
+
+Also a deliberate small implementation choice, not a design fork
+needing its own checkpoint: `login_format` uses named `{name}`/
+`{password}` placeholders (e.g. `connect {name} {password}`) rather
+than Potato's real positional `%s %s` -- clearer, and this is
+MushTato's own reimplementation rather than literal ported code. The
+masked-password echo (`●` repeated to the password's length) *is*
+lifted directly from Potato's own real behavior in `sendLoginInfoSub`,
+not invented.
+
+A real data-loss bug found while extending the model, not before
+shipping it: `WorldEditDialog` (the quick name/host/port/notes dialog)
+used to always build a brand new `WorldProfile` from just its 4 visible
+fields on save -- meaning using quick Edit on a world that already had
+Characters/auto-sends set up via the new Properties dialog would
+silently wipe all of it out. Fixed with `dataclasses.replace()` against
+the original profile so only the 4 shown fields actually change; a
+regression test
+(`test_editing_preserves_characters_and_autosends_not_shown_in_this_dialog`)
+proves the fix, not just describes the fix.
+
+Migration is genuinely additive, proven with a test that writes a
+real Phase-6-shape JSON file (no Phase 8b fields at all) and loads it
+under the extended model
+(`test_old_phase6_format_json_still_loads_with_new_fields_defaulted`) --
+not just a description of intended behavior. Full suite: 283 passing
+(120 engine + 163 GUI, up from 249 at the end of Phase 8).
+
+Manually validated end-to-end against the real local RhostMUSH
+(`127.0.0.1:4444`): added a "guest"/"guest" Character via the real
+Properties dialog UI, set it as default, set `look` (connect) and `who`
+(login) auto-sends, saved, then connected via the real Address-Book-
+driven path -- confirmed in the actual scrollback: the banner arrived,
+then the masked login line (`connect guest ●●●●●`, password never in
+plaintext), then `look`'s room description, then `who`'s player list,
+in exactly that order. Disconnect/Reconnect via the toolbar fired the
+same sequence again and `connect_count` persisted correctly across it
+(1 -> 2, confirmed by re-reading the actual saved JSON file, not just
+the in-memory object) -- screenshotted for the record (session window,
+and the Properties dialog's Characters and Auto-Sends pages).
+
+Still NOT wiring `engine/scripting` into the GUI -- same deferred
+decision as every phase since Phase 4b, called out again so it stays
+visible rather than quietly dropped.
+
+Next: Rick has his own phase document for what comes after Phase 8b --
 not yet assigned a phase number here.
 
 ## Standing rules: verification and assumptions
