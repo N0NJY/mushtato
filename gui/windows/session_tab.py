@@ -52,6 +52,8 @@ class SessionTab(QWidget):
         theme: Optional[str] = None,
         host_window=None,  # the MainWindow shell; None only in standalone tests
         world: Optional[WorldProfile] = None,  # Phase 8b: auto-sends/login need the saved profile
+        character: Optional[CharacterProfile] = None,  # explicit "Log In as" choice, overrides
+        # world.default_character for this one connection without changing it
     ) -> None:
         super().__init__()
         self.host = host
@@ -59,6 +61,7 @@ class SessionTab(QWidget):
         self.name = name or f"{host}:{port}"
         self.host_window = host_window
         self.world = world
+        self._explicit_character = character
         self._theme = theme if theme is not None else DEFAULT_THEME
         self.connected_at: Optional[QDateTime] = None
         self.connection_state = "Connecting"
@@ -191,7 +194,7 @@ class SessionTab(QWidget):
             self._send_autosend_block(self.world.autosend_firstconnect)
         if self.world.autosend_connect:
             self._send_autosend_block(self.world.autosend_connect)
-        character = self._resolve_default_character()
+        character = self._resolve_login_character()
         if character is not None:
             self._send_login_line(character)
         if self.world.autosend_login:
@@ -212,7 +215,13 @@ class SessionTab(QWidget):
             if line:
                 self._send_to_bridge(line, apply_aliases=False)
 
-    def _resolve_default_character(self) -> Optional[CharacterProfile]:
+    def _resolve_login_character(self) -> Optional[CharacterProfile]:
+        # An explicit "Log In as" choice from the address book always
+        # wins, for this one connection only -- it never touches
+        # world.default_character, which is why that field's own value
+        # is never mutated here.
+        if self._explicit_character is not None:
+            return self._explicit_character
         if self.world is None or not self.world.default_character:
             return None
         return next(

@@ -112,12 +112,13 @@ toolbar button.
 - **Add** -- create a new saved world (name, host, port, notes).
 - **Edit** -- quickly change a selected world's name/host/port/notes.
 - **Delete** -- remove a selected world from the list.
-- **Connect** -- open (or switch to) a tab for the selected world.
-  Double-clicking a world in the list does the same thing.
+- **Connect** -- open (or switch to) a tab for the selected world,
+  using its stored default Character (if any). Double-clicking a world
+  in the list does the same thing.
 - **Properties...** -- open the full World Properties window (below)
   for a selected world's deeper settings.
 
-If you connect to a world that's already open in a tab, MushTato
+If you Connect to a world that's already open in a tab, MushTato
 switches to that existing tab instead of opening a second connection
 to the same place.
 
@@ -125,6 +126,16 @@ to the same place.
 by name and connects to it (or switches to its tab if already open),
 from any tab's input line -- exactly the same underlying action as
 clicking Connect in the Address Book.
+
+**Logging in as a specific Character:** selecting a world also lists
+its saved Characters in a second list next to it. Pick one and click
+**Log In** to connect using that Character specifically -- this is a
+one-time choice for that connection only; it never changes the world's
+stored default Character. Unlike plain Connect, Log In always opens a
+**new** tab, even if that world already has one open elsewhere --
+logging in as a different Character is treated as a genuinely
+different session (e.g. running a main character and an alt on the
+same MUD at once), not a duplicate of an existing connection.
 
 ## World Properties
 

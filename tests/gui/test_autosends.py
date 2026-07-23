@@ -126,6 +126,25 @@ def test_no_default_character_skips_login_line_but_not_autosends(qapp, tmp_path:
     assert bridge.sent == ["look"]
 
 
+def test_explicit_character_overrides_the_world_s_default_without_changing_it(qapp, tmp_path: Path):
+    # Post-8b "Log In as" picker: an explicit character passed to
+    # open_tab() must win over world.default_character for that one
+    # connection, and must never mutate default_character itself.
+    thoran = CharacterProfile(name="Thoran", password="hunter2")
+    alt = CharacterProfile(name="Alt", password="altpw")
+    world = make_world(characters=[thoran, alt], default_character="Thoran")
+    host = MainWindow(address_book_storage_path=tmp_path / "ab.json")
+    bridge = FakeBridge()
+    tab = host.open_tab("example.com", 4201, bridge=bridge, world=world, character=alt)
+
+    bridge.connected.emit()
+    QTest.qWait(50)
+
+    assert bridge.sent == ["connect Alt altpw"]
+    assert world.default_character == "Thoran"  # unchanged
+    assert tab.world.default_character == "Thoran"
+
+
 def test_full_dispatch_order_matches_potato(qapp, tmp_path: Path):
     world = make_world(
         autosend_firstconnect="firstconnect-line",

@@ -96,3 +96,21 @@ def test_connecting_to_the_same_host_and_port_twice_switches_to_the_existing_tab
     assert same is tab
     assert host.tab_widget.count() == 2
     assert host.tab_widget.currentWidget() is tab
+
+
+def test_open_tab_with_an_explicit_character_bypasses_dedup_and_opens_a_second_tab(qapp, tmp_path):
+    # Post-8b: logging in as a different Character than an
+    # already-open tab is a genuinely different session server-side
+    # (e.g. main + alt at once), so it must NOT collapse into the
+    # existing tab the way a plain open_tab() call does.
+    from engine.storage import CharacterProfile
+
+    host = MainWindow(address_book_storage_path=tmp_path / "ab.json")
+    first = host.open_tab("a.example.com", 4000, bridge=FakeBridge())
+
+    second = host.open_tab(
+        "a.example.com", 4000, bridge=FakeBridge(), character=CharacterProfile(name="Alt")
+    )
+
+    assert second is not first
+    assert host.tab_widget.count() == 2

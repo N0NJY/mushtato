@@ -29,6 +29,7 @@ from PySide6.QtWidgets import (
 from engine.storage import (
     DEFAULT_HOTKEYS,
     DEFAULT_THEME,
+    CharacterProfile,
     Settings,
     WorldProfile,
     address_book_path,
@@ -91,6 +92,7 @@ class MainWindow(QMainWindow):
         name: Optional[str] = None,
         bridge: Optional[TelnetBridge] = None,
         world: Optional[WorldProfile] = None,
+        character: Optional[CharacterProfile] = None,
     ) -> SessionTab:
         """Open a new connection tab, or switch to an existing one for
         the same host:port rather than opening a duplicate.
@@ -98,15 +100,31 @@ class MainWindow(QMainWindow):
         ``world`` (Phase 8b), when given, is the full saved profile --
         SessionTab needs it for auto-sends/character login, not just
         the host/port/name a direct-connect (no address book) tab has.
+
+        ``character``, when given, is an explicit "Log In as" choice
+        from the address book's character picker -- unlike a plain
+        Connect, this deliberately skips the existing-tab dedup check
+        below and always opens a new tab, since logging in as a
+        different character than one already connected is a genuinely
+        different session server-side (e.g. running a main + an alt at
+        once), not a duplicate of the same connection.
         """
-        for index in range(self.tab_widget.count()):
-            existing = self.tab_widget.widget(index)
-            if existing.host == host and existing.port == port:
-                self.tab_widget.setCurrentIndex(index)
-                return existing
+        if character is None:
+            for index in range(self.tab_widget.count()):
+                existing = self.tab_widget.widget(index)
+                if existing.host == host and existing.port == port:
+                    self.tab_widget.setCurrentIndex(index)
+                    return existing
 
         tab = SessionTab(
-            host, port, name=name, bridge=bridge, theme=self._theme, host_window=self, world=world
+            host,
+            port,
+            name=name,
+            bridge=bridge,
+            theme=self._theme,
+            host_window=self,
+            world=world,
+            character=character,
         )
         tab.connectionStateChanged.connect(lambda state, t=tab: self._on_tab_state_changed(t, state))
         index = self.tab_widget.addTab(tab, tab.name)

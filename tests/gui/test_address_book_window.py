@@ -21,8 +21,8 @@ class FakeHostWindow:
         self._hotkeys = hotkeys if hotkeys is not None else dict(DEFAULT_HOTKEYS)
         self.open_tab_calls = []
 
-    def open_tab(self, host, port, *, name=None, bridge=None, world=None):
-        self.open_tab_calls.append((host, port, name, world))
+    def open_tab(self, host, port, *, name=None, bridge=None, world=None, character=None):
+        self.open_tab_calls.append((host, port, name, world, character))
         return (host, port, name)
 
 
@@ -97,7 +97,7 @@ def test_connect_asks_the_host_to_open_a_tab(qapp, tmp_path: Path):
     window.list_widget.setCurrentRow(0)
     window._connect_selected()
 
-    assert host.open_tab_calls == [("silvren.com", 4444, "Estrellita", worlds[0])]
+    assert host.open_tab_calls == [("silvren.com", 4444, "Estrellita", worlds[0], None)]
 
 
 def test_connecting_to_two_worlds_asks_the_host_twice(qapp, tmp_path: Path):
@@ -112,8 +112,8 @@ def test_connecting_to_two_worlds_asks_the_host_twice(qapp, tmp_path: Path):
     window.connect_to(worlds[1])
 
     assert host.open_tab_calls == [
-        ("a.example.com", 1, "World A", worlds[0]),
-        ("b.example.com", 2, "World B", worlds[1]),
+        ("a.example.com", 1, "World A", worlds[0], None),
+        ("b.example.com", 2, "World B", worlds[1], None),
     ]
 
 
@@ -178,3 +178,94 @@ def test_buttons_disable_again_after_deleting_the_last_world(qapp, tmp_path: Pat
 
     assert window.edit_button.isEnabled() is False
     assert window.properties_button.isEnabled() is False
+
+
+# -- Character picker + Log In (post-8b addition) ------------------------
+
+
+def test_selecting_a_world_populates_its_character_list(qapp, tmp_path: Path):
+    from engine.storage import CharacterProfile
+
+    worlds = [
+        WorldProfile(
+            name="Estrellita",
+            host="silvren.com",
+            port=4444,
+            characters=[CharacterProfile(name="Thoran"), CharacterProfile(name="Guest1")],
+        )
+    ]
+    window = make_address_book(tmp_path, worlds)
+
+    window.list_widget.setCurrentRow(0)
+
+    names = [window.character_list.item(i).text() for i in range(window.character_list.count())]
+    assert names == ["Thoran", "Guest1"]
+
+
+def test_character_list_clears_for_a_world_with_no_characters(qapp, tmp_path: Path):
+    from engine.storage import CharacterProfile
+
+    worlds = [
+        WorldProfile(
+            name="Has Chars", host="a.example.com", port=1,
+            characters=[CharacterProfile(name="Thoran")],
+        ),
+        WorldProfile(name="No Chars", host="b.example.com", port=2),
+    ]
+    window = make_address_book(tmp_path, worlds)
+
+    window.list_widget.setCurrentRow(0)
+    assert window.character_list.count() == 1
+    window.list_widget.setCurrentRow(1)
+    assert window.character_list.count() == 0
+
+
+def test_login_button_disabled_until_a_character_is_selected(qapp, tmp_path: Path):
+    from engine.storage import CharacterProfile
+
+    worlds = [
+        WorldProfile(
+            name="Estrellita", host="silvren.com", port=4444,
+            characters=[CharacterProfile(name="Thoran")],
+        )
+    ]
+    window = make_address_book(tmp_path, worlds)
+
+    assert window.login_button.isEnabled() is False
+    window.list_widget.setCurrentRow(0)
+    assert window.login_button.isEnabled() is False  # world selected, no character yet
+    window.character_list.setCurrentRow(0)
+    assert window.login_button.isEnabled() is True
+
+
+def test_log_in_as_selected_character_calls_open_tab_with_that_character(qapp, tmp_path: Path):
+    from engine.storage import CharacterProfile
+
+    thoran = CharacterProfile(name="Thoran", password="hunter2")
+    worlds = [
+        WorldProfile(
+            name="Estrellita", host="silvren.com", port=4444,
+            characters=[thoran, CharacterProfile(name="Guest1")],
+        )
+    ]
+    host = FakeHostWindow()
+    window = make_address_book(tmp_path, worlds, host_window=host)
+
+    window.list_widget.setCurrentRow(0)
+    window.character_list.setCurrentRow(0)
+    window._log_in_as_selected_character()
+
+    assert host.open_tab_calls == [("silvren.com", 4444, "Estrellita", worlds[0], thoran)]
+
+
+def test_log_in_as_public_method_does_not_require_list_selection_state(qapp, tmp_path: Path):
+    from engine.storage import CharacterProfile
+
+    world = WorldProfile(name="X", host="h", port=1)
+    character = CharacterProfile(name="Alt", password="")
+    host = FakeHostWindow()
+    window = make_address_book(tmp_path, [world], host_window=host)
+
+    window.log_in_as(world, character)
+
+    assert host.open_tab_calls == [("h", 1, "X", world, character)]

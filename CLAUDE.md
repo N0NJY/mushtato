@@ -1138,6 +1138,58 @@ Character (zero manually-typed Auto-Sends text) still sent the masked
 `connect guest ●●●●●` login line automatically. 289 tests passing (120
 engine + 169 GUI, up from 283).
 
+**Post-8b addition: a Character picker in the Address Book.** Rick
+asked for a way to pick a saved Character (from a world's list) and log
+in as that one specifically, right from the Address Book, rather than
+only via the single `default_character` set on the Properties Basic
+page. Checked Potato's own real source first (`~/git/potato/potato.vfs`)
+rather than assuming: its Manage Worlds window's "Char" column and
+Connect button only ever read `charDefault` -- no right-click/double-
+click character-choice binding exists anywhere, and `newConnection`'s
+optional `character` argument is only ever called with a real value
+from `newConnectionDefault`. So this is confirmed as a genuine MushTato
+addition beyond Potato, not a parity port, called out as such rather
+than presented as more "authentic" than it is.
+
+Three real forks, checkpointed rather than picked silently: (1) picking
+a Character here is **one-time only** -- it never overwrites the
+world's stored `default_character`, avoiding a surprising side effect
+from what's meant to be a quick action; (2) Log In **always opens a new
+tab**, even if that world's host:port already has one open elsewhere --
+`MainWindow.open_tab()` now skips its existing-tab dedup check whenever
+an explicit `character` argument is given, since logging in as a
+different Character is a genuinely different session server-side (e.g.
+a main character and an alt on the same MUD at once), not a duplicate
+of an existing connection; plain Connect keeps the original dedup
+behavior unchanged; (3) a second `QListWidget` (not a dropdown) next to
+the world list, for visibility/consistency with how Characters are
+already shown in Properties.
+
+Mechanically: `SessionTab` gained an `_explicit_character` (renamed
+`_resolve_default_character` to `_resolve_login_character`, which now
+checks the explicit choice first and only falls back to
+`world.default_character` when none was given); `MainWindow.open_tab()`
+and `AddressBookWindow` both thread an optional `character` parameter
+through to it, reusing the exact same `open_tab()` -> `SessionTab` ->
+auto-send/login-dispatch path Connect already uses -- Log In is not a
+parallel implementation, just a different set of arguments into the
+same machinery. `AddressBookWindow.log_in_as(world, character)` is a
+public method for this, separate from the private
+`_log_in_as_selected_character()` that reads the two list widgets'
+current selections. Updated `gui/help/topics.py`'s Address Book section
+to document the picker and its one-time/new-tab semantics.
+
+Manually verified end-to-end against the real local RhostMUSH with two
+saved Characters (GuestA default, GuestB not): Log In button correctly
+stayed disabled until a Character was actually picked; logging in as
+GuestB (not the default) sent `connect GuestB ●●●●●`; logging in as
+GuestA afterward opened a genuine second tab (`tab1 is tab2` false, tab
+count 2) rather than reusing the first; a subsequent plain Connect
+still correctly reused/deduped against an existing tab; and
+`default_character` was confirmed unchanged (`GuestA`) in the actual
+saved JSON after all of this -- screenshotted for the record. 296 tests
+passing (120 engine + 176 GUI, up from 289).
+
 Next: Rick has his own phase document for what comes after Phase 8b --
 not yet assigned a phase number here.
 
