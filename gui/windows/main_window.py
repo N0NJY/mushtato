@@ -10,7 +10,7 @@ from __future__ import annotations
 from importlib.metadata import PackageNotFoundError, version as _pkg_version
 from typing import Dict, List, Optional
 
-from PySide6.QtCore import QDateTime, Signal, QTimer
+from PySide6.QtCore import QDateTime, Qt, Signal, QTimer
 from PySide6.QtGui import (
     QAction,
     QActionGroup,
@@ -24,6 +24,8 @@ from PySide6.QtWidgets import (
     QLabel,
     QMainWindow,
     QMessageBox,
+    QSizePolicy,
+    QSplitter,
     QTextEdit,
     QToolBar,
     QVBoxLayout,
@@ -40,7 +42,7 @@ from engine.storage import (
     settings_path,
 )
 
-from ..theme import apply_theme, scrollback_palette
+from ..theme import apply_scrollback_theme, apply_theme
 from .history_line_edit import HistoryLineEdit
 from .spawn_window import SpawnWindow
 from .styled_text_qt import append_styled_segments
@@ -123,16 +125,38 @@ class MainWindow(QMainWindow):
         self.input_line = HistoryLineEdit(self)
         self.input_line.setPlaceholderText("Command...")
         self.input_line.returnPressed.connect(self._on_primary_send)
+        # A plain QLineEdit's default vertical size policy is Fixed, so
+        # it would ignore any extra space a splitter hands it -- switch
+        # to Expanding so dragging the splitter below actually resizes
+        # the visible box, not just the invisible layout space around it.
+        self.input_line.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Expanding)
 
         self.secondary_input = HistoryLineEdit(self)
         self.secondary_input.setPlaceholderText("Pose/says...")
         self.secondary_input.returnPressed.connect(self._on_secondary_send)
+        self.secondary_input.setSizePolicy(
+            QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Expanding
+        )
+
+        input_container = QWidget(self)
+        input_layout = QVBoxLayout(input_container)
+        input_layout.setContentsMargins(0, 0, 0, 0)
+        input_layout.addWidget(self.input_line)
+        input_layout.addWidget(self.secondary_input)
+
+        # A vertical splitter between scrollback and the input boxes --
+        # Rick asked to be able to resize the command input area, which
+        # a fixed QVBoxLayout ratio can't do; dragging the splitter
+        # handle reallocates space between the two.
+        self.splitter = QSplitter(Qt.Orientation.Vertical, self)
+        self.splitter.addWidget(self.scrollback)
+        self.splitter.addWidget(input_container)
+        self.splitter.setStretchFactor(0, 5)
+        self.splitter.setStretchFactor(1, 1)
 
         central = QWidget(self)
         layout = QVBoxLayout(central)
-        layout.addWidget(self.scrollback)
-        layout.addWidget(self.input_line)
-        layout.addWidget(self.secondary_input)
+        layout.addWidget(self.splitter)
         self.setCentralWidget(central)
 
         self._apply_hotkeys()
@@ -141,17 +165,12 @@ class MainWindow(QMainWindow):
         self._register_commands()
         self._build_chrome()
 
-        # Applied after _build_chrome(), not right after the scrollback
-        # is constructed -- Rick found on a real desktop that adding the
-        # menu bar/toolbar/status bar left the address book and spawned
-        # log windows (both plain QMainWindows with no toolbar) correctly
-        # themed, but MainWindow's own scrollback stayed on default
-        # colors. QMainWindow's toolbar/dock-area layout machinery
-        # appears to re-polish the central widget subtree once a toolbar
-        # is added, which can discard an explicit palette override set
-        # beforehand -- setting it after chrome construction instead
-        # means nothing later in __init__ can still reset it.
-        self.scrollback.setPalette(scrollback_palette(self._theme, self.palette()))
+        # Applied after _build_chrome(), and via both the widget and
+        # its viewport (see apply_scrollback_theme's docstring -- real
+        # pixel-sampling on a real desktop found the viewport itself
+        # staying white regardless of what was set on the QTextEdit).
+        # Also reapplied in showEvent() below as a second guard.
+        apply_scrollback_theme(self.scrollback, self._theme)
 
         # Dependency-injectable so tests can supply a fake bridge that
         # never touches the network (see tests/gui) -- the real
@@ -164,6 +183,15 @@ class MainWindow(QMainWindow):
 
         self._append_plain(f"Connecting to {host}:{port} ...\n")
         self.bridge.start()
+
+    def showEvent(self, event) -> None:  # noqa: N802 -- Qt override signature
+        # Second guard, on top of the __init__-time call: some real
+        # desktops' style/theme integration re-applies its own palette
+        # to a widget's viewport around show time, so this re-asserts
+        # the scrollback's theme every time the window becomes visible,
+        # not just once at construction.
+        super().showEvent(event)
+        apply_scrollback_theme(self.scrollback, self._theme)
 
     def _append_plain(self, text: str) -> None:
         cursor = QTextCursor(self.scrollback.document())

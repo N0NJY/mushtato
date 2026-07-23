@@ -65,6 +65,24 @@ def test_history_line_edit_recalls_previous_entries():
     assert edit.text() == ""
 
 
+def test_scrollback_and_input_area_are_resizable_via_a_splitter(qapp):
+    window = MainWindow("example.com", 4201, bridge=FakeBridge())
+    window.show()
+    window.resize(800, 600)
+
+    assert window.splitter.count() == 2
+    assert window.splitter.widget(0) is window.scrollback
+    # input_line/secondary_input live in a container that's the
+    # splitter's second pane, not added to it directly.
+    input_container = window.splitter.widget(1)
+    assert window.input_line in input_container.findChildren(type(window.input_line))
+    assert window.secondary_input in input_container.findChildren(type(window.secondary_input))
+
+    original_sizes = window.splitter.sizes()
+    window.splitter.setSizes([50, 400])
+    assert window.splitter.sizes() != original_sizes
+
+
 def test_primary_and_secondary_history_are_independent(qapp):
     window = MainWindow("example.com", 4201, bridge=FakeBridge())
 

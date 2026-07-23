@@ -126,3 +126,24 @@ def scrollback_palette(theme: str, base_palette: QPalette) -> QPalette:
         palette.setColor(QPalette.ColorRole.Base, QColor(LIGHT_SCROLLBACK_BASE))
         palette.setColor(QPalette.ColorRole.Text, QColor(LIGHT_SCROLLBACK_TEXT))
     return palette
+
+
+def apply_scrollback_theme(text_edit, theme: str) -> None:
+    """Apply the scrollback palette to a QTextEdit *and its viewport*.
+
+    Found via real-desktop pixel sampling (not assumed): a QTextEdit is
+    a QAbstractScrollArea, and its visible background is actually
+    painted by a separate child widget, ``viewport()`` -- calling
+    ``.setPalette()`` on the QTextEdit itself was leaving the viewport
+    on its default (white) background regardless of theme, even though
+    the palette *object* returned by ``scrollback_palette()`` was
+    correct. Setting the palette (and forcing ``autoFillBackground``)
+    on both the widget and its viewport is the standard fix for this
+    well-known Qt gotcha. Call this instead of ``text_edit.setPalette``
+    directly for any scrollback pane.
+    """
+    palette = scrollback_palette(theme, text_edit.palette())
+    text_edit.setPalette(palette)
+    text_edit.setAutoFillBackground(True)
+    text_edit.viewport().setPalette(palette)
+    text_edit.viewport().setAutoFillBackground(True)

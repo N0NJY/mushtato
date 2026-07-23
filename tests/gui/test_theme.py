@@ -7,11 +7,13 @@ from gui.theme import (
     DARK_SCROLLBACK_TEXT,
     LIGHT_SCROLLBACK_BASE,
     LIGHT_SCROLLBACK_TEXT,
+    apply_scrollback_theme,
     apply_theme,
     build_app_palette,
     scrollback_palette,
 )
 from PySide6.QtGui import QColor, QPalette
+from PySide6.QtWidgets import QTextEdit
 
 
 def test_dark_app_palette_uses_potato_input_colors(qapp):
@@ -67,3 +69,18 @@ def test_apply_theme_sets_the_palette_after_the_style_change(qapp):
     # would be immediately overwritten.
     apply_theme(qapp, "dark")
     assert qapp.palette().color(QPalette.ColorRole.Base) == QColor(DARK_INPUT_BASE)
+
+
+def test_apply_scrollback_theme_sets_the_viewport_palette_too(qapp):
+    # The real bug (found via pixel-sampling a real screenshot, not
+    # assumed): QTextEdit's visible background is painted by its
+    # separate viewport() child widget, which does not reliably pick up
+    # a palette set only on the QTextEdit itself.
+    text_edit = QTextEdit()
+    apply_scrollback_theme(text_edit, "dark")
+
+    assert text_edit.viewport().palette().color(QPalette.ColorRole.Base) == QColor(
+        DARK_SCROLLBACK_BASE
+    )
+    assert text_edit.viewport().autoFillBackground() is True
+    assert text_edit.autoFillBackground() is True

@@ -667,4 +667,49 @@ can't reproduce the real-desktop symptom), so this is a
 best-reasoned-from-the-evidence fix, not a confirmed root cause --
 Rick will re-verify against another fresh build.
 
+**Post-7d fix #3: the real root cause, found by pixel-sampling, not
+eyeballing.** Rick sent two more screenshots after fix #2 and reported
+the scrollback still wasn't dark. A first visual read of the
+screenshots looked correctly dark -- wrong; sampling actual pixel RGB
+values with PIL (`im.getpixel(...)`) at multiple empty-scrollback
+coordinates showed pure white (`255,255,255`) throughout the scrollback
+viewport, while the input box sampled genuinely black (`0,0,0`) --
+Rick's report was correct and the earlier "looks dark to me" read was
+not a substitute for actually checking. Real root cause: `QTextEdit` is
+a `QAbstractScrollArea`, and its visible background is painted by a
+separate child widget, `viewport()` -- calling `.setPalette()` on the
+`QTextEdit` itself doesn't reliably propagate to the viewport on every
+platform/style combination, so fixes #1 and #2 (style + ordering) never
+addressed the actual cause. Fixed with a new
+`gui/theme.apply_scrollback_theme(text_edit, theme)` helper that sets
+the palette AND `autoFillBackground(True)` on **both** the widget and
+`.viewport()` -- used by `MainWindow` and `SpawnWindow` alike (both had
+the same latent bug; `SpawnWindow` happening to look fine in Rick's
+first test was inconclusive, not evidence it was actually correct).
+Also added a `showEvent()` override on both windows that reapplies the
+same theme every time the window becomes visible, as a second guard
+against whatever real-desktop style/theme integration might reset a
+widget's palette around show time. This time verified with actual pixel
+sampling in this sandbox too (not just re-asserting the same
+screenshot-eyeballing that was wrong last time): background samples at
+multiple empty-scrollback coordinates in a fresh local-RhostMUSH smoke
+test came back pure `(0, 0, 0)` in both `MainWindow` and a spawned
+`SpawnWindow`. Real-desktop confirmation is still Rick's to do, per the
+same pattern as fixes #1/#2, but this round's own verification step was
+substantively stronger than before.
+
+**Resizable input area, added alongside the fix #3 work.** Rick also
+asked to be able to resize the command input box. `HistoryLineEdit` is
+a plain `QLineEdit`, whose default vertical size policy is `Fixed` --
+a `QVBoxLayout` alone can't give the user any control over the split
+between scrollback and input. `MainWindow` now wraps `input_line` +
+`secondary_input` in a container widget and puts that container and
+`scrollback` into a `QSplitter` (`self.splitter`, vertical orientation,
+5:1 stretch favoring the scrollback initially) -- both line edits' size
+policies were switched to `Expanding` so dragging the splitter handle
+actually changes their visible height, not just invisible layout
+padding around a fixed-size box. `input_line`/`secondary_input` remain
+the same objects at the same attribute names, so no existing test or
+GUI-wiring code needed to change.
+
 Next: Phase 8, documentation.
