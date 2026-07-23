@@ -107,8 +107,9 @@ class MainWindow(QMainWindow):
         # Output pane gets its own dimmer Base/Text than the rest of the
         # app's palette (matching Potato's own real distinction between
         # its brighter input box and dimmer output pane) -- see
-        # gui/theme.py.
-        self.scrollback.setPalette(scrollback_palette(self._theme, self.palette()))
+        # gui/theme.py. The actual setPalette() call is deferred to
+        # after _build_chrome() below, not done here -- see that call
+        # site for why.
 
         # Dual input (Phase 6): two independent boxes, both sending to
         # this same connection, each with its own recall history.
@@ -139,6 +140,18 @@ class MainWindow(QMainWindow):
         self._commands = CommandTable()
         self._register_commands()
         self._build_chrome()
+
+        # Applied after _build_chrome(), not right after the scrollback
+        # is constructed -- Rick found on a real desktop that adding the
+        # menu bar/toolbar/status bar left the address book and spawned
+        # log windows (both plain QMainWindows with no toolbar) correctly
+        # themed, but MainWindow's own scrollback stayed on default
+        # colors. QMainWindow's toolbar/dock-area layout machinery
+        # appears to re-polish the central widget subtree once a toolbar
+        # is added, which can discard an explicit palette override set
+        # beforehand -- setting it after chrome construction instead
+        # means nothing later in __init__ can still reset it.
+        self.scrollback.setPalette(scrollback_palette(self._theme, self.palette()))
 
         # Dependency-injectable so tests can supply a fake bridge that
         # never touches the network (see tests/gui) -- the real

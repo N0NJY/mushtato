@@ -647,4 +647,24 @@ the code takes the documented order-dependent path -- Rick will
 re-verify this against a fresh download, same as any other
 can't-verify-headless GUI change in this project.
 
+**Post-7d fix #2: the Fusion fix alone wasn't enough for MainWindow's
+own scrollback.** Rick re-tested the fresh build with fix #1 above and
+reported real progress but a narrower remaining gap: the address book
+window and a spawned log window both themed correctly, but MainWindow's
+own scrollback (the actual session/"terminal" pane) still didn't. The
+one structural difference between those two working windows and the
+non-working one: `AddressBookWindow`/`SpawnWindow` are plain
+`QMainWindow`s with no toolbar, while `MainWindow` (as of Phase 7d) has
+a menu bar, toolbar, and status bar. `MainWindow.scrollback`'s palette
+override was being set early in `__init__`, before `_build_chrome()`
+added that chrome -- moved to run immediately after `_build_chrome()`
+instead, on the theory that QMainWindow's toolbar/dock-area layout
+machinery re-polishes the central widget subtree once a toolbar is
+added, which can discard an explicit palette override set beforehand.
+Same honesty caveat as fix #1: this can't be proven in the offscreen
+headless sandbox (a new regression test only guards the ordering, it
+can't reproduce the real-desktop symptom), so this is a
+best-reasoned-from-the-evidence fix, not a confirmed root cause --
+Rick will re-verify against another fresh build.
+
 Next: Phase 8, documentation.

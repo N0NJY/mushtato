@@ -6,7 +6,9 @@ need a live server.
 """
 
 from PySide6.QtCore import QObject, Signal
+from PySide6.QtGui import QColor, QPalette
 
+from gui.theme import DARK_SCROLLBACK_BASE, DARK_SCROLLBACK_TEXT
 from gui.windows.main_window import MainWindow
 
 
@@ -95,3 +97,17 @@ def test_close_event_stops_the_bridge(qapp):
     window = MainWindow("example.com", 4201, bridge=bridge)
     window.close()
     assert bridge.stopped is True
+
+
+def test_scrollback_palette_still_matches_theme_after_chrome_is_built(qapp):
+    # Regression guard: the scrollback's palette override is applied
+    # after _build_chrome() specifically because building the menu
+    # bar/toolbar/status bar was found (on a real desktop) to reset an
+    # earlier override -- see main_window.py's __init__ comment. This
+    # doesn't reproduce that real-desktop bug (this suite runs on the
+    # offscreen QPA platform), but it does guard against a future edit
+    # re-introducing the wrong ordering.
+    window = MainWindow("example.com", 4201, bridge=FakeBridge(), theme="dark")
+    palette = window.scrollback.palette()
+    assert palette.color(QPalette.ColorRole.Base) == QColor(DARK_SCROLLBACK_BASE)
+    assert palette.color(QPalette.ColorRole.Text) == QColor(DARK_SCROLLBACK_TEXT)
