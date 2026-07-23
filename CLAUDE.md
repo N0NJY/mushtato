@@ -96,7 +96,8 @@ CI packaging) — done, see below. Phase 7b (theme support, first-run
 settings dialog) — done, see below. Phase 7c (built-in client command
 system) — done, see below. Phase 7d (menu bar, toolbar, status bar
 chrome) — done, see below. Phase 7e (tabbed session host window) —
-done, see below.** Telnet IAC negotiation is
+done, see below. Phase 8 (documentation & onboarding) — done, see
+below.** Telnet IAC negotiation is
 hand-rolled on raw asyncio streams (not telnetlib3)
 — see the Phase 3 discussion for reasoning. `scripts/console_client.py`
 is a throwaway dev tool for manually testing against a real server
@@ -831,7 +832,171 @@ Still NOT wiring `engine/scripting` into the GUI -- same deferred
 decision as every phase since Phase 4b, called out again so it stays
 visible rather than quietly dropped.
 
-Next: Phase 8, documentation.
+**Phase 8 (documentation & onboarding) — done.** New `gui/help/`
+package (`topics.py`, `markdown_tools.py`, `help_window.py`), new
+`INSTALL.md`/`TROUBLESHOOTING.md`/`CREDITS.md`/`CHANGELOG.md`, small
+additions to `engine/commands.py` and `gui/windows/session_tab.py`/
+`main_window.py`.
+
+Two checkpoints before code, per this file's own standing rules (added
+partway through this same session, immediately put to use). First
+checkpoint: content architecture. Resolved: (1) current reality only --
+Rick's own prompt said "multi-window sessions," caught and corrected to
+document Phase 7e's actual tabbed model instead of stale wording, per
+his confirmation; (2) a new Menus & Toolbar topic added beyond the
+original list, since a novice clicking a disabled placeholder button
+(Editor/Upload/Mail Window/Find) and getting nothing is exactly the
+confusion this phase exists to prevent; (3) one scrolling `QTextBrowser`
+document with a linked table of contents, not a ~10-tab `QTabWidget` or
+a sidebar-list split -- ties back to Phase 7c's own TinyFugue research
+(`src/help.c`: an indexed text file read top-to-bottom with jump
+targets), and scales better as sections are added later than more tabs
+would; (4) static content as Markdown-formatted **Python string
+constants** in `gui/help/topics.py`, not loose `.md` files -- deliberately
+avoiding a second "works locally, breaks in the real packaged build" gap
+(`packaging/mushtato.spec`'s `datas=[]` is empty; bundling loose files
+would need real spec changes plus frozen-vs-source path resolution,
+unverifiable without an actual PyInstaller build, exactly the shape of
+the libxcb-cursor0 and theme-palette bugs already hit this session) --
+a `.py` module needs none of that, it's bundled automatically via the
+normal import graph. The command list and hotkey list are generated
+from live data (`COMMAND_HELP`, `HelpContext`), not hand-copied, for the
+same reason the Phase 7c `/help` placeholder already generated its text
+live.
+
+Second checkpoint, after Rick added a new requirement mid-review (every
+Help feature must also be reachable from the command line): resolved
+into `/help` (bare, opens the window and prints a short pointer),
+`/help topics` (a reserved keyword listing topic slugs, Rick's own
+explicit ask), `/help <topic-slug>` (prints that topic's content to the
+scrollback), and `/help <command-name>` (unchanged -- still prints that
+command's one-line help). Topic slugs were chosen up front to never
+collide with real command names (`themes` vs. `theme`, `commands` vs.
+no command literally named that) -- confirmed with a test
+(`test_topic_slugs_never_collide_with_command_names`), not just asserted
+by construction. Markdown syntax is lightly stripped
+(`gui/help/markdown_tools.strip_markdown`) before printing a topic to
+the scrollback -- a small regex pass (header/emphasis markers only,
+list bullets left alone), not a full Markdown-to-text engine, agreed as
+the right amount of polish for this feature.
+
+Single source of truth, enforced structurally, not just by convention:
+`gui/help/topics.py`'s `COMMAND_HELP` list is what
+`SessionTab._register_commands()` actually iterates to register every
+command (refactored from eight explicit `.register()` calls into one
+data-driven loop) -- the registered set and the documented set cannot
+diverge, and a test (`test_command_help_matches_what_session_tab_actually_registers`)
+checks this against a real, live `CommandTable`, not just re-asserting
+the same list back at itself. `/help` itself is re-registered by
+`SessionTab` (overriding `engine/commands.py`'s auto-registered default),
+the same established pattern `/connect`/`/settings`/`/theme` already use
+to reach the host shell without the engine layer ever importing Qt
+(rule 2) -- confirmed before writing any code that this was the right
+reuse, not a one-off.
+
+`MainWindow._show_help()` (the Phase 7c placeholder: required an active
+tab, showed a `QMessageBox`) is gone, replaced by `MainWindow.show_help()`
+-- the real Help window is static app documentation and must be reachable
+with zero tabs open, which the placeholder's design couldn't do. The
+Help window is a lazily-constructed singleton satellite (same pattern
+as `AddressBookWindow`), but its content is rebuilt on every open
+(`HelpWindow.refresh()`) rather than left stale, since hotkeys/theme can
+change between opens and there's now exactly one long-lived instance to
+go stale.
+
+**A real Markdown-rendering bug, found by actually rendering the
+content, not by reading the source and assuming it was fine:** command
+help text originally used angle-bracket placeholders (`/connect <name>`,
+`/theme <dark|light>`), matching how the rest of the app's plain-text
+usage strings already looked. Rendering the assembled "Built-in
+Commands" topic through `QTextBrowser.setMarkdown()` silently corrupted
+everything after the first `<...>` -- Qt's Markdown parser treats
+`<name>` as an (invalid) inline HTML tag and swallows subsequent content
+trying to resolve it. Confirmed by isolating the exact rendered output,
+not guessed at from the visual glitch alone. Fixed by switching every
+placeholder to square brackets (`/connect [name]`, `/theme [dark|light]`)
+project-wide, in both the Markdown content and the plain-text command
+usage strings, for one consistent convention -- with a regression test
+(`test_markdown_rendering_does_not_swallow_content_after_a_placeholder`)
+that renders the real content through the real widget and checks every
+command's description survived, not just that the source text looks
+right.
+
+A second, smaller real rendering bug from the same "verify by actually
+rendering it" pass: consecutive `cursor.insertMarkdown()` calls (TOC,
+then each section) left the cursor "inside" the prior bullet list's
+context, so the next section's `# Heading` got absorbed as plain text
+into the previous list item instead of starting a real heading block --
+visible as sections running into each other with no line break. Fixed
+by inserting a freshly-reset `QTextBlockFormat()` block before each
+section. Table-of-contents navigation itself was verified empirically
+rather than assumed to "just work" from Markdown: Qt's `setMarkdown()`
+does not generate `id`/`name` anchors on headings (confirmed by
+inspecting the actual generated HTML), so `QTextBrowser.scrollToAnchor()`
+would silently do nothing -- navigation instead tracks each section's
+starting `QTextCursor` position during assembly and jumps there
+directly on `anchorClicked` (with `setOpenLinks(False)` so Qt doesn't try
+to resolve the anchor itself), which depends only on documented,
+guaranteed `QTextCursor` behavior.
+
+The Help window's content pane reuses the same "set the palette on both
+the widget and its `viewport()`" fix already found for the scrollback
+(`gui/theme.py`, generalized this phase into
+`apply_widget_and_viewport_palette()`, with `apply_scrollback_theme()`
+now a thin wrapper over it) -- `QTextBrowser` is a `QTextEdit` subclass
+and was flagged as a likely carrier of the identical bug before it was
+ever reported, then actually confirmed via the same pixel-sampling
+discipline used for the scrollback fix, not assumed safe by similarity.
+Uses the window's own inherited app-wide palette, not the scrollback's
+dimmed output-pane colors -- a reference document isn't MUD output and
+has no reason to use Potato's dimmer text.
+
+A real, verified documentation-accuracy fix surfaced while writing
+`INSTALL.md`'s uninstall section: `engine/storage/paths.py`'s own
+comment claimed `~/.config` on Linux and `%APPDATA%` on Windows --
+checking `platformdirs`' actual source (not the comment) found both
+wrong. `user_data_dir` (not `user_config_dir`, a different function this
+project doesn't call) resolves to `~/.local/share/MushTato` on Linux
+(`$XDG_DATA_HOME`) and `%LOCALAPPDATA%\MushTato` on Windows (Local, not
+Roaming) -- macOS's `~/Library/Application Support/MushTato` was already
+correct. Fixed the stale comment in the same pass rather than
+documenting the wrong path in `INSTALL.md` to match it.
+
+`TROUBLESHOOTING.md` and the in-app FAQ/Troubleshooting topic are the
+same content in two places, per the scope's own "a matching in-app FAQ
+section" requirement -- not the single-source-of-truth-in-Python
+approach used for the command list, since this content doesn't need to
+stay mechanically in sync with live app state the way command
+registrations do; both copies just need a human to keep them aligned on
+future edits, same as `CREDITS.md`.
+
+Testing, explicit about verification level per this file's own standing
+rules: the Help *mechanism* is unit-tested headlessly (topic resolution,
+command/topic namespace non-collision, Markdown stripping, TOC
+navigation actually moving the cursor, the command-list single-source-
+of-truth claim checked against a live `CommandTable`) -- 135 GUI tests
+passing (up from 135... from 133 pre-Phase-8, +14 new). Content
+*accuracy* was explicitly out of scope for testing (Rick's own call in
+the original ask) -- reviewed by rendering it for real and reading it,
+not asserted correct by a test. Full suite: 249 passing (114 engine +
+135 GUI, up from 224 total at the end of Phase 7e). Manually verified end-to-end against
+the real local RhostMUSH: opened the Help window from the menu and via
+`/help`, clicked through TOC navigation to a far section, ran
+`/help topics`, `/help hotkeys`, `/help theme`, and `/help bogus` from a
+live tab and confirmed each printed the right thing to the real
+scrollback -- screenshotted for the record, including the specific
+before/after screenshots that caught the two rendering bugs above (a
+visual read alone caught the block-separation bug; the angle-bracket
+corruption needed isolating the actual rendered text to catch at all,
+since the visual glitch by itself didn't point at the cause).
+
+Still NOT wiring `engine/scripting` into the GUI -- same deferred
+decision as every phase since Phase 4b, called out again so it stays
+visible rather than quietly dropped, and now has its own in-app Help
+topic saying exactly that.
+
+Next: Rick has his own phase document for what comes after Phase 8 --
+not yet assigned a phase number here.
 
 ## Standing rules: verification and assumptions
 

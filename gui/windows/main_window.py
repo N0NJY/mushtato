@@ -37,6 +37,7 @@ from engine.storage import (
 )
 
 from ..dialogs.settings_dialog import SettingsDialog
+from ..help.help_window import HelpWindow
 from ..theme import apply_theme
 from ..version import mushtato_version
 from .session_tab import SessionTab
@@ -67,6 +68,7 @@ class MainWindow(QMainWindow):
             address_book_storage_path if address_book_storage_path is not None else address_book_path()
         )
         self._address_book_window = None  # lazily constructed on first use
+        self._help_window = None  # lazily constructed on first use
 
         self.tab_widget = QTabWidget(self)
         self.tab_widget.setTabsClosable(False)
@@ -154,6 +156,7 @@ class MainWindow(QMainWindow):
             app = QApplication.instance()
             if app is not None:
                 apply_theme(app, self._theme)
+            self._retheme_open_tabs()
 
     def set_theme(self, theme: str) -> str:
         self._theme = theme
@@ -161,20 +164,35 @@ class MainWindow(QMainWindow):
         app = QApplication.instance()
         if app is not None:
             apply_theme(app, theme)
+        self._retheme_open_tabs()
         return f"Theme set to {theme}."
+
+    def _retheme_open_tabs(self) -> None:
+        # Every open tab's own scrollback override, not just the
+        # app-wide palette -- see SessionTab.apply_theme's docstring
+        # for why this used to be an accepted gap and isn't anymore.
+        for index in range(self.tab_widget.count()):
+            self.tab_widget.widget(index).apply_theme(self._theme)
 
     def _show_about(self) -> None:
         QMessageBox.information(self, "About MushTato", f"MushTato {mushtato_version()}")
 
-    def _show_help(self) -> None:
-        tab = self.tab_widget.currentWidget()
-        if tab is not None:
-            outcome = tab._commands.process("/help")
-            text = outcome.text
+    def show_help(self) -> None:
+        """Open the real Help window (Phase 8), replacing the Phase 7c
+        /help placeholder. Available with zero tabs open -- this is
+        static app documentation, not tied to any one connection.
+        """
+        if self._help_window is None:
+            self._help_window = HelpWindow(hotkeys=self._hotkeys, theme=self._theme)
         else:
-            text = "Connect to a world (File > Address Book...), then type /help for the command list."
-        if text:
-            QMessageBox.information(self, "MushTato Help", text)
+            # Rebuilt every open, not just shown as-is -- hotkeys/theme
+            # can have changed since this singleton window was last
+            # shown, and stale content would be worse than the small
+            # cost of rebuilding it.
+            self._help_window.refresh(self._hotkeys, self._theme)
+        self._help_window.show()
+        self._help_window.raise_()
+        self._help_window.activateWindow()
 
     # -- chrome: menu bar, toolbar, status bar -------------------------
 
@@ -267,7 +285,7 @@ class MainWindow(QMainWindow):
 
         # -- Help ------------------------------------------------------
         self.help_menu = help_menu = menu_bar.addMenu("&Help")
-        self.help_action = add_action(help_menu, "Help", self._show_help)
+        self.help_action = add_action(help_menu, "Help", self.show_help)
         self.about_action = add_action(help_menu, "About", self._show_about)
         toolbar.addSeparator()
         toolbar.addAction(self.help_action)

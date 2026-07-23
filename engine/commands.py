@@ -82,6 +82,16 @@ class CommandTable:
             name=name.lower(), handler=handler, help_text=help_text
         )
 
+    def command_help_text(self, name: str) -> Optional[str]:
+        """The registered help text for ``name``, or ``None`` if it
+        isn't a registered command. For a caller (e.g. a GUI Help
+        system, Phase 8) that wants to look up one command's help text
+        directly, without going through the "/name args" text-parsing
+        path in :meth:`process`.
+        """
+        command = self._commands.get(name.lower())
+        return command.help_text if command is not None else None
+
     def process(self, text: str) -> CommandOutcome:
         if text.startswith("//"):
             return CommandOutcome(action="send", text=text[1:])

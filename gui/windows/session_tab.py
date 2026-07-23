@@ -20,6 +20,8 @@ from engine.ansi import AnsiParser
 from engine.commands import CommandTable
 from engine.storage import DEFAULT_THEME
 
+from ..help.markdown_tools import strip_markdown
+from ..help.topics import COMMAND_HELP, HelpContext, TOPICS, get_topic
 from ..theme import apply_scrollback_theme
 from ..version import mushtato_version
 from .history_line_edit import HistoryLineEdit
@@ -131,6 +133,18 @@ class SessionTab(QWidget):
         # viewport-palette bug this guards against.
         super().showEvent(event)
         apply_scrollback_theme(self.scrollback, self._theme)
+
+    def apply_theme(self, theme: str) -> None:
+        """Re-applies a changed theme to this tab's own scrollback.
+
+        Called by the host when the user switches theme while this tab
+        is already open -- closes a previously-accepted Phase 7b gap
+        (only *newly created* windows ever picked up a theme change;
+        already-open ones didn't) now that MainWindow has direct access
+        to every open tab, not just a "next window" it hasn't made yet.
+        """
+        self._theme = theme
+        apply_scrollback_theme(self.scrollback, theme)
 
     def _append_plain(self, text: str) -> None:
         cursor = QTextCursor(self.scrollback.document())
@@ -245,20 +259,55 @@ class SessionTab(QWidget):
     # happens in standalone tests, never in the real app).
 
     def _register_commands(self) -> None:
-        self._commands.register("quit", self._cmd_quit, "Close this tab")
-        self._commands.register(
-            "spawnlog", self._cmd_spawnlog, "Open a log-mirror spawn window"
-        )
-        self._commands.register(
-            "connect", self._cmd_connect, "Connect to a saved world by name: /connect <name>"
-        )
-        self._commands.register("settings", self._cmd_settings, "Open the settings dialog")
-        self._commands.register("version", self._cmd_version, "Show the MushTato version")
-        self._commands.register(
-            "theme", self._cmd_theme, "Switch theme: /theme <dark|light>"
-        )
-        self._commands.register("disconnect", self._cmd_disconnect, "Disconnect from the server")
-        self._commands.register("reconnect", self._cmd_reconnect, "Reconnect to the server")
+        # COMMAND_HELP (gui/help/topics.py) is the single source of
+        # truth for names + help text -- this loop is what actually
+        # wires each name to its real handler, so the registered set
+        # and the documented set can never drift apart.
+        handlers = {
+            "help": self._cmd_help,
+            "quit": self._cmd_quit,
+            "spawnlog": self._cmd_spawnlog,
+            "connect": self._cmd_connect,
+            "settings": self._cmd_settings,
+            "version": self._cmd_version,
+            "theme": self._cmd_theme,
+            "disconnect": self._cmd_disconnect,
+            "reconnect": self._cmd_reconnect,
+        }
+        for name, help_text in COMMAND_HELP:
+            self._commands.register(name, handlers[name], help_text)
+
+    def _cmd_help(self, args: str) -> Optional[str]:
+        name = args.strip().lower()
+
+        if not name:
+            if self.host_window is not None:
+                self.host_window.show_help()
+            topic_slugs = ", ".join(topic.slug for topic in TOPICS)
+            command_names = ", ".join(f"/{n}" for n, _ in COMMAND_HELP)
+            return (
+                "Opening Help window.\n"
+                f"Topics ('/help topics' for this list): {topic_slugs}\n"
+                f"Commands: {command_names}\n"
+                "Type /help [topic] or /help [command] for details on one."
+            )
+
+        if name == "topics":
+            return "Help topics: " + ", ".join(topic.slug for topic in TOPICS)
+
+        topic = get_topic(name)
+        if topic is not None:
+            context = HelpContext(
+                hotkeys=self.host_window._hotkeys if self.host_window is not None else {},
+                theme=self._theme,
+            )
+            return strip_markdown(topic.render(context))
+
+        command_help = self._commands.command_help_text(name)
+        if command_help is not None:
+            return f"/{name} - {command_help}"
+
+        return f"No such help topic or command: {name}"
 
     def _cmd_quit(self, args: str) -> Optional[str]:
         del args
@@ -276,7 +325,7 @@ class SessionTab(QWidget):
             return "Not available in this session (no host window)."
         name = args.strip()
         if not name:
-            return "Usage: /connect <world-name>"
+            return "Usage: /connect [world-name]"
         return self.host_window.connect_by_name(name)
 
     def _cmd_settings(self, args: str) -> Optional[str]:
@@ -293,7 +342,7 @@ class SessionTab(QWidget):
     def _cmd_theme(self, args: str) -> Optional[str]:
         theme = args.strip().lower()
         if theme not in ("dark", "light"):
-            return "Usage: /theme <dark|light>"
+            return "Usage: /theme [dark|light]"
         if self.host_window is None:
             return "Not available in this session (no host window)."
         return self.host_window.set_theme(theme)

@@ -85,6 +85,61 @@ def test_help_lists_all_registered_built_in_commands(qapp):
         assert name in text
 
 
+def test_bare_help_opens_the_help_window(qapp, tmp_path: Path):
+    host = MainWindow(address_book_storage_path=tmp_path / "ab.json")
+    tab = host.open_tab("example.com", 4201, bridge=FakeBridge())
+    tab.input_line.setText("/help")
+    tab.input_line.returnPressed.emit()
+    assert host._help_window is not None
+    assert host._help_window.isVisible() is True
+
+
+def test_help_topics_lists_topic_slugs_without_opening_the_window(qapp, tmp_path: Path):
+    from gui.help.topics import TOPICS
+
+    host = MainWindow(address_book_storage_path=tmp_path / "ab.json")
+    tab = host.open_tab("example.com", 4201, bridge=FakeBridge())
+    tab.input_line.setText("/help topics")
+    tab.input_line.returnPressed.emit()
+    text = tab.scrollback.toPlainText()
+    for topic in TOPICS:
+        assert topic.slug in text
+    assert host._help_window is None  # /help topics doesn't open the window
+
+
+def test_help_topic_prints_that_topic_s_content_to_the_scrollback(qapp):
+    tab = make_tab()
+    tab.input_line.setText("/help hotkeys")
+    tab.input_line.returnPressed.emit()
+    text = tab.scrollback.toPlainText()
+    assert "Hotkeys" in text
+    assert "Spawn Log Window" in text  # a real current hotkey label
+    # Markdown syntax should be stripped for scrollback display.
+    assert "**" not in text.split("Connecting to")[-1]
+
+
+def test_help_command_name_still_shows_its_one_liner(qapp):
+    tab = make_tab()
+    tab.input_line.setText("/help theme")
+    tab.input_line.returnPressed.emit()
+    assert "Switch theme: /theme [dark|light]" in tab.scrollback.toPlainText()
+
+
+def test_help_unknown_name_reports_neither_topic_nor_command(qapp):
+    tab = make_tab()
+    tab.input_line.setText("/help bogus")
+    tab.input_line.returnPressed.emit()
+    assert "No such help topic or command: bogus" in tab.scrollback.toPlainText()
+
+
+def test_topic_slugs_never_collide_with_command_names(qapp):
+    from gui.help.topics import COMMAND_HELP, TOPICS
+
+    topic_slugs = {topic.slug for topic in TOPICS}
+    command_names = {name for name, _ in COMMAND_HELP}
+    assert topic_slugs.isdisjoint(command_names)
+
+
 def test_connect_and_settings_report_unavailable_without_a_host_window(qapp):
     tab = make_tab()  # no host_window -> standalone test scenario
 

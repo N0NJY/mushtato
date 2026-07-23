@@ -5,8 +5,13 @@ later decision (storage functions just take an explicit path). Phase 6
 is the first phase that needs a real, concrete answer -- the address
 book has to persist somewhere real for the GUI to use, not just an
 arbitrary path supplied by a test. `platformdirs` gives the OS-idiomatic
-location on each platform (``%APPDATA%`` on Windows, ``~/Library/
-Application Support`` on macOS, ``~/.config`` on Linux) rather than a
+location on each platform for *data* (not config) directories --
+verified against platformdirs' actual source (Phase 8), not assumed:
+``%LOCALAPPDATA%\\MushTato`` on Windows (Local, not Roaming
+``%APPDATA%``), ``~/Library/Application Support/MushTato`` on macOS,
+``~/.local/share/MushTato`` on Linux (``$XDG_DATA_HOME``, not
+``~/.config``, which is ``$XDG_CONFIG_HOME`` -- a different
+platformdirs function this project doesn't call) -- rather than a
 single hardcoded ``~/.mushtato``-style path.
 """
 

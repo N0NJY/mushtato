@@ -127,26 +127,43 @@ def test_reconnect_action_restarts_the_bridge(qapp, tmp_path: Path):
     assert tab.input_line.isEnabled() is True
 
 
-def test_help_action_shows_the_same_text_as_the_help_command(qapp, tmp_path: Path, monkeypatch):
-    shown = []
-    monkeypatch.setattr(
-        QMessageBox, "information", staticmethod(lambda parent, title, text: shown.append(text))
-    )
-    host = make_host(address_book_storage_path=tmp_path / "ab.json")
-    tab = host.open_tab("example.com", 4201, bridge=FakeBridge())
-    host.help_action.trigger()
-    assert shown == [tab._commands.process("/help").text]
-
-
-def test_help_action_with_no_tabs_shows_a_fallback_message(qapp, tmp_path: Path, monkeypatch):
-    shown = []
-    monkeypatch.setattr(
-        QMessageBox, "information", staticmethod(lambda parent, title, text: shown.append(text))
-    )
+def test_help_action_opens_the_real_help_window(qapp, tmp_path: Path):
     host = make_host(address_book_storage_path=tmp_path / "ab.json")
     host.help_action.trigger()
-    assert len(shown) == 1
-    assert "/help" in shown[0]
+    assert host._help_window is not None
+    assert host._help_window.isVisible() is True
+
+
+def test_help_action_works_with_zero_tabs_open(qapp, tmp_path: Path):
+    # The Help window is static app documentation, not tied to any one
+    # connection -- it must be reachable even before anything is
+    # connected, unlike the old Phase 7c placeholder which required an
+    # active tab to produce any output at all.
+    host = make_host(address_book_storage_path=tmp_path / "ab.json")
+    assert host.tab_widget.count() == 0
+    host.help_action.trigger()
+    assert host._help_window is not None
+    assert host._help_window.isVisible() is True
+
+
+def test_help_action_reuses_the_same_window_on_repeated_clicks(qapp, tmp_path: Path):
+    host = make_host(address_book_storage_path=tmp_path / "ab.json")
+    host.help_action.trigger()
+    first = host._help_window
+    host.help_action.trigger()
+    assert host._help_window is first
+
+
+def test_help_window_content_includes_every_topic_and_command(qapp, tmp_path: Path):
+    from gui.help.topics import COMMAND_HELP, TOPICS
+
+    host = make_host(address_book_storage_path=tmp_path / "ab.json")
+    host.help_action.trigger()
+    text = host._help_window.browser.toPlainText()
+    for topic in TOPICS:
+        assert topic.title in text
+    for name, _ in COMMAND_HELP:
+        assert f"/{name}" in text
 
 
 def test_about_action_shows_the_version(qapp, tmp_path: Path, monkeypatch):
@@ -196,6 +213,26 @@ def test_theme_menu_reflects_current_theme_and_switching_applies_it(
     from engine.storage import load_settings
 
     assert load_settings(settings_file).theme == "light"
+
+
+def test_switching_theme_re_themes_already_open_tabs(qapp, tmp_path: Path, monkeypatch):
+    # Regression guard: previously (Phase 7b) a theme change only ever
+    # reached *newly created* windows -- an already-open scrollback
+    # kept its construction-time colors. Now that MainWindow has direct
+    # access to every open tab, switching theme must restyle them too.
+    settings_file = tmp_path / "settings.json"
+    monkeypatch.setattr("gui.windows.main_window.settings_path", lambda: settings_file)
+
+    from gui.theme import DARK_SCROLLBACK_BASE, LIGHT_SCROLLBACK_BASE
+    from PySide6.QtGui import QColor, QPalette
+
+    host = make_host(theme="dark", address_book_storage_path=tmp_path / "ab.json")
+    tab = host.open_tab("example.com", 4201, bridge=FakeBridge())
+    assert tab.scrollback.palette().color(QPalette.ColorRole.Base) == QColor(DARK_SCROLLBACK_BASE)
+
+    host.light_theme_action.trigger()
+
+    assert tab.scrollback.palette().color(QPalette.ColorRole.Base) == QColor(LIGHT_SCROLLBACK_BASE)
 
 
 def test_status_bar_shows_no_connection_with_no_tabs(qapp, tmp_path: Path):

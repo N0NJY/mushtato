@@ -128,22 +128,37 @@ def scrollback_palette(theme: str, base_palette: QPalette) -> QPalette:
     return palette
 
 
-def apply_scrollback_theme(text_edit, theme: str) -> None:
-    """Apply the scrollback palette to a QTextEdit *and its viewport*.
+def apply_widget_and_viewport_palette(scroll_area, palette: QPalette) -> None:
+    """Apply ``palette`` to a QAbstractScrollArea (e.g. QTextEdit/
+    QTextBrowser) *and its viewport*.
 
-    Found via real-desktop pixel sampling (not assumed): a QTextEdit is
-    a QAbstractScrollArea, and its visible background is actually
-    painted by a separate child widget, ``viewport()`` -- calling
-    ``.setPalette()`` on the QTextEdit itself was leaving the viewport
-    on its default (white) background regardless of theme, even though
-    the palette *object* returned by ``scrollback_palette()`` was
-    correct. Setting the palette (and forcing ``autoFillBackground``)
-    on both the widget and its viewport is the standard fix for this
-    well-known Qt gotcha. Call this instead of ``text_edit.setPalette``
-    directly for any scrollback pane.
+    Found via real-desktop pixel sampling (not assumed): this class of
+    widget's visible background is actually painted by a separate
+    child widget, ``viewport()`` -- calling ``.setPalette()`` on the
+    outer widget alone was leaving the viewport on its default (white)
+    background regardless of theme, even though the palette object
+    itself was correct. Setting the palette (and forcing
+    ``autoFillBackground``) on both the widget and its viewport is the
+    standard fix for this well-known Qt gotcha. Any scroll-area-based
+    pane in this codebase should go through this rather than a bare
+    ``.setPalette()`` call.
+    """
+    scroll_area.setPalette(palette)
+    scroll_area.setAutoFillBackground(True)
+    scroll_area.viewport().setPalette(palette)
+    scroll_area.viewport().setAutoFillBackground(True)
+
+
+def apply_scrollback_theme(text_edit, theme: str) -> None:
+    """Apply the *scrollback-specific* (dimmed output-pane) palette to
+    a QTextEdit and its viewport -- see
+    ``apply_widget_and_viewport_palette`` for why both need it. Use
+    this for actual MUD-output scrollback panes; for a widget that
+    should just follow the regular app-wide/chrome palette instead
+    (e.g. the Help window's reference-document pane, which isn't MUD
+    output and has no reason to use Potato's dimmed output colors),
+    call ``apply_widget_and_viewport_palette`` directly with the
+    widget's own inherited palette instead.
     """
     palette = scrollback_palette(theme, text_edit.palette())
-    text_edit.setPalette(palette)
-    text_edit.setAutoFillBackground(True)
-    text_edit.viewport().setPalette(palette)
-    text_edit.viewport().setAutoFillBackground(True)
+    apply_widget_and_viewport_palette(text_edit, palette)
