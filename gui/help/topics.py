@@ -171,15 +171,18 @@ list on the left, that section's fields on the right):
 
 ## Auto-Login on startup
 
-Each world in the list shows a checkbox once it has a default Character
-set (Properties -> Basic) -- check it to have MushTato automatically
-open and log into that world every time the app starts, with no
-confirmation prompt. Worlds without a default Character show no
-checkbox at all, since there'd be nothing to log in as; set one in
-Properties first. Flagged worlds are opened one at a time, in the
-order they appear in this list, the same way clicking Connect on each
-in turn would -- a world that's down doesn't hold up the rest, since
-nothing waits for a login to actually succeed before opening the next.
+Back in the Address Book's own Worlds list (not inside Properties): each
+world's row shows a checkbox once that world has a default Character set
+(Properties -> Basic, or just add its first Character on the Characters
+page, which auto-selects it as the default). Check it to have MushTato
+automatically open and log into that world every time the app starts,
+with no confirmation prompt. A world with no default Character shows no
+checkbox at all on its row, since there'd be nothing to log in as yet --
+set one in Properties first and the checkbox appears. Flagged worlds are
+opened one at a time, in the order they appear in this list, the same
+way clicking Connect on each in turn would -- a world that's down
+doesn't hold up the rest, since nothing waits for a login to actually
+succeed before opening the next.
 
 ## Sorting and reordering
 
@@ -420,6 +423,11 @@ system, install `libxcb-cursor0` and its usual companions yourself (see
 **A toolbar/menu item does nothing when clicked** -- some items (Editor,
 Upload, Mail Window, Find) are shown disabled on purpose; see the Menus
 & Toolbar topic.
+
+**I checked "auto-login" on a world but nothing happens at startup** --
+auto-login also needs that world to have a default Character set (a
+checked box with no default Character is inert); see the Address Book
+topic.
 
 **Where are my saved worlds/settings stored?** -- see `INSTALL.md`'s
 "Removing your data" section for the exact per-OS path.

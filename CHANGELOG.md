@@ -6,7 +6,58 @@ of work, per `CLAUDE.md`/`SPEC.md`'s roadmap) rather than by version
 number, reconstructed from `CLAUDE.md`'s phase-by-phase notes and git
 history. All dates below are from the actual commit history.
 
-## Phase 8 — Documentation & onboarding (in progress)
+## Post-8b — Tab-activity flashing (2026-07-24)
+
+- A background tab (one you're not currently viewing) blinks orange when
+  it receives new incoming text, and keeps blinking indefinitely until
+  you switch to it — the tab you're already looking at never flashes for
+  its own traffic.
+
+## Post-8b — Address book auto-login and sorting (2026-07-24)
+
+- A per-world "auto-login" checkbox, shown on that world's row in the
+  Address Book's Worlds list once it has a default Character set (no
+  checkbox at all otherwise, since there'd be nothing to log in as).
+  Checked worlds are opened and logged into automatically, one at a
+  time, when MushTato starts — no confirmation prompt.
+- Sort A-Z / Sort Z-A buttons (one-shot re-sorts, not a persistent mode)
+  and drag-and-drop reordering of the Worlds list.
+
+## Post-8b — Character picker + Log In (2026-07-23)
+
+- A second list next to the Address Book's Worlds list shows the
+  selected world's saved Characters. Picking one and clicking **Log In**
+  connects as that Character specifically — a one-time choice that never
+  changes the world's stored default Character, and always opens a new
+  tab (logging in as a different Character is a genuinely different
+  session, not a duplicate connection). Confirmed via Potato's real
+  source that no equivalent exists there — this is a MushTato original,
+  not a ported feature.
+
+## Post-8b — Two real fixes found testing the actual build (2026-07-23)
+
+- Address book buttons (Edit/Delete/Connect/Properties...) silently did
+  nothing when clicked with no world selected — now disabled until a
+  world is actually selected.
+- The first Character added to a world with no default set yet is now
+  auto-selected as that world's default, closing a real discoverability
+  gap (the Default Character field lives on a different Properties page
+  than where Characters are added).
+
+## Phase 8b — Address book / World Properties overhaul (2026-07-23)
+
+- Per-world saved Characters (name + password), auto-sends (first-
+  connect-ever / every-connect / after-login), login format/delay, and
+  notes — verified against Potato's real source for exact dispatch order
+  and data shape, not guessed at.
+- A new World Properties window (category list + pages: Basic,
+  Characters, Connection, Auto-Sends, Notes) alongside the existing
+  quick Edit dialog.
+- A real data-loss bug fixed along the way: the quick Edit dialog used
+  to silently wipe out a world's Characters/auto-sends if you edited it
+  after setting them up via Properties.
+
+## Phase 8 — Documentation & onboarding (2026-07-23)
 
 - Real in-app Help system (`gui/help/`), replacing the Phase 7c `/help`
   placeholder: a scrollable reference document (menu bar → Help → Help,

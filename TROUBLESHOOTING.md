@@ -78,3 +78,12 @@ Some items (Editor, Upload, Mail Window, Find) are shown disabled
 (grayed out) on purpose — they're modeled on real Potato features
 MushTato doesn't have working equivalents for yet, not broken buttons.
 See the in-app Help's Menus & Toolbar topic.
+
+**I checked "auto-login" on a world but nothing happens at startup**
+Auto-login also requires that world to have a default Character set
+(Properties... → Basic, or just add its first Character on the
+Characters page, which auto-selects it as the default) — a checked box
+with no default Character is inert, since there'd be nothing to log in
+as. If a world's row shows no checkbox at all, that's the same cause:
+set a default Character first and the checkbox appears. See the in-app
+Help's Address Book topic.
