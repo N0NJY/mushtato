@@ -287,7 +287,10 @@ Both boxes keep their own independent recall history (Up/Down arrows
 step through what *that* box has sent, not the other one's).
 
 The boundary between the scrollback and the input boxes can be dragged
-to resize how much space each gets.
+to resize how much space each gets -- MushTato remembers wherever you
+last dragged it to and uses that as the starting size for every tab
+you open from then on, this session or a future launch. See the Fonts
+topic for changing the size/typeface of the text in either area.
 """
 
 
@@ -340,6 +343,27 @@ The dark theme's scrollback and input colors match Potato's own real
 shipped defaults (black background, dimmed output text, brighter input
 text). The light theme has no equivalent in Potato (Potato's own
 defaults are always black-background) -- it's MushTato's own design.
+"""
+
+
+def _render_fonts(ctx: HelpContext) -> str:
+    del ctx
+    return """# Fonts
+
+Options -> Settings... has two independent font pickers:
+
+- **Terminal Font** -- the scrollback/display pane where the MUD's own
+  text appears. Only monospaced (fixed-width) fonts are offered here,
+  since MUD output (ASCII-art borders, banners, tables) is authored
+  assuming every character is the same width -- a proportional font
+  would break that alignment.
+- **Input Font** -- both input boxes (Command... and Pose/says...)
+  share this one setting; any installed font can be used here, since
+  the input boxes don't have the terminal's alignment requirement.
+
+Changing either font applies immediately to every already-open tab,
+the same live-reload treatment Theme already gets -- you don't need to
+reconnect or restart. Both are saved and restored on your next launch.
 """
 
 
@@ -443,6 +467,7 @@ TOPICS: List[HelpTopic] = [
     HelpTopic("spawn-windows", "Spawn Windows", _render_spawn_windows),
     HelpTopic("hotkeys", "Hotkeys", _render_hotkeys),
     HelpTopic("themes", "Themes", _render_themes),
+    HelpTopic("fonts", "Fonts", _render_fonts),
     HelpTopic("commands", "Built-in Commands", _render_commands),
     HelpTopic("faq", "FAQ / Troubleshooting", _render_faq),
     HelpTopic("scripting", "Scripting", _render_scripting),

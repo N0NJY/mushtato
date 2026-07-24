@@ -6,6 +6,17 @@ of work, per `CLAUDE.md`/`SPEC.md`'s roadmap) rather than by version
 number, reconstructed from `CLAUDE.md`'s phase-by-phase notes and git
 history. All dates below are from the actual commit history.
 
+## Post-8b — Remembered input-pane size + configurable fonts (2026-07-24)
+
+- The dual-input pane's dragged height is now remembered (one global
+  preference, not per-world) and used as the starting split for every
+  newly-opened tab, this session or a future launch.
+- Two independent font pickers in Options → Settings...: a **Terminal
+  Font** (monospaced fonts only, to preserve MUD banner/table
+  alignment) for the scrollback pane, and an **Input Font** shared by
+  both input boxes. Both apply immediately to already-open tabs and
+  persist across restarts.
+
 ## Post-8b — Tab-activity flashing (2026-07-24)
 
 - A background tab (one you're not currently viewing) blinks orange when

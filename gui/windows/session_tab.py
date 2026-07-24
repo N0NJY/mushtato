@@ -13,13 +13,13 @@ from typing import List, Optional
 
 from PySide6.QtCore import QDateTime, QTimer, Qt, Signal
 from PySide6.QtGui import QTextCursor
-from PySide6.QtGui import QFontDatabase
 from PySide6.QtWidgets import QSizePolicy, QSplitter, QTextEdit, QVBoxLayout, QWidget
 
 from engine.ansi import AnsiParser
 from engine.commands import CommandTable
 from engine.storage import DEFAULT_THEME, CharacterProfile, WorldProfile
 
+from ..fonts import resolve_input_font, resolve_scrollback_font
 from ..help.markdown_tools import strip_markdown
 from ..help.topics import COMMAND_HELP, HelpContext, TOPICS, get_topic
 from ..theme import apply_scrollback_theme
@@ -55,6 +55,11 @@ class SessionTab(QWidget):
         world: Optional[WorldProfile] = None,  # Phase 8b: auto-sends/login need the saved profile
         character: Optional[CharacterProfile] = None,  # explicit "Log In as" choice, overrides
         # world.default_character for this one connection without changing it
+        scrollback_font_family: str = "",
+        scrollback_font_size: int = 0,
+        input_font_family: str = "",
+        input_font_size: int = 0,
+        splitter_sizes: Optional[List[int]] = None,  # last-dragged split, None -> stretch-factor default
     ) -> None:
         super().__init__()
         self.host = host
@@ -73,8 +78,10 @@ class SessionTab(QWidget):
         self.scrollback.setReadOnly(True)
         # MUD output (banners, tables, ASCII-art borders, prompts) is
         # authored assuming a fixed-width terminal; the default
-        # proportional GUI font breaks that alignment.
-        self.scrollback.setFont(QFontDatabase.systemFont(QFontDatabase.SystemFont.FixedFont))
+        # proportional GUI font breaks that alignment. resolve_
+        # scrollback_font falls back to the same fixed-width system
+        # font as before when no font setting has been saved yet.
+        self.scrollback.setFont(resolve_scrollback_font(scrollback_font_family, scrollback_font_size))
 
         # Dual input (Phase 6): two independent boxes, both sending to
         # this same connection, each with its own recall history.
@@ -85,9 +92,12 @@ class SessionTab(QWidget):
         # free-form text (poses/says); it bypasses *both* -- a pose
         # starting with "/" or a word that happens to match an alias
         # must never be silently reinterpreted, same reasoning for both.
+        input_font = resolve_input_font(input_font_family, input_font_size)
+
         self.input_line = HistoryLineEdit(self)
         self.input_line.setPlaceholderText("Command...")
         self.input_line.returnPressed.connect(self._on_primary_send)
+        self.input_line.setFont(input_font)
         # A plain QLineEdit's default vertical size policy is Fixed, so
         # it would ignore any extra space the splitter below hands it.
         self.input_line.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Expanding)
@@ -95,6 +105,7 @@ class SessionTab(QWidget):
         self.secondary_input = HistoryLineEdit(self)
         self.secondary_input.setPlaceholderText("Pose/says...")
         self.secondary_input.returnPressed.connect(self._on_secondary_send)
+        self.secondary_input.setFont(input_font)
         self.secondary_input.setSizePolicy(
             QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Expanding
         )
@@ -110,6 +121,15 @@ class SessionTab(QWidget):
         self.splitter.addWidget(input_container)
         self.splitter.setStretchFactor(0, 5)
         self.splitter.setStretchFactor(1, 1)
+        if splitter_sizes:
+            self.splitter.setSizes(splitter_sizes)
+        # Persisted globally (one preference for every tab, not
+        # per-world -- Rick's explicit choice), so the *next* tab you
+        # open -- this session or a future one -- starts at whatever
+        # height you last dragged to. Deliberately does NOT resize
+        # already-open tabs live when another tab is dragged; see
+        # MainWindow.record_splitter_sizes's docstring.
+        self.splitter.splitterMoved.connect(self._on_splitter_moved)
 
         layout = QVBoxLayout(self)
         layout.setContentsMargins(0, 0, 0, 0)
@@ -151,6 +171,27 @@ class SessionTab(QWidget):
         """
         self._theme = theme
         apply_scrollback_theme(self.scrollback, theme)
+
+    def apply_fonts(
+        self, scrollback_font_family: str, scrollback_font_size: int,
+        input_font_family: str, input_font_size: int,
+    ) -> None:
+        """Re-applies changed font settings to this tab's widgets --
+        called by the host on every already-open tab when Settings is
+        saved, the same live-reload treatment apply_theme() already
+        gets (unlike splitter size, which only affects newly-opened
+        tabs -- see MainWindow.record_splitter_sizes's docstring for
+        why those two are treated differently).
+        """
+        self.scrollback.setFont(resolve_scrollback_font(scrollback_font_family, scrollback_font_size))
+        input_font = resolve_input_font(input_font_family, input_font_size)
+        self.input_line.setFont(input_font)
+        self.secondary_input.setFont(input_font)
+
+    def _on_splitter_moved(self, pos: int, index: int) -> None:  # noqa: ARG002 -- Qt signal args
+        del pos, index
+        if self.host_window is not None:
+            self.host_window.record_splitter_sizes(self.splitter.sizes())
 
     def _append_plain(self, text: str) -> None:
         cursor = QTextCursor(self.scrollback.document())

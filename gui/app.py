@@ -105,7 +105,15 @@ def main() -> int:
     settings = ensure_settings(settings_path())
     apply_theme(app, settings.theme)
 
-    window = MainWindow(hotkeys=settings.hotkeys, theme=settings.theme)
+    window = MainWindow(
+        hotkeys=settings.hotkeys,
+        theme=settings.theme,
+        scrollback_font_family=settings.scrollback_font_family,
+        scrollback_font_size=settings.scrollback_font_size,
+        input_font_family=settings.input_font_family,
+        input_font_size=settings.input_font_size,
+        splitter_sizes=settings.splitter_sizes,
+    )
     window.resize(900, 700)
     window.show()
 

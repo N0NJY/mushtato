@@ -65,6 +65,11 @@ class MainWindow(QMainWindow):
         hotkeys: Optional[Dict[str, str]] = None,
         theme: Optional[str] = None,
         address_book_storage_path=None,
+        scrollback_font_family: str = "",
+        scrollback_font_size: int = 0,
+        input_font_family: str = "",
+        input_font_size: int = 0,
+        splitter_sizes: Optional[list] = None,
     ) -> None:
         super().__init__()
         self.setWindowTitle("MushTato")
@@ -76,6 +81,15 @@ class MainWindow(QMainWindow):
         # construction side-effect-free for tests.
         self._hotkeys = hotkeys if hotkeys is not None else dict(DEFAULT_HOTKEYS)
         self._theme = theme if theme is not None else DEFAULT_THEME
+        self._scrollback_font_family = scrollback_font_family
+        self._scrollback_font_size = scrollback_font_size
+        self._input_font_family = input_font_family
+        self._input_font_size = input_font_size
+        # The dual-input splitter's last-dragged size, one global
+        # preference applied as every *newly-opened* tab's starting
+        # split -- see record_splitter_sizes's docstring for why this
+        # doesn't live-resize already-open tabs the way font/theme do.
+        self._splitter_sizes = list(splitter_sizes) if splitter_sizes else []
         self._address_book_path = (
             address_book_storage_path if address_book_storage_path is not None else address_book_path()
         )
@@ -100,6 +114,16 @@ class MainWindow(QMainWindow):
         self._activity_timer = QTimer(self)
         self._activity_timer.setInterval(self.ACTIVITY_BLINK_INTERVAL_MS)
         self._activity_timer.timeout.connect(self._tick_activity_flash)
+
+        # Debounced splitter-size persistence: splitterMoved fires on
+        # every pixel of a drag, so writing settings.json synchronously
+        # on each one would hit the disk dozens of times per drag.
+        # Restarting a single-shot timer on every call coalesces that
+        # into one write shortly after the drag actually stops.
+        self._splitter_save_timer = QTimer(self)
+        self._splitter_save_timer.setSingleShot(True)
+        self._splitter_save_timer.setInterval(400)
+        self._splitter_save_timer.timeout.connect(self._save_settings_to_disk)
 
         self._build_chrome()
         self._apply_hotkeys()
@@ -148,6 +172,11 @@ class MainWindow(QMainWindow):
             host_window=self,
             world=world,
             character=character,
+            scrollback_font_family=self._scrollback_font_family,
+            scrollback_font_size=self._scrollback_font_size,
+            input_font_family=self._input_font_family,
+            input_font_size=self._input_font_size,
+            splitter_sizes=self._splitter_sizes or None,
         )
         tab.connectionStateChanged.connect(lambda state, t=tab: self._on_tab_state_changed(t, state))
         tab.activity.connect(lambda t=tab: self._on_tab_activity(t))
@@ -208,6 +237,40 @@ class MainWindow(QMainWindow):
         if self._address_book_window is not None:
             self._address_book_window.worlds = worlds
             self._address_book_window._refresh_list()
+
+    # -- settings persistence (hotkeys/theme/fonts/splitter size) -----
+
+    def _current_settings(self) -> Settings:
+        return Settings(
+            hotkeys=self._hotkeys,
+            theme=self._theme,
+            scrollback_font_family=self._scrollback_font_family,
+            scrollback_font_size=self._scrollback_font_size,
+            input_font_family=self._input_font_family,
+            input_font_size=self._input_font_size,
+            splitter_sizes=self._splitter_sizes,
+        )
+
+    def _save_settings_to_disk(self) -> None:
+        save_settings(settings_path(), self._current_settings())
+
+    def record_splitter_sizes(self, sizes) -> None:
+        """Remember the dual-input splitter's last-dragged sizes as one
+        global preference -- applied as the *starting* split for every
+        newly-opened tab, this session or a future launch (Rick's
+        explicit choice over per-world persistence).
+
+        Deliberately does NOT resize any already-open tab's splitter --
+        unlike theme/fonts, dragging one tab's split isn't a "setting
+        change" the user made through Settings, it's an in-the-moment
+        layout tweak on that one tab; silently resizing every other
+        open tab to match would be surprising mid-session. Debounced
+        (400ms, restarts on every call) so a fast drag -- which fires
+        this on every pixel of movement -- doesn't hit the disk dozens
+        of times per second.
+        """
+        self._splitter_sizes = list(sizes)
+        self._splitter_save_timer.start()
 
     def _on_current_tab_changed(self, index: int) -> None:
         if index != -1:
@@ -271,22 +334,32 @@ class MainWindow(QMainWindow):
         self._address_book_window.activateWindow()
 
     def open_settings(self) -> None:
-        settings = Settings(hotkeys=self._hotkeys, theme=self._theme)
-        dialog = SettingsDialog(self, settings=settings)
+        dialog = SettingsDialog(self, settings=self._current_settings())
         if dialog.exec():
             result = dialog.result_settings()
             self._hotkeys = result.hotkeys
             self._theme = result.theme
-            save_settings(settings_path(), result)
+            self._scrollback_font_family = result.scrollback_font_family
+            self._scrollback_font_size = result.scrollback_font_size
+            self._input_font_family = result.input_font_family
+            self._input_font_size = result.input_font_size
+            # splitter_sizes isn't editable in the dialog -- result.splitter_sizes
+            # is just the same value the dialog was constructed with, passed
+            # through unchanged, so this line is a no-op in practice; kept
+            # for the same reason as every other field here: one save writes
+            # the *complete* current settings, never a partial one.
+            self._splitter_sizes = result.splitter_sizes
+            self._save_settings_to_disk()
             self._apply_hotkeys()  # only one owner of hotkeys now -- live-reload is cheap
             app = QApplication.instance()
             if app is not None:
                 apply_theme(app, self._theme)
             self._retheme_open_tabs()
+            self._refont_open_tabs()
 
     def set_theme(self, theme: str) -> str:
         self._theme = theme
-        save_settings(settings_path(), Settings(hotkeys=self._hotkeys, theme=theme))
+        self._save_settings_to_disk()
         app = QApplication.instance()
         if app is not None:
             apply_theme(app, theme)
@@ -299,6 +372,21 @@ class MainWindow(QMainWindow):
         # for why this used to be an accepted gap and isn't anymore.
         for index in range(self.tab_widget.count()):
             self.tab_widget.widget(index).apply_theme(self._theme)
+
+    def _refont_open_tabs(self) -> None:
+        # Font changes live-reload to every already-open tab, the same
+        # treatment theme already gets -- unlike splitter size (see
+        # record_splitter_sizes's docstring), a font change made
+        # through Settings is a deliberate preference change, not an
+        # in-the-moment layout tweak, so propagating it everywhere is
+        # the expected behavior here, not a surprise.
+        for index in range(self.tab_widget.count()):
+            self.tab_widget.widget(index).apply_fonts(
+                self._scrollback_font_family,
+                self._scrollback_font_size,
+                self._input_font_family,
+                self._input_font_size,
+            )
 
     def _show_about(self) -> None:
         QMessageBox.information(self, "About MushTato", f"MushTato {mushtato_version()}")

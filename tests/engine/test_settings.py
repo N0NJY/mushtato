@@ -88,3 +88,49 @@ def test_theme_missing_from_saved_file_defaults(tmp_path: Path):
     settings = load_settings(path)
 
     assert settings.theme == DEFAULT_THEME
+
+
+# -- Fonts + splitter size (post-8b addition) ----------------------------
+
+
+def test_font_and_splitter_fields_default_to_empty_sentinels(tmp_path: Path):
+    settings = load_settings(tmp_path / "does_not_exist.json")
+    assert settings.scrollback_font_family == ""
+    assert settings.scrollback_font_size == 0
+    assert settings.input_font_family == ""
+    assert settings.input_font_size == 0
+    assert settings.splitter_sizes == []
+
+
+def test_font_and_splitter_fields_round_trip(tmp_path: Path):
+    path = tmp_path / "settings.json"
+    original = Settings(
+        scrollback_font_family="Courier New",
+        scrollback_font_size=12,
+        input_font_family="Arial",
+        input_font_size=11,
+        splitter_sizes=[500, 100],
+    )
+
+    save_settings(path, original)
+    loaded = load_settings(path)
+
+    assert loaded == original
+
+
+def test_pre_font_settings_format_json_defaults_the_new_fields(tmp_path: Path):
+    """Simulates a settings.json saved before font/splitter settings
+    existed at all -- must load with sensible defaults, not raise.
+    """
+    path = tmp_path / "settings.json"
+    import json
+
+    path.write_text(json.dumps({"hotkeys": DEFAULT_HOTKEYS, "theme": "dark"}), encoding="utf-8")
+
+    settings = load_settings(path)
+
+    assert settings.scrollback_font_family == ""
+    assert settings.scrollback_font_size == 0
+    assert settings.input_font_family == ""
+    assert settings.input_font_size == 0
+    assert settings.splitter_sizes == []

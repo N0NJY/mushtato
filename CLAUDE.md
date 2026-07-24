@@ -1327,6 +1327,116 @@ while the active tab stays normal, and the color correctly toggling
 off on the next simulated tick. Updated the "Sessions & Tabs" Help
 topic to document the behavior.
 
+**Post-8b addition: remembered input-pane size + configurable fonts.**
+Rick asked for two things together: (1) the dual-input splitter to
+remember whatever height he last dragged it to, across restarts, and
+(2) a Settings option to change the font used in the scrollback/
+terminal pane and in the input boxes.
+
+Checkpointed two real forks before writing code (both times, Rick chose
+the option this file's own convention would call "Recommended," but
+they were genuine forks, not rubber-stamps): (1) splitter-size scope --
+**one global preference** applied as the starting split for every
+newly-opened tab, not saved per-world (per-world would need a
+`WorldProfile` schema change for a fairly small visual preference); (2)
+font scope -- **two independent pickers** (Terminal Font, Input Font),
+matching Rick's own phrasing ("both the display terminal window as
+well as the input windows") rather than one shared font+size for both.
+
+`engine/storage/settings.py`'s `Settings` gained
+`scrollback_font_family`/`scrollback_font_size`/`input_font_family`/
+`input_font_size` (empty string / `0` = "no override" sentinels) and
+`splitter_sizes` (empty list = "no saved preference yet") -- additive-
+migration-safe like every other Settings field. The empty-sentinel
+design exists specifically because `/engine` can never import PySide6
+(rule 2): `engine/storage` can't compute a real font default itself
+(that needs `QFontDatabase`), so it stores "unset" and leaves resolving
+that to the GUI layer.
+
+New `gui/fonts.py` (`resolve_scrollback_font`/`resolve_input_font`/
+`default_scrollback_font`) is the one place those sentinels get
+resolved into a real `QFont` -- reused identically by `SessionTab` (at
+construction and in a new `apply_fonts()` live-reload method) and by
+`SettingsDialog` (to pre-populate the pickers with the *actual*
+effective font, not a blank field, when nothing's been saved yet).
+
+`SettingsDialog` gained two `QFontComboBox` + `QSpinBox` pairs. The
+Terminal Font combo is filtered to `QFontComboBox.FontFilter.
+MonospacedFonts` specifically -- MUD output (banners, tables, ASCII-art
+borders) assumes a fixed-width terminal, the exact real alignment bug
+Phase 5 found and fixed by defaulting to a fixed-width font in the
+first place; letting the terminal font drift to a proportional face
+would silently reintroduce that. The Input Font combo is unfiltered,
+since the input boxes have no such constraint. `splitter_sizes` has no
+UI in this dialog at all -- it's set only by dragging, so
+`result_settings()` just passes whatever value the dialog was
+constructed with straight through unchanged, never resetting it.
+
+Live-reload semantics deliberately differ between fonts and splitter
+size, and this was a real design distinction, not an oversight:
+**fonts** propagate to every already-open tab immediately when Settings
+is saved (`MainWindow._refont_open_tabs()`, the same treatment
+`_retheme_open_tabs()` already gives Theme) -- a font change made
+through Settings is a deliberate preference change. **Splitter size**
+does *not* propagate to already-open tabs -- dragging one tab's split
+is an in-the-moment layout tweak on that one tab, not a Settings-dialog
+preference; silently resizing every other open tab to match would be
+surprising mid-session. It only becomes the starting point for tabs
+opened *after* the drag (this session or a future launch).
+
+A real latent bug fixed along the way, found by re-reading the existing
+code rather than by a bug report: `MainWindow.open_settings()` and
+`set_theme()` used to each build a `Settings(hotkeys=..., theme=...)`
+object from only two fields and save *that* -- meaning saving hotkeys or
+switching theme would have silently wiped out any saved font/splitter
+preferences the next time either ran. Fixed by a new
+`MainWindow._current_settings()` that always builds the *complete*
+current settings from every tracked field, with `open_settings()`/
+`set_theme()`/`record_splitter_sizes()` all funneling through one
+`_save_settings_to_disk()` -- a single save path that can't accidentally
+go out of sync with what MainWindow actually knows, instead of several
+independent partial-Settings constructions that could each drift.
+Covered by a regression test
+(`test_setting_theme_does_not_clobber_previously_saved_fonts`) proving
+the specific failure mode, not just describing it.
+
+Splitter-size persistence is debounced (400ms, `MainWindow.
+_splitter_save_timer`, a single-shot `QTimer` restarted on every
+`record_splitter_sizes()` call): `QSplitter.splitterMoved` fires on
+every pixel of a drag, so writing the whole `settings.json` file
+synchronously on each one would hit disk dozens of times per drag --
+this coalesces a fast drag into one write shortly after it actually
+stops. Proven with a test that calls `record_splitter_sizes()` ten
+times in a row and confirms only the *last* value ends up on disk.
+
+A real test-writing lesson from this round, not a product bug: an
+unshown/unresized `QWidget` in the headless offscreen test environment
+has ~0 real geometry, so `QSplitter.setSizes()` at construction has
+nothing to actually distribute against until the widget (or, for a
+`SessionTab` embedded in `MainWindow.tab_widget`, the *host* window) is
+given a real size via `resize()` + `show()` + `QApplication.
+processEvents()`. A second lesson: hardcoding specific font names like
+"Courier New"/"Arial" in tests is flaky by environment -- they aren't
+guaranteed installed on every OS/CI runner, and Qt silently substitutes
+the nearest match for a missing font (and resolves generic fontconfig
+aliases like `"monospace"` to a concrete family name via `QFontInfo`
+rather than returning the alias itself). Fixed by pulling actually-
+installed font names from the dialog's own populated combo list rather
+than assuming specific fonts exist.
+
+Verified at three levels: 281 tests passing (up from 256; everything
+outside `engine/scripting`'s `google-re2`/RestrictedPython dependency,
+the same pre-existing, unrelated environment gap noted in every recent
+phase); a scripted end-to-end run that saves fonts/splitter size via
+one `MainWindow` instance, waits out the real debounce timer, then
+constructs a *second, independent* `MainWindow` reading the same
+`settings.json` (simulating an actual app restart without needing to
+literally relaunch the process) and confirms it picks up the exact
+saved font sizes and split proportions; and a rendered screenshot
+showing the terminal pane at a visibly larger font size than the input
+box, not just asserted via `.pointSize()`. Added a new "Fonts" Help
+topic and updated the Dual Input topic to mention the remembered split.
+
 Next: Rick has his own phase document for what comes after Phase 8b --
 not yet assigned a phase number here.
 
