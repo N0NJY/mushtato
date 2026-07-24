@@ -6,6 +6,19 @@ of work, per `CLAUDE.md`/`SPEC.md`'s roadmap) rather than by version
 number, reconstructed from `CLAUDE.md`'s phase-by-phase notes and git
 history. All dates below are from the actual commit history.
 
+## Post-Phase-9 — Fix duplicated scrollback lines on a split network read (2026-07-24)
+
+- Fixed a real bug where a line arriving split across two network reads
+  (unremarkable on any real connection with latency) could render
+  twice — the completed line followed by a phantom repeat of its own
+  tail, e.g. `You say, "some words"` then `You say, "some`. Caused by
+  `SessionTab._insert_finalized_segments` unconditionally re-showing a
+  stale "preview" (the incomplete-trailing-line mechanism from Phase 9)
+  that was often the very line that had just been completed. Two new
+  regression tests cover the exact reproduced failure and the
+  legitimate multi-line-plus-trailing-preview case it could have
+  regressed.
+
 ## Post-Phase-9 — Connection resilience + clickable URLs (2026-07-24)
 
 - **Dropped connections are now detected.** OS-level TCP keepalive is

@@ -403,7 +403,7 @@ class SessionTab(QWidget):
             if finalized.gagged:
                 self._clear_preview()
             elif finalized.segments:
-                self._insert_finalized_segments(finalized.segments)
+                self._insert_finalized_segments(finalized.segments, restore_preview=False)
                 for spawn in self.spawn_windows:
                     spawn.receive_segments(finalized.segments)
                 any_output = True
@@ -452,11 +452,35 @@ class SessionTab(QWidget):
         replace_tail(self.scrollback, self._preview_start_position, segments)
         self._preview_segments = segments
 
-    def _insert_finalized_segments(self, segments: List[StyledSegment]) -> None:
+    def _insert_finalized_segments(
+        self, segments: List[StyledSegment], *, restore_preview: bool = True
+    ) -> None:
+        """Insert ``segments``, preserving the invariant that an
+        already-showing preview stays the last thing on screen -- used
+        as-is by ``_on_script_echo_requested``, where a script's echo()
+        genuinely can land in the middle of an unrelated, still-pending
+        partial line (e.g. a prompt) and must not swallow it.
+
+        ``_on_incoming_batch_ready`` (real incoming server text) passes
+        ``restore_preview=False`` instead: there, ``segments`` being
+        inserted is never unrelated to the current preview -- it's
+        frequently *the same pending line* LineDispatcher just finished
+        (the preview was exactly that line's not-yet-terminated tail).
+        Restoring it here would re-insert that same stale tail right
+        after the now-complete line, a real duplicate-output bug found
+        by reproducing it directly: a line arriving split across two
+        network reads (e.g. 'You say, "some' then ' words"\\n') rendered
+        as "You say, \"some words\"\\nYou say, \"some" -- the finalized
+        line followed by a phantom repeat of its own tail. The correct,
+        current preview state (if any) is already re-applied once, after
+        every finalized line in the batch, via LineDispatchResult.preview
+        -- this inner restore was always redundant for that call path,
+        never just extra-safe.
+        """
         pending_preview = self._preview_segments if self._preview_start_position is not None else None
         self._clear_preview()
         append_styled_segments(self.scrollback, segments)
-        if pending_preview is not None:
+        if restore_preview and pending_preview is not None:
             self._show_preview(pending_preview)
 
     def _script_echo(self, text: str, style: Optional[Style]) -> None:

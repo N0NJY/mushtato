@@ -1827,6 +1827,59 @@ Still NOT wiring `execute_trusted_unrestricted` into any GUI path --
 same deferred decision as every phase since Phase 4b, called out again
 so it stays visible.
 
+**Post-Phase-9 fix: duplicated scrollback lines on a split network
+read — done.** `gui/windows/session_tab.py`'s `_insert_finalized_segments`.
+
+Rick reported real, repeated symptoms: typing e.g. `say some words`
+sometimes produced `You say, "some words"` twice in that tab's
+scrollback. Initially suspected script involvement (Rick mentioned
+he'd been experimenting with the new Scripts page on that world), but
+checking the actual on-disk saved scripts
+(`~/.local/share/MushTato/scripts/*.json`) found every world's script
+list empty — ruled out before proposing anything, not assumed innocent.
+
+Root-caused by reading the actual rendering pipeline, then confirmed by
+directly reproducing it (not just reasoned about): a `SessionTab` fed
+`'You say, "some'` then `' words"\r\n'` as two separate `simulate_incoming()`
+calls (mirroring how a real line arriving split across two TCP reads —
+unremarkable on any real network connection, especially one with any
+latency — reaches `TelnetBridge.on_text`) rendered
+`'You say, "some words"\nYou say, "some'` — the correctly-completed
+line followed by a phantom repeat of its own not-yet-terminated tail.
+Cause: `_insert_finalized_segments` unconditionally restored whatever
+"preview" (`LineDispatcher`'s incomplete-trailing-line mechanism, Phase 9)
+was showing *before* an insert, once the new segments were in. That
+restore is only correct for `_on_script_echo_requested`'s call path,
+where a script's `echo()` genuinely can land in the middle of an
+unrelated, still-pending partial line (e.g. a prompt) and must not
+swallow it. For `_on_incoming_batch_ready` (ordinary incoming server
+text), the "preview" being restored is frequently *the exact same
+pending line* `LineDispatcher.feed()` just finished — its not-yet-
+terminated tail, now stale, since the full completed line was already
+inserted moments earlier in the same call. Restoring it duplicated that
+tail. `LineDispatchResult.preview` (the freshly computed, authoritative
+current preview) was already being correctly re-applied once, after
+every finalized line in a batch — the inner per-insert restore was
+always redundant on this path, not merely extra-safe.
+
+Fix: `_insert_finalized_segments` gained a `restore_preview` keyword
+(default `True`, unchanged for the echo path); `_on_incoming_batch_ready`
+now passes `restore_preview=False` for real incoming text, relying
+solely on the batch's own trailing `LineDispatchResult.preview` handling
+that already existed. Verified the fix doesn't regress the legitimate
+case it might have looked like it was protecting: a single batch with
+multiple complete lines *and* a genuine new trailing partial line (e.g.
+`"Line1\nLine2\nPartial"`) still renders correctly, preview shown once,
+at the true end — proven by a second new test, not just asserted safe
+by inspection.
+
+Two new regression tests in `tests/gui/test_main_window_smoke.py`:
+`test_line_split_across_two_chunks_is_not_duplicated` (the exact
+reproduced failure, using the same `FakeBridge.simulate_incoming()`
+two-call pattern used to confirm the bug before writing the fix) and
+`test_multiple_finalized_lines_plus_trailing_preview_in_one_batch` (the
+non-regression case above). 427 tests passing (up from 425).
+
 Next: Phase 10 (post-1.0 script-sharing ecosystem) is the last item on
 SPEC.md's roadmap; Rick will decide when/whether to start it.
 

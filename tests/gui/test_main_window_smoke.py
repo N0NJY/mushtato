@@ -102,6 +102,40 @@ def test_incoming_text_is_rendered_in_scrollback(qapp):
     assert "You see a dusty road." in tab.scrollback.toPlainText()
 
 
+def test_line_split_across_two_chunks_is_not_duplicated(qapp):
+    # Real, reproduced bug (not hypothetical): a line arriving split
+    # across two separate reads -- extremely common over any real
+    # network connection -- used to render the finalized line followed
+    # by a phantom repeat of its own not-yet-terminated tail, because
+    # _insert_finalized_segments unconditionally restored whatever
+    # preview was showing before the insert, even when that preview
+    # was exactly the pending line that had just been completed.
+    bridge = FakeBridge()
+    tab = SessionTab("example.com", 4201, bridge=bridge)
+
+    bridge.simulate_incoming('You say, "some')
+    bridge.simulate_incoming(' words"\r\n')
+
+    text = tab.scrollback.toPlainText()
+    assert text.count('You say, "some words"') == 1
+    assert not text.rstrip("\n").endswith('You say, "some')
+
+
+def test_multiple_finalized_lines_plus_trailing_preview_in_one_batch(qapp):
+    # A batch with more than one complete line AND a genuine new
+    # trailing partial line (e.g. a prompt) must still show that
+    # trailing preview once, correctly, at the true end -- the fix for
+    # the duplication bug above must not break this case.
+    bridge = FakeBridge()
+    tab = SessionTab("example.com", 4201, bridge=bridge)
+
+    bridge.simulate_incoming("Line1\nLine2\nPartial")
+
+    text = tab.scrollback.toPlainText()
+    assert text.endswith("Line1\nLine2\nPartial")
+    assert text.count("Partial") == 1
+
+
 def test_connection_closed_disables_input(qapp):
     bridge = FakeBridge()
     tab = SessionTab("example.com", 4201, bridge=bridge)
