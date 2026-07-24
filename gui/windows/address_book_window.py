@@ -17,6 +17,19 @@ a genuine MushTato addition, not a Potato port -- verified against the
 real Potato source (~/git/potato/potato.vfs) that its own Manage Worlds
 window has no equivalent picker; its "Char" column and Connect button
 only ever read/use the stored default.
+
+Post-Character-picker addition (another genuine MushTato addition,
+Rick's own request, no Potato equivalent claimed): a per-world
+"auto-login on startup" checkbox right on each row of the Worlds list,
+and Sort A-Z/Z-A buttons plus drag-and-drop manual reordering. The
+checkbox is only enabled once a world has a default_character set
+(auto-login has nothing to log in as otherwise) -- shown greyed-out
+rather than hidden so it's visible feedback, not a silent gap.
+Reordering (drag-and-drop or a sort click) rewrites ``self.worlds`` and
+persists immediately, the same "list order is stored order" model
+Potato itself doesn't have any precedent for either. gui/app.py's
+startup path reads this flag directly from the saved address book (no
+GUI window needs to exist yet) -- see ``worlds_to_auto_login`` there.
 """
 
 from __future__ import annotations
@@ -24,11 +37,14 @@ from __future__ import annotations
 from pathlib import Path
 from typing import List, Optional
 
+from PySide6.QtCore import Qt
 from PySide6.QtGui import QKeySequence, QShortcut
 from PySide6.QtWidgets import (
+    QAbstractItemView,
     QHBoxLayout,
     QLabel,
     QListWidget,
+    QListWidgetItem,
     QMainWindow,
     QPushButton,
     QVBoxLayout,
@@ -60,6 +76,12 @@ class AddressBookWindow(QMainWindow):
         self.list_widget.itemDoubleClicked.connect(self._connect_selected)
         self.list_widget.currentRowChanged.connect(self._refresh_selection_dependent_buttons)
         self.list_widget.currentRowChanged.connect(self._refresh_character_list)
+        self.list_widget.itemChanged.connect(self._on_world_item_changed)
+        # Manual drag-and-drop reordering ("choose the order in which
+        # they are listed") -- InternalMove keeps this a pure reorder,
+        # never a copy/drop-from-elsewhere.
+        self.list_widget.setDragDropMode(QAbstractItemView.DragDropMode.InternalMove)
+        self.list_widget.model().rowsMoved.connect(self._on_worlds_reordered)
 
         self.character_list = QListWidget(self)
         self.character_list.currentRowChanged.connect(self._refresh_login_button)
@@ -76,6 +98,10 @@ class AddressBookWindow(QMainWindow):
         self.properties_button.clicked.connect(self._open_properties)
         self.login_button = QPushButton("Log In")
         self.login_button.clicked.connect(self._log_in_as_selected_character)
+        sort_az_button = QPushButton("Sort A-Z")
+        sort_az_button.clicked.connect(self._sort_alpha)
+        sort_za_button = QPushButton("Sort Z-A")
+        sort_za_button.clicked.connect(self._sort_reverse_alpha)
 
         button_row = QHBoxLayout()
         button_row.addWidget(add_button)
@@ -84,6 +110,8 @@ class AddressBookWindow(QMainWindow):
         button_row.addWidget(self.connect_button)
         button_row.addWidget(self.properties_button)
         button_row.addWidget(self.login_button)
+        button_row.addWidget(sort_az_button)
+        button_row.addWidget(sort_za_button)
 
         lists_row = QHBoxLayout()
         worlds_column = QVBoxLayout()
@@ -119,11 +147,65 @@ class AddressBookWindow(QMainWindow):
         QShortcut(QKeySequence(hotkeys["close_window"]), self, activated=self.close)
 
     def _refresh_list(self) -> None:
+        # Blocked so that setCheckState() below (a data change on a
+        # freshly-added item) doesn't fire itemChanged and re-save
+        # during a routine repopulation -- only a real user click on
+        # the checkbox should trigger _on_world_item_changed.
+        self.list_widget.blockSignals(True)
         self.list_widget.clear()
         for world in self.worlds:
-            self.list_widget.addItem(f"{world.name} ({world.host}:{world.port})")
+            item = QListWidgetItem(f"{world.name} ({world.host}:{world.port})")
+            # The row itself always stays selectable/enabled (Edit,
+            # Delete, Connect, Properties, double-click all still need
+            # to work on a world with no default character set yet) --
+            # only the checkbox's presence is conditional. A world
+            # without a default character simply shows no checkbox at
+            # all rather than a disabled one, since Qt ties a disabled
+            # checkbox to a disabled (unselectable) *row*, which would
+            # break every other button for that world.
+            flags = Qt.ItemFlag.ItemIsSelectable | Qt.ItemFlag.ItemIsEnabled
+            can_auto_login = bool(world.default_character)
+            if can_auto_login:
+                flags |= Qt.ItemFlag.ItemIsUserCheckable
+            item.setFlags(flags)
+            if can_auto_login:
+                item.setCheckState(
+                    Qt.CheckState.Checked if world.auto_login else Qt.CheckState.Unchecked
+                )
+                item.setToolTip("Auto-login on startup")
+            else:
+                item.setToolTip("Set a default character (Properties...) to enable auto-login")
+            item.setData(Qt.ItemDataRole.UserRole, world)
+            self.list_widget.addItem(item)
+        self.list_widget.blockSignals(False)
         self._refresh_selection_dependent_buttons()
         self._refresh_character_list()
+
+    def _on_world_item_changed(self, item: QListWidgetItem) -> None:
+        world = item.data(Qt.ItemDataRole.UserRole)
+        if world is None:
+            return
+        checked = item.checkState() == Qt.CheckState.Checked
+        if world.auto_login != checked:
+            world.auto_login = checked
+            self._save()
+
+    def _on_worlds_reordered(self, *_args) -> None:
+        self.worlds = [
+            self.list_widget.item(i).data(Qt.ItemDataRole.UserRole)
+            for i in range(self.list_widget.count())
+        ]
+        self._save()
+
+    def _sort_alpha(self) -> None:
+        self.worlds.sort(key=lambda w: w.name.lower())
+        self._save()
+        self._refresh_list()
+
+    def _sort_reverse_alpha(self) -> None:
+        self.worlds.sort(key=lambda w: w.name.lower(), reverse=True)
+        self._save()
+        self._refresh_list()
 
     def _refresh_selection_dependent_buttons(self, *_args) -> None:
         has_selection = self._selected_index() is not None

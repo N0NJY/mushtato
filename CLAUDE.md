@@ -1190,6 +1190,143 @@ still correctly reused/deduped against an existing tab; and
 saved JSON after all of this -- screenshotted for the record. 296 tests
 passing (120 engine + 176 GUI, up from 289).
 
+**Post-8b addition: auto-login on startup + address book sorting.**
+Rick asked for two things together: (1) a per-world "auto-login"
+checkbox so flagged worlds connect and log in automatically when
+MushTato starts, and (2) a way to sort/reorder the Worlds list
+(alphabetical, reverse-alphabetical, or a manually chosen order).
+
+Checkpointed two real forks before writing code. On timing/sequencing:
+Rick described Potato's own real behavior from memory (open, connect,
+jump to the next tab, one at a time -- not waiting on login success
+first, "because occasionally a site might be down") and, when asked,
+said explicitly **no confirmation prompt is needed** ("It doesn't ask
+me to confirm though. That's not necessary") -- a real change from the
+original request's "might ask 'Do you wish Auto-Login?'" wording,
+caught only by asking rather than building the first draft literally.
+On manual reordering: Rick chose **drag-and-drop** over Move Up/Down
+buttons, despite Move Up/Down being the recommended (lower-risk) option.
+
+`WorldProfile` gained `auto_login: bool = False`
+(`engine/storage/address_book.py`), additive-migration-safe like every
+other Phase 8b field. `AddressBookWindow`'s Worlds list
+(`gui/windows/address_book_window.py`) now builds `QListWidgetItem`s
+with a checkbox **only when a world has a `default_character` set** --
+a world without one shows no checkbox at all, not a disabled one. This
+was a real correction mid-build, not the first design: a disabled
+checkbox requires clearing `Qt.ItemFlag.ItemIsEnabled` on the whole
+item, which also would have made the *entire row* unselectable --
+silently breaking Edit/Delete/Connect/Properties for any world without
+a default Character (i.e. most newly-added worlds). Toggling the
+checkbox persists immediately via `itemChanged`, guarded by
+`blockSignals()` during `_refresh_list()`'s own repopulation so a
+routine refresh doesn't re-fire it. Each item's world object is stored
+via `Qt.ItemDataRole.UserRole` and used directly (not re-looked-up by
+index), so persistence is correct regardless of list order.
+
+Sort A-Z / Sort Z-A are one-shot re-sorts of `self.worlds` (by
+`.name.lower()`), not a persistent "mode" -- a newly added world just
+appends to the end until Sort is clicked again, per Rick's own request
+("sort... or choose the order"). Drag-and-drop reordering uses
+`QAbstractItemView.DragDropMode.InternalMove`; the actual persistence
+hook is the model's `rowsMoved` signal (`_on_worlds_reordered`), which
+rebuilds `self.worlds` from each item's stored `UserRole` data in the
+list's current visual order -- proven in a test that calls
+`model().moveRow()` directly (the same primitive a real internal-move
+drop performs), not just simulated by clearing and re-adding items.
+
+Startup wiring (`gui/app.py`): `worlds_to_auto_login()` filters the
+loaded address book to worlds with both `auto_login` and a
+`default_character` set (a checked box with no default is inert, not
+an error); `auto_login_all()` then calls the *exact same*
+`MainWindow.open_tab()` every other connect path already uses, once
+per flagged world, in address-book order -- no parallel connect
+mechanism, no artificial delay between opens (each tab's connection
+already runs on its own independent background thread per the
+Phase 5 architecture, so "one at a time" just describes iteration
+order, matching what Rick described). Only runs on the no-args launch
+path; a direct `host port` CLI connect skips it entirely, same as it
+already skips first-run settings.
+
+Verified at multiple levels, distinguished honestly: the full
+automated suite (296 tests defined; 248 of them -- everything outside
+`engine/scripting`'s RestrictedPython/`google-re2` dependency, which
+this particular sandbox doesn't have installed, an environment gap
+unrelated to this feature -- collected and passing, including 10 new
+tests for the checkbox/sort/reorder behavior and 4 for the
+`worlds_to_auto_login`/`auto_login_all` startup logic); a headless
+screenshot smoke test confirming the checkbox/no-checkbox rendering
+and Sort Z-A visually; and a genuine live end-to-end run against the
+real local RhostMUSH (`127.0.0.1:4444`) driving `gui/app.py`'s actual
+`app.exec()` event loop (not just `QTest.qWait`, which didn't
+reproduce real cross-thread signal delivery correctly in an ad hoc
+script) -- confirmed the flagged world's tab opened, connected, sent
+the masked login line, and received real room content back.
+Updated `gui/help/topics.py`'s Address Book section to document both
+features.
+
+**Post-8b addition: tab-activity flashing.** Rick asked for some way
+to notice when a background tab (not the one currently in view)
+receives new text -- explored as an exploratory question first (per
+this file's own guidance for "what do you think?"-style asks), landing
+on a two-part answer: a color change on the tab label, plus actual
+blinking, not just a static color. One more checkpoint on the
+remaining real fork -- whether the blink settles into a steady color
+after a few seconds (calmer, Slack/Discord-style) or keeps blinking
+indefinitely until viewed -- and Rick chose **indefinite**, explicitly
+over the recommended calmer option.
+
+`SessionTab` (`gui/windows/session_tab.py`) gained a new `activity`
+signal, emitted from `_on_text_received()` whenever real segments
+arrive (same guard already used for the scrollback-append/spawn-window
+mirroring, so this doesn't fire for a completely empty chunk).
+`SessionTab` deliberately doesn't know or care whether it's the
+*currently active* tab -- exactly the same separation of concerns as
+`connectionStateChanged`, where the host shell (which actually owns
+tab selection) makes that call, not the tab itself.
+
+`MainWindow` (`gui/windows/main_window.py`) does the rest: a single
+shared `QTimer` (`_activity_timer`, 500ms) flashes every tab currently
+tracked in `_tabs_with_activity` together, rather than one timer per
+tab -- simpler, and keeps multiple flashing tabs blinking in sync
+rather than independently drifting. Tracked by **tab object**, not
+index -- indices shift as tabs open/close, so each tick looks up a
+tab's *current* index via `indexOf()` rather than trusting a stashed
+one. `QTabBar.setTabTextColor(index, QColor())` (an invalid color) is
+the reset path back to the tab bar's own default text color, rather
+than this code trying to compute/track what that default is per-theme.
+The activity color itself (`MainWindow.ACTIVITY_COLOR`, orange) is a
+single fixed choice for both dark/light themes -- this is tab-bar
+chrome, not scrollback content, so the dark/light legibility concerns
+that drove `gui/theme.py`'s and `engine/ansi`'s own color choices don't
+carry over the same way; revisit if orange turns out to read poorly on
+one theme in practice. `_on_current_tab_changed()` (already existed,
+wired to `tab_widget.currentChanged`) is where clearing happens --
+switching to a flashing tab clears and un-tracks it immediately,
+regardless of scroll position within that tab. `close_tab()` also
+untracks a closed tab so `_tabs_with_activity` never holds a stale
+reference. The timer only runs while at least one tab actually has
+unseen activity, stopping itself once the last one is cleared.
+
+Verified with 8 new headless tests (`tests/gui/test_tab_activity.py`):
+activity in the *currently active* tab never marks/flashes it; a
+background tab's activity marks it, starts the timer, and colors its
+tab immediately; manually ticking the flash toggles the color between
+`ACTIVITY_COLOR` and the reset color; switching to a flashing tab
+clears it and resets its color; the timer stops once the last flashing
+tab is cleared; the flash keeps going through 20+ ticks with no
+auto-settle (Rick's "indefinite" choice, proven, not just asserted);
+multiple background tabs flash independently-tracked but in sync, and
+clearing one leaves the other still flashing; closing a flashing tab
+untracks it. Full suite: 256 passing (up from 248, everything outside
+`engine/scripting`'s `google-re2`/RestrictedPython dependency, which
+this sandbox still doesn't have installed -- an unrelated, pre-existing
+environment gap). Also visually confirmed via a headless screenshot
+smoke test showing two background tabs' labels rendering in orange
+while the active tab stays normal, and the color correctly toggling
+off on the next simulated tick. Updated the "Sessions & Tabs" Help
+topic to document the behavior.
+
 Next: Rick has his own phase document for what comes after Phase 8b --
 not yet assigned a phase number here.
 

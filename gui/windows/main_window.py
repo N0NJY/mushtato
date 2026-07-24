@@ -16,7 +16,7 @@ from __future__ import annotations
 from typing import Dict, Optional
 
 from PySide6.QtCore import QDateTime, QTimer
-from PySide6.QtGui import QAction, QActionGroup, QKeySequence, QShortcut
+from PySide6.QtGui import QAction, QActionGroup, QColor, QKeySequence, QShortcut
 from PySide6.QtWidgets import (
     QApplication,
     QLabel,
@@ -50,6 +50,15 @@ __all__ = ["MainWindow", "mushtato_version"]
 
 
 class MainWindow(QMainWindow):
+    # Tab-activity flashing (post-8b addition): a single fixed color
+    # used for every world, on either theme -- not a Potato/TinyFugue
+    # port, no per-theme variant attempted (this is tab-bar chrome, not
+    # scrollback content, so the dark/light legibility concerns that
+    # drove engine/ansi/gui/theme's own color choices don't apply the
+    # same way here).
+    ACTIVITY_COLOR = QColor(255, 140, 0)  # orange
+    ACTIVITY_BLINK_INTERVAL_MS = 500
+
     def __init__(
         self,
         *,
@@ -77,6 +86,20 @@ class MainWindow(QMainWindow):
         self.tab_widget.setTabsClosable(False)
         self.tab_widget.currentChanged.connect(self._on_current_tab_changed)
         self.setCentralWidget(self.tab_widget)
+
+        # Tab-activity flashing: which SessionTabs currently have unseen
+        # activity (tracked by object, not index -- indices shift as
+        # tabs open/close, so looking up a tab's *current* index each
+        # tick via indexOf() is the only reliable option). One shared
+        # timer flashes every marked tab in sync, rather than a timer
+        # per tab -- simpler and keeps multiple flashing tabs blinking
+        # together instead of independently. Runs only while at least
+        # one tab actually has unseen activity.
+        self._tabs_with_activity: set = set()
+        self._activity_flash_on = False
+        self._activity_timer = QTimer(self)
+        self._activity_timer.setInterval(self.ACTIVITY_BLINK_INTERVAL_MS)
+        self._activity_timer.timeout.connect(self._tick_activity_flash)
 
         self._build_chrome()
         self._apply_hotkeys()
@@ -127,6 +150,7 @@ class MainWindow(QMainWindow):
             character=character,
         )
         tab.connectionStateChanged.connect(lambda state, t=tab: self._on_tab_state_changed(t, state))
+        tab.activity.connect(lambda t=tab: self._on_tab_activity(t))
         index = self.tab_widget.addTab(tab, tab.name)
         self.tab_widget.setCurrentIndex(index)
         self._refresh_action_enabled_state()
@@ -137,6 +161,9 @@ class MainWindow(QMainWindow):
         if index == -1:
             return
         tab.shutdown()
+        self._tabs_with_activity.discard(tab)
+        if not self._tabs_with_activity:
+            self._activity_timer.stop()
         self.tab_widget.removeTab(index)
         tab.deleteLater()
         self._refresh_action_enabled_state()
@@ -182,13 +209,53 @@ class MainWindow(QMainWindow):
             self._address_book_window.worlds = worlds
             self._address_book_window._refresh_list()
 
-    def _on_current_tab_changed(self, index: int) -> None:  # noqa: ARG002
+    def _on_current_tab_changed(self, index: int) -> None:
+        if index != -1:
+            self._clear_tab_activity(self.tab_widget.widget(index))
         self._refresh_status_bar()
         self._refresh_action_enabled_state()
 
     def _on_tab_state_changed(self, tab: SessionTab, state: str) -> None:
         if self.tab_widget.currentWidget() is tab:
             self.status_state_label.setText(state)
+
+    # -- tab-activity flashing ------------------------------------------
+
+    def _on_tab_activity(self, tab: SessionTab) -> None:
+        # Only *other* tabs get flashed -- text arriving in the tab
+        # you're already looking at isn't "activity you missed".
+        if self.tab_widget.currentWidget() is tab:
+            return
+        if tab not in self._tabs_with_activity:
+            self._tabs_with_activity.add(tab)
+        if not self._activity_timer.isActive():
+            self._activity_flash_on = True
+            self._apply_activity_colors()
+            self._activity_timer.start()
+
+    def _tick_activity_flash(self) -> None:
+        self._activity_flash_on = not self._activity_flash_on
+        self._apply_activity_colors()
+
+    def _apply_activity_colors(self) -> None:
+        bar = self.tab_widget.tabBar()
+        color = self.ACTIVITY_COLOR if self._activity_flash_on else QColor()
+        for tab in self._tabs_with_activity:
+            index = self.tab_widget.indexOf(tab)
+            if index != -1:
+                bar.setTabTextColor(index, color)
+
+    def _clear_tab_activity(self, tab: SessionTab) -> None:
+        if tab in self._tabs_with_activity:
+            self._tabs_with_activity.discard(tab)
+            index = self.tab_widget.indexOf(tab)
+            if index != -1:
+                # An invalid QColor tells Qt to fall back to the tab
+                # bar's own default text color, rather than us having
+                # to compute/track what that default is per-theme.
+                self.tab_widget.tabBar().setTabTextColor(index, QColor())
+        if not self._tabs_with_activity:
+            self._activity_timer.stop()
 
     # -- address book / settings (host-level, shared by every tab) ---
 

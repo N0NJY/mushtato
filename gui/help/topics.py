@@ -168,6 +168,28 @@ list on the left, that section's fields on the right):
   principle the Pose/says... box already follows.
 - **Notes** -- one free-text block for anything you want to remember
   about this world.
+
+## Auto-Login on startup
+
+Each world in the list shows a checkbox once it has a default Character
+set (Properties -> Basic) -- check it to have MushTato automatically
+open and log into that world every time the app starts, with no
+confirmation prompt. Worlds without a default Character show no
+checkbox at all, since there'd be nothing to log in as; set one in
+Properties first. Flagged worlds are opened one at a time, in the
+order they appear in this list, the same way clicking Connect on each
+in turn would -- a world that's down doesn't hold up the rest, since
+nothing waits for a login to actually succeed before opening the next.
+
+## Sorting and reordering
+
+- **Sort A-Z** / **Sort Z-A** -- re-sort the whole list alphabetically
+  by world name, right now. This is a one-time action, not a mode --
+  adding a new world afterward just appends it to the end until you
+  click Sort again.
+- **Drag and drop** a world up or down in the list to put it in
+  whatever custom order you want. The saved order is what both the
+  list itself and Auto-Login's connect-in-sequence use.
 """
 
 
@@ -196,6 +218,15 @@ separate window per connection.
 This replaced an earlier design (one separate top-level window per
 connection) -- if you're used to an older MushTato build, this is the
 intentional current model, not a bug.
+
+## Tab activity
+
+If text arrives on a tab you're *not* currently looking at, its label
+blinks orange -- so you notice something happened on another world
+while your attention was elsewhere. It keeps blinking indefinitely
+(not just a few times) until you actually switch to that tab, at which
+point it clears immediately. The tab you're currently viewing never
+flashes for its own incoming text -- only tabs in the background do.
 """
 
 

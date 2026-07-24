@@ -109,6 +109,7 @@ def test_old_phase6_format_json_still_loads_with_new_fields_defaulted(tmp_path: 
     assert world.autosend_connect == ""
     assert world.autosend_login == ""
     assert world.connect_count == 0
+    assert world.auto_login is False
 
 
 def test_old_format_json_missing_worlds_key_entirely_still_loads(tmp_path: Path):
@@ -193,3 +194,21 @@ def test_connect_count_increment_and_save_round_trips(tmp_path: Path):
     save_address_book(path, worlds)
 
     assert load_address_book(path)[0].connect_count == 1
+
+
+# -- auto-login flag (post-Character-picker addition) -------------------
+
+
+def test_auto_login_round_trips(tmp_path: Path):
+    path = tmp_path / "address_book.json"
+    save_address_book(path, [WorldProfile(name="X", host="h", port=1, auto_login=True)])
+
+    assert load_address_book(path)[0].auto_login is True
+
+
+def test_pre_auto_login_format_json_defaults_to_false(tmp_path: Path):
+    path = tmp_path / "address_book.json"
+    old_format_json = {"worlds": [{"name": "Old", "host": "old.example.com", "port": 1}]}
+    path.write_text(json.dumps(old_format_json), encoding="utf-8")
+
+    assert load_address_book(path)[0].auto_login is False

@@ -41,6 +41,7 @@ class SessionTab(QWidget):
 
     titleChanged = Signal(str)
     connectionStateChanged = Signal(str)
+    activity = Signal()  # new text arrived -- host decides if this tab is "active" or not
 
     def __init__(
         self,
@@ -252,6 +253,11 @@ class SessionTab(QWidget):
             append_styled_segments(self.scrollback, segments)
             for spawn in self.spawn_windows:
                 spawn.receive_segments(segments)
+            # SessionTab doesn't know (or need to know) whether it's the
+            # currently-active tab -- that's the host shell's call to
+            # make (tab-activity flashing, post-8b addition), same
+            # separation as connectionStateChanged.
+            self.activity.emit()
 
     def _on_connection_closed(self) -> None:
         self._append_plain("\n[Connection closed by server]\n")

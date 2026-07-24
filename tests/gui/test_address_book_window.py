@@ -269,3 +269,113 @@ def test_log_in_as_public_method_does_not_require_list_selection_state(qapp, tmp
     window.log_in_as(world, character)
 
     assert host.open_tab_calls == [("h", 1, "X", world, character)]
+
+
+# -- Auto-login checkbox + sorting/reordering (post-Character-picker) ---
+
+
+def test_world_with_no_default_character_shows_no_checkbox(qapp, tmp_path: Path):
+    from PySide6.QtCore import Qt
+
+    worlds = [WorldProfile(name="No Default", host="h", port=1)]
+    window = make_address_book(tmp_path, worlds)
+
+    item = window.list_widget.item(0)
+    assert not (item.flags() & Qt.ItemFlag.ItemIsUserCheckable)
+    # The row itself must still be usable -- only the checkbox is gated.
+    assert item.flags() & Qt.ItemFlag.ItemIsEnabled
+    assert item.flags() & Qt.ItemFlag.ItemIsSelectable
+
+
+def test_world_with_default_character_shows_a_checkbox_reflecting_auto_login(
+    qapp, tmp_path: Path
+):
+    from engine.storage import CharacterProfile
+    from PySide6.QtCore import Qt
+
+    worlds = [
+        WorldProfile(
+            name="Has Default", host="h", port=1,
+            characters=[CharacterProfile(name="Thoran")],
+            default_character="Thoran",
+            auto_login=True,
+        )
+    ]
+    window = make_address_book(tmp_path, worlds)
+
+    item = window.list_widget.item(0)
+    assert item.flags() & Qt.ItemFlag.ItemIsUserCheckable
+    assert item.checkState() == Qt.CheckState.Checked
+
+
+def test_checking_the_box_persists_auto_login(qapp, tmp_path: Path):
+    from engine.storage import CharacterProfile, load_address_book
+    from PySide6.QtCore import Qt
+
+    worlds = [
+        WorldProfile(
+            name="Has Default", host="h", port=1,
+            characters=[CharacterProfile(name="Thoran")],
+            default_character="Thoran",
+        )
+    ]
+    window = make_address_book(tmp_path, worlds)
+    item = window.list_widget.item(0)
+    assert item.checkState() == Qt.CheckState.Unchecked
+
+    item.setCheckState(Qt.CheckState.Checked)
+
+    assert window.worlds[0].auto_login is True
+    assert load_address_book(window._path)[0].auto_login is True
+
+
+def test_sort_a_to_z_reorders_and_persists(qapp, tmp_path: Path):
+    from engine.storage import load_address_book
+
+    worlds = [
+        WorldProfile(name="Charlie", host="a", port=1),
+        WorldProfile(name="alpha", host="b", port=2),
+        WorldProfile(name="Bravo", host="c", port=3),
+    ]
+    window = make_address_book(tmp_path, worlds)
+
+    window._sort_alpha()
+
+    assert [w.name for w in window.worlds] == ["alpha", "Bravo", "Charlie"]
+    assert [w.name for w in load_address_book(window._path)] == ["alpha", "Bravo", "Charlie"]
+
+
+def test_sort_z_to_a_reorders_and_persists(qapp, tmp_path: Path):
+    worlds = [
+        WorldProfile(name="alpha", host="a", port=1),
+        WorldProfile(name="Bravo", host="b", port=2),
+        WorldProfile(name="Charlie", host="c", port=3),
+    ]
+    window = make_address_book(tmp_path, worlds)
+
+    window._sort_reverse_alpha()
+
+    assert [w.name for w in window.worlds] == ["Charlie", "Bravo", "alpha"]
+
+
+def test_dragging_a_world_to_a_new_position_persists_the_new_order(qapp, tmp_path: Path):
+    # Simulates the actual operation Qt's InternalMove drag-and-drop
+    # performs under the hood -- QAbstractItemModel.moveRow() is the
+    # one operation that emits rowsMoved; a plain takeItem/insertItem
+    # pair would emit rowsRemoved/rowsInserted instead and wouldn't
+    # exercise the same code path a real drag uses.
+    from PySide6.QtCore import QModelIndex
+
+    from engine.storage import load_address_book
+
+    worlds = [
+        WorldProfile(name="A", host="a", port=1),
+        WorldProfile(name="B", host="b", port=2),
+        WorldProfile(name="C", host="c", port=3),
+    ]
+    window = make_address_book(tmp_path, worlds)
+
+    window.list_widget.model().moveRow(QModelIndex(), 2, QModelIndex(), 0)
+
+    assert [w.name for w in window.worlds] == ["C", "A", "B"]
+    assert [w.name for w in load_address_book(window._path)] == ["C", "A", "B"]

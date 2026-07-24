@@ -63,6 +63,12 @@ class WorldProfile:
     # verified against Potato's own sendLoginInfoSub: it checks
     # conn($c,numConnects) == 1, a counter that survives restarts.
     connect_count: int = 0
+    # Per-world "connect me automatically on app startup" flag (post-8b
+    # addition, Rick's own request -- no Potato equivalent researched
+    # or claimed here). Only actually acted on at startup if a
+    # default_character is also set, since auto-login has nothing to
+    # log in as otherwise.
+    auto_login: bool = False
 
 
 def load_address_book(path: Path) -> List[WorldProfile]:
@@ -97,6 +103,7 @@ def load_address_book(path: Path) -> List[WorldProfile]:
                 autosend_connect=entry.get("autosend_connect", ""),
                 autosend_login=entry.get("autosend_login", ""),
                 connect_count=entry.get("connect_count", 0),
+                auto_login=entry.get("auto_login", False),
             )
         )
     return worlds
@@ -121,6 +128,7 @@ def save_address_book(path: Path, worlds: List[WorldProfile]) -> None:
                 "autosend_connect": w.autosend_connect,
                 "autosend_login": w.autosend_login,
                 "connect_count": w.connect_count,
+                "auto_login": w.auto_login,
             }
             for w in worlds
         ]
