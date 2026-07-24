@@ -6,6 +6,32 @@ of work, per `CLAUDE.md`/`SPEC.md`'s roadmap) rather than by version
 number, reconstructed from `CLAUDE.md`'s phase-by-phase notes and git
 history. All dates below are from the actual commit history.
 
+## Post-Phase-9 — Connection resilience + clickable URLs (2026-07-24)
+
+- **Dropped connections are now detected.** OS-level TCP keepalive is
+  always on for every connection, so a silently-dead network (e.g. the
+  user's own connection dropping) now reliably produces the same
+  "[Connection lost]" message a clean server-side close already showed
+  — previously it just hung with no indication anything was wrong.
+- **Automatic reconnection.** Once a tab's connection drops, it retries
+  connecting again every 30 seconds — indefinitely, with no
+  confirmation prompt — until a retry succeeds or the user clicks
+  Disconnect. Runs independently per tab; each retry calls the exact
+  same code the manual Reconnect action already uses.
+- **Telnet NOP keepalive**, opt-in per world (World Properties →
+  Connection → Keepalive checkbox, now functional rather than a
+  disabled placeholder): sends an application-level `IAC NOP` every 60
+  seconds, for worlds behind a firewall/NAT that drops idle connections
+  before OS-level TCP keepalive would ever notice.
+- **Clickable URLs.** Any `http://`/`https://` URL in a tab's scrollback
+  (or a spawned log window mirroring it) is now underlined, colored,
+  and clickable — opens in the system's default browser. Display-layer
+  only; doesn't change what triggers see.
+- Along the way: fixed a real pre-existing bug where saving World
+  Properties for any reason could silently reset a world's `auto_login`
+  flag back to off, since it was never threaded through
+  `result_profile()`.
+
 ## Phase 9 — GUI-scripting integration (2026-07-24)
 
 - `engine/scripting` (sandboxed triggers/aliases/gags/highlights/timers/

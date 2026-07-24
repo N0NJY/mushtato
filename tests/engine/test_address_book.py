@@ -212,3 +212,18 @@ def test_pre_auto_login_format_json_defaults_to_false(tmp_path: Path):
     path.write_text(json.dumps(old_format_json), encoding="utf-8")
 
     assert load_address_book(path)[0].auto_login is False
+
+
+def test_nop_keepalive_round_trips(tmp_path: Path):
+    path = tmp_path / "address_book.json"
+    save_address_book(path, [WorldProfile(name="X", host="h", port=1, nop_keepalive=True)])
+
+    assert load_address_book(path)[0].nop_keepalive is True
+
+
+def test_pre_nop_keepalive_format_json_defaults_to_false(tmp_path: Path):
+    path = tmp_path / "address_book.json"
+    old_format_json = {"worlds": [{"name": "Old", "host": "old.example.com", "port": 1}]}
+    path.write_text(json.dumps(old_format_json), encoding="utf-8")
+
+    assert load_address_book(path)[0].nop_keepalive is False

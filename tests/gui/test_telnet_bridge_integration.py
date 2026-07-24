@@ -187,3 +187,88 @@ def test_on_text_callback_fires_before_the_equivalent_textReceived_signal(qapp):
 
     bridge.stop()
     server_loop.call_soon_threadsafe(server_state["task"].cancel)
+
+
+def _start_byte_recording_server_in_background(ready: threading.Event, host_port: dict, received: list):
+    """Like _start_fake_server_in_background, but the server just
+    records every byte it receives (rather than scripting a specific
+    banner/response exchange) -- used to prove the NOP keepalive
+    heartbeat actually reaches the wire.
+    """
+    loop = asyncio.new_event_loop()
+    state: dict = {}
+
+    async def record(reader, writer):
+        del writer
+        while True:
+            chunk = await reader.read(64)
+            if not chunk:
+                return
+            received.extend(chunk)
+
+    async def serve():
+        server = await asyncio.start_server(record, "127.0.0.1", 0)
+        host, port = server.sockets[0].getsockname()[:2]
+        host_port["host"] = host
+        host_port["port"] = port
+        ready.set()
+        async with server:
+            await server.serve_forever()
+
+    async def main():
+        state["task"] = asyncio.current_task()
+        try:
+            await serve()
+        except asyncio.CancelledError:
+            pass
+
+    def run():
+        asyncio.set_event_loop(loop)
+        loop.run_until_complete(main())
+
+    thread = threading.Thread(target=run, daemon=True)
+    thread.start()
+    return loop, state
+
+
+def test_nop_keepalive_sends_iac_nop_periodically_when_enabled(qapp):
+    from engine.net.telnet import IAC, NOP
+
+    ready = threading.Event()
+    host_port: dict = {}
+    received: list = []
+    server_loop, server_state = _start_byte_recording_server_in_background(ready, host_port, received)
+    assert ready.wait(timeout=3), "fake server never started"
+
+    bridge = TelnetBridge(host_port["host"], host_port["port"], nop_keepalive=True)
+    bridge.NOP_KEEPALIVE_INTERVAL_SECONDS = 0.05  # instance override -- don't wait 60 real seconds
+    connected_spy = QSignalSpy(bridge.connected)
+    bridge.start()
+
+    assert _pump_until(qapp, lambda: connected_spy.count() >= 1), "never connected"
+    assert _pump_until(
+        qapp, lambda: received.count(IAC) >= 2, timeout_seconds=3.0
+    ), f"never received repeated NOPs, got: {received}"
+    assert received[:2] == [IAC, NOP]
+
+    bridge.stop()
+    server_loop.call_soon_threadsafe(server_state["task"].cancel)
+
+
+def test_no_nop_keepalive_sent_when_disabled(qapp):
+    ready = threading.Event()
+    host_port: dict = {}
+    received: list = []
+    server_loop, server_state = _start_byte_recording_server_in_background(ready, host_port, received)
+    assert ready.wait(timeout=3), "fake server never started"
+
+    bridge = TelnetBridge(host_port["host"], host_port["port"])  # nop_keepalive defaults to False
+    connected_spy = QSignalSpy(bridge.connected)
+    bridge.start()
+    assert _pump_until(qapp, lambda: connected_spy.count() >= 1), "never connected"
+
+    _pump_until(qapp, lambda: False, timeout_seconds=0.3)  # let a moment pass
+    assert received == []
+
+    bridge.stop()
+    server_loop.call_soon_threadsafe(server_state["task"].cancel)

@@ -14,7 +14,7 @@ from typing import Optional
 
 from PySide6.QtCore import Signal
 from PySide6.QtGui import QFontDatabase
-from PySide6.QtWidgets import QMainWindow, QTextEdit
+from PySide6.QtWidgets import QMainWindow, QTextBrowser
 
 from engine.storage import DEFAULT_THEME
 
@@ -30,8 +30,13 @@ class SpawnWindow(QMainWindow):
         self.setWindowTitle(title)
         self._theme = theme if theme is not None else DEFAULT_THEME
 
-        self.scrollback = QTextEdit(self)
+        # QTextBrowser, not plain QTextEdit -- a spawn window mirrors
+        # the same StyledSegments the owning tab's scrollback shows, so
+        # a URL clicked here must work identically (see session_tab.py's
+        # own comment on why QTextBrowser is required for this).
+        self.scrollback = QTextBrowser(self)
         self.scrollback.setReadOnly(True)
+        self.scrollback.setOpenExternalLinks(True)
         self.scrollback.setFont(QFontDatabase.systemFont(QFontDatabase.SystemFont.FixedFont))
         # Same dimmer output-pane colors as MainWindow's scrollback --
         # see gui/theme.py's apply_scrollback_theme (sets the palette

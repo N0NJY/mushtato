@@ -53,6 +53,14 @@ class TelnetBridge(QObject):
     connectionClosed = Signal()
     connectionFailed = Signal(str)
 
+    # Post-Phase-9 addition: an application-level Telnet NOP heartbeat,
+    # matching Potato's real "Use NOP Keepalive" option (verified
+    # mechanism against potato-telnet.tcl's send_keepalive -- see
+    # engine/net/client.py's send_nop() docstring for what wasn't
+    # verifiable: Potato's own real scheduling interval). This is
+    # this project's own reasonable choice, not a ported value.
+    NOP_KEEPALIVE_INTERVAL_SECONDS = 60
+
     def __init__(
         self,
         host: str,
@@ -60,11 +68,13 @@ class TelnetBridge(QObject):
         parent: Optional[QObject] = None,
         *,
         on_text: Optional[Callable[[str], None]] = None,
+        nop_keepalive: bool = False,
     ) -> None:
         super().__init__(parent)
         self._host = host
         self._port = port
         self._on_text = on_text
+        self._nop_keepalive = nop_keepalive
         self._loop: Optional[asyncio.AbstractEventLoop] = None
         self._client: Optional[TelnetClient] = None
         self._thread: Optional[threading.Thread] = None
@@ -162,6 +172,7 @@ class TelnetBridge(QObject):
     async def _run(self) -> None:
         client = TelnetClient(self._host, self._port)
         self._client = client
+        keepalive_task: Optional[asyncio.Task] = None
         try:
             try:
                 await client.connect()
@@ -170,6 +181,8 @@ class TelnetBridge(QObject):
                 return
 
             self.connected.emit()
+            if self._nop_keepalive:
+                keepalive_task = asyncio.create_task(self._send_nop_periodically(client))
 
             while True:
                 try:
@@ -185,4 +198,20 @@ class TelnetBridge(QObject):
                         self._on_text(chunk)
                     self.textReceived.emit(chunk)
         finally:
+            if keepalive_task is not None:
+                keepalive_task.cancel()
             await client.close()
+
+    async def _send_nop_periodically(self, client: TelnetClient) -> None:
+        # A companion task to _run()'s own read loop, cancelled from
+        # _run()'s finally block whenever the connection ends (cleanly
+        # or not) -- an OSError here just means the connection is
+        # already dead, which the read loop's own error handling will
+        # discover and report on its own, so this task simply stops
+        # rather than emitting a second, redundant failure signal.
+        try:
+            while True:
+                await asyncio.sleep(self.NOP_KEEPALIVE_INTERVAL_SECONDS)
+                await client.send_nop()
+        except (asyncio.CancelledError, OSError):
+            pass

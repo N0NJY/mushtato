@@ -34,6 +34,21 @@ FAQ / Troubleshooting**, or type `/help faq` into any tab's command box.
 - If your network uses a custom/restrictive DNS, try connecting by numeric
   IP address if the world's listing provides one.
 
+**A tab went quiet and I never saw "[Connection lost]"**
+- MushTato relies on the operating system's TCP keepalive to notice a
+  silently-dead connection (one where neither side ever sends a clean
+  close — e.g. your own network drops, or a router loses power) — this
+  normally takes about 15-20 seconds. A very restrictive firewall/NAT can
+  still swallow those low-level keepalive probes on some networks; turning
+  on that world's **Keepalive** option (World Properties → Connection)
+  adds an application-level nudge (a Telnet no-op sent every 60 seconds)
+  that can help in that case.
+- Once a drop is detected, MushTato automatically retries reconnecting
+  every 30 seconds — no need to reconnect by hand. It keeps retrying
+  indefinitely until either a retry succeeds or you click **Disconnect**
+  (File menu, toolbar, or `/disconnect`) to give up on it. See the in-app
+  Help's Sessions & Tabs topic.
+
 ## Installation / launch problems
 
 **Windows: "Windows protected your PC" (SmartScreen)**
@@ -80,6 +95,12 @@ Some items (Editor, Upload, Mail Window, Find) are shown disabled
 (grayed out) on purpose — they're modeled on real Potato features
 MushTato doesn't have working equivalents for yet, not broken buttons.
 See the in-app Help's Menus & Toolbar topic.
+
+**Does MushTato make URLs in the scrollback clickable?**
+Yes — any `http://` or `https://` URL in a tab's scrollback (or a spawned
+log window mirroring it) is shown underlined in a distinct color; clicking
+it opens your system's default web browser. Purely a display-layer
+feature — it doesn't change what the server sent or what triggers see.
 
 **I checked "auto-login" on a world but nothing happens at startup**
 Auto-login also requires that world to have a default Character set

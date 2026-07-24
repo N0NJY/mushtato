@@ -151,11 +151,13 @@ list on the left, that section's fields on the right):
   Edit/Delete a Character, then Save or Cancel that one change.
 - **Connection** -- the *Login Format* (e.g. `connect {name}
   {password}`, sent with the default Character's name/password
-  substituted in) and *Login Delay* (how long to wait after connecting
+  substituted in), *Login Delay* (how long to wait after connecting
   before sending it, giving the server time to show its own banner
-  first) are real and functional. The rest of this section (SSL, a 2nd
-  address/port, proxy, and several Telnet-specific options) mirrors
-  real settings from Potato but is shown **disabled** -- MushTato's
+  first), and *Keepalive* (send a Telnet no-op every 60 seconds to keep
+  idle firewalls/NAT from silently dropping this connection) are real
+  and functional. The rest of this section (SSL, a 2nd address/port,
+  proxy, and several other Telnet-specific options) mirrors real
+  settings from Potato but is shown **disabled** -- MushTato's
   connection engine doesn't support them yet. Visible on purpose, so
   it's clear what's planned versus what's broken.
 - **Auto-Sends** -- three optional blocks of text (one line each) sent
@@ -233,6 +235,37 @@ while your attention was elsewhere. It keeps blinking indefinitely
 (not just a few times) until you actually switch to that tab, at which
 point it clears immediately. The tab you're currently viewing never
 flashes for its own incoming text -- only tabs in the background do.
+
+## Clickable links
+
+Any `http://` or `https://` URL appearing in a tab's scrollback
+(including a spawned log window mirroring it) is shown underlined in a
+distinct color and is clickable -- clicking one opens it in your
+system's default web browser. This is purely a display-layer feature;
+it doesn't change what the server actually sent or what triggers see.
+
+## Detecting a dropped connection
+
+MushTato keeps the underlying TCP connection's OS-level keepalive
+turned on for every tab, always -- if the network genuinely goes away
+(your own connection drops, a router loses power, etc.) without either
+side sending a clean close, the OS itself notices within about 15-20
+seconds and MushTato reports "[Connection lost]" in that tab's
+scrollback and updates its status bar, the same as a clean server-side
+disconnect always did. If a particular world also needs an
+application-level nudge to stop an idle firewall/NAT from dropping it
+in the first place, turn on that world's *Keepalive* option in World
+Properties -> Connection (see the Address Book topic).
+
+## Automatic reconnection
+
+Once a tab's connection drops -- however it drops -- that tab
+automatically retries connecting again every 30 seconds, on its own,
+with no confirmation prompt, and keeps retrying indefinitely until
+either a retry succeeds or you click Disconnect (File menu, toolbar,
+or `/disconnect`) to give up on it. Each retry is the exact same action
+as manually clicking Reconnect. This runs independently per tab -- one
+tab retrying doesn't affect any other tab's connection.
 """
 
 
@@ -522,8 +555,19 @@ port for typos (most MU*s use a non-standard port); the server may be
 down; a firewall or VPN may be blocking that port.
 
 **Connection hangs and never says Connected or failed** -- usually a
-firewall silently dropping the connection. Try `/reconnect` or File ->
-Reconnect once you suspect this.
+firewall silently dropping the connection attempt itself (before a TCP
+connection is even established, so keepalive doesn't help here). Try
+`/reconnect` or File -> Reconnect once you suspect this.
+
+**A tab went quiet and I never saw "[Connection lost]"** -- MushTato
+relies on the operating system's TCP keepalive to notice a silently-
+dead connection (no clean close from either side), which normally
+takes 15-20 seconds; a very restrictive firewall/NAT can still swallow
+those keepalive probes on some networks. Turning on that world's
+Keepalive option (World Properties -> Connection) sends an
+application-level nudge too, which can help in that case. Once a drop
+is detected, MushTato retries reconnecting automatically every 30
+seconds -- see the Sessions & Tabs topic.
 
 **Can't resolve the hostname** -- check for typos, or try a numeric IP
 if the world's listing provides one.

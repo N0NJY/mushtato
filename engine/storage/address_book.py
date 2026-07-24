@@ -69,6 +69,14 @@ class WorldProfile:
     # default_character is also set, since auto-login has nothing to
     # log in as otherwise.
     auto_login: bool = False
+    # Application-level Telnet NOP heartbeat (post-Phase-9 addition),
+    # matching Potato's real "Use NOP Keepalive" per-world checkbox
+    # (verified against potato-telnet.tcl -- see
+    # gui/windows/telnet_bridge.py's own docstring for what wasn't
+    # verifiable, namely Potato's real scheduling interval). Off by
+    # default -- most connections don't need it; this is a targeted
+    # opt-in for a world known to idle-kick quiet connections.
+    nop_keepalive: bool = False
 
 
 def load_address_book(path: Path) -> List[WorldProfile]:
@@ -104,6 +112,7 @@ def load_address_book(path: Path) -> List[WorldProfile]:
                 autosend_login=entry.get("autosend_login", ""),
                 connect_count=entry.get("connect_count", 0),
                 auto_login=entry.get("auto_login", False),
+                nop_keepalive=entry.get("nop_keepalive", False),
             )
         )
     return worlds
@@ -129,6 +138,7 @@ def save_address_book(path: Path, worlds: List[WorldProfile]) -> None:
                 "autosend_login": w.autosend_login,
                 "connect_count": w.connect_count,
                 "auto_login": w.auto_login,
+                "nop_keepalive": w.nop_keepalive,
             }
             for w in worlds
         ]

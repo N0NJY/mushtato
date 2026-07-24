@@ -26,7 +26,7 @@ from typing import List, Optional
 
 from PySide6.QtCore import QDateTime, QTimer, Qt, Signal
 from PySide6.QtGui import QTextCursor
-from PySide6.QtWidgets import QSizePolicy, QSplitter, QTextEdit, QVBoxLayout, QWidget
+from PySide6.QtWidgets import QSizePolicy, QSplitter, QTextBrowser, QVBoxLayout, QWidget
 
 from engine.ansi import DEFAULT_STYLE, Style, StyledSegment
 from engine.commands import CommandTable
@@ -87,6 +87,16 @@ class SessionTab(QWidget):
     _aliasExpansionDone = Signal(str, object)
     triggerStateChanged = Signal(str)  # a trigger's enabled state changed -- Scripts UI refresh hook
 
+    # Post-Phase-9 addition: automatic reconnection after a dropped
+    # connection. Fixed 30s for every world (Rick's explicit choice
+    # over a per-world configurable interval, which Potato's own real
+    # autoreconnect,time option supports but Rick didn't want the extra
+    # UI for) -- retries indefinitely until it succeeds or the user
+    # clicks Disconnect (also Rick's explicit choice, matching Potato's
+    # real behavior of reusing Disconnect as the "cancel pending
+    # reconnect" action, verified against potato-skin.tcl).
+    AUTO_RECONNECT_INTERVAL_MS = 30_000
+
     def __init__(
         self,
         host: str,
@@ -124,9 +134,24 @@ class SessionTab(QWidget):
         # replace it in place rather than appending a duplicate.
         self._preview_start_position: Optional[int] = None
         self._preview_segments: List[StyledSegment] = []
+        # Repeating (not single-shot) -- once started, keeps firing
+        # every AUTO_RECONNECT_INTERVAL_MS until explicitly stopped
+        # (a successful reconnect, or the user clicking Disconnect).
+        self._auto_reconnect_timer = QTimer(self)
+        self._auto_reconnect_timer.setInterval(self.AUTO_RECONNECT_INTERVAL_MS)
+        self._auto_reconnect_timer.timeout.connect(self._auto_reconnect_tick)
 
-        self.scrollback = QTextEdit(self)
+        # QTextBrowser (a QTextEdit subclass), not plain QTextEdit --
+        # needed for URLs in incoming text to actually be clickable
+        # (setOpenExternalLinks/anchorClicked are QTextBrowser-only; a
+        # plain QTextEdit renders the same anchor formatting but never
+        # responds to a click on it). Already the established pattern
+        # for the Help window's content pane (gui/help/help_window.py),
+        # including the viewport-palette-fix this scrollback already
+        # needs regardless (see apply_scrollback_theme below).
+        self.scrollback = QTextBrowser(self)
         self.scrollback.setReadOnly(True)
+        self.scrollback.setOpenExternalLinks(True)
         # MUD output (banners, tables, ASCII-art borders, prompts) is
         # authored assuming a fixed-width terminal; the default
         # proportional GUI font breaks that alignment. resolve_
@@ -215,7 +240,9 @@ class SessionTab(QWidget):
         # injected), rather than only passed at TelnetBridge's own
         # construction, so a test's FakeBridge participates in the same
         # on_text-then-textReceived contract a real TelnetBridge does.
-        self.bridge = bridge if bridge is not None else TelnetBridge(host, port)
+        self.bridge = bridge if bridge is not None else TelnetBridge(
+            host, port, nop_keepalive=world.nop_keepalive if world is not None else False
+        )
         self.bridge.set_on_text(self._on_raw_incoming_text)
         self.bridge.connected.connect(self._on_connected)
         self.bridge.connectionClosed.connect(self._on_connection_closed)
@@ -504,6 +531,7 @@ class SessionTab(QWidget):
         self.connectionStateChanged.emit(state)
 
     def _on_connected(self) -> None:
+        self._stop_auto_reconnect()
         self._append_plain("Connected.\n")
         self.connected_at = QDateTime.currentDateTime()
         self._set_connection_state("Connected")
@@ -511,6 +539,30 @@ class SessionTab(QWidget):
             self._append_plain(f"[Script error in on_connect ({name}): {message}]\n")
         self._drain_and_schedule_pending_timers()
         self._fire_autosends()
+
+    # -- auto-reconnect (post-Phase-9 addition) -------------------------
+    # Started whenever the connection drops for a reason the user didn't
+    # choose (_on_connection_closed/_on_connection_failed); stopped on a
+    # successful (re)connect or an explicit user Disconnect. Ticks call
+    # reconnect_bridge() directly -- the exact same method the toolbar/
+    # menu/hotkey Reconnect action already uses, not a parallel
+    # implementation.
+
+    def _start_auto_reconnect(self) -> None:
+        if self._auto_reconnect_timer.isActive():
+            return  # already scheduled -- e.g. a retry attempt that itself just failed again
+        interval_seconds = self.AUTO_RECONNECT_INTERVAL_MS // 1000
+        self._append_plain(
+            f"[Will automatically try to reconnect every {interval_seconds} seconds. "
+            "Click Disconnect to cancel.]\n"
+        )
+        self._auto_reconnect_timer.start()
+
+    def _stop_auto_reconnect(self) -> None:
+        self._auto_reconnect_timer.stop()
+
+    def _auto_reconnect_tick(self) -> None:
+        self.reconnect_bridge()
 
     # -- Phase 8b: world-level auto-sends + character login ------------
     # Verified against Potato's real dispatch (potato.tcl's
@@ -597,6 +649,7 @@ class SessionTab(QWidget):
         self.connected_at = None
         self._set_connection_state("Disconnected")
         self.save_script_state()
+        self._start_auto_reconnect()
 
     def _on_connection_failed(self, message: str) -> None:
         self._append_plain(f"\n[Connection failed: {message}]\n")
@@ -605,6 +658,7 @@ class SessionTab(QWidget):
         self.connected_at = None
         self._set_connection_state("Disconnected")
         self.save_script_state()
+        self._start_auto_reconnect()
 
     def _send_to_bridge(self, text: str, *, apply_aliases: bool) -> None:
         self._append_plain(text + "\n")
@@ -650,6 +704,12 @@ class SessionTab(QWidget):
             self.spawn_windows.remove(window)
 
     def disconnect_bridge(self) -> None:
+        # Explicitly cancels any pending auto-reconnect -- Disconnect
+        # is the user's deliberate "stop trying" action, matching real
+        # Potato's own behavior (verified against potato-skin.tcl,
+        # where the Disconnect button is reused as "cancel reconnect"
+        # while a retry is scheduled).
+        self._stop_auto_reconnect()
         self.bridge.stop()
         self.input_line.setEnabled(False)
         self.secondary_input.setEnabled(False)
@@ -675,6 +735,7 @@ class SessionTab(QWidget):
         stops the bridge, closes any spawn windows this tab owns, and
         persists this world's script variables one last time.
         """
+        self._stop_auto_reconnect()
         self.bridge.stop()
         for spawn in list(self.spawn_windows):
             spawn.close()

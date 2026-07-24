@@ -161,7 +161,6 @@ def test_connection_specifics_placeholders_are_disabled(qapp):
         dialog.port2_spin,
         dialog.proxy_combo,
         dialog.naws_checkbox,
-        dialog.keepalive_checkbox,
         dialog.term_checkbox,
     ):
         assert widget.isEnabled() is False
@@ -172,6 +171,9 @@ def test_functional_connection_fields_are_enabled(qapp):
     dialog = WorldPropertiesDialog(None, world=world)
     assert dialog.login_format_edit.isEnabled() is True
     assert dialog.login_delay_spin.isEnabled() is True
+    # No longer a placeholder (post-Phase-9) -- real and functional,
+    # unlike its disabled Connection-page neighbors above.
+    assert dialog.keepalive_checkbox.isEnabled() is True
 
 
 def test_category_list_has_six_sections(qapp):
@@ -331,3 +333,42 @@ def test_a_script_with_a_disabled_trigger_shows_a_visible_marker(qapp):
     unmarked_item = dialog_unmarked._scripts_page.list_widget.item(0)
     assert marked_item.toolTip() != ""
     assert unmarked_item.toolTip() == ""
+
+
+# -- NOP keepalive (post-Phase-9 addition) --------------------------------
+
+
+def test_dialog_loads_nop_keepalive_from_the_world(qapp):
+    dialog_on = WorldPropertiesDialog(None, world=make_world(nop_keepalive=True))
+    dialog_off = WorldPropertiesDialog(None, world=make_world(nop_keepalive=False))
+
+    assert dialog_on.keepalive_checkbox.isChecked() is True
+    assert dialog_off.keepalive_checkbox.isChecked() is False
+
+
+def test_result_profile_reflects_edited_nop_keepalive(qapp):
+    dialog = WorldPropertiesDialog(None, world=make_world(nop_keepalive=False))
+
+    dialog.keepalive_checkbox.setChecked(True)
+
+    assert dialog.result_profile().nop_keepalive is True
+
+
+# -- Regression: auto_login used to be silently dropped by this dialog --
+
+
+def test_result_profile_preserves_auto_login_unchanged(qapp):
+    # Real bug found and fixed alongside nop_keepalive: this dialog has
+    # no UI for auto_login (that checkbox lives on the Address Book's
+    # own Worlds list) -- result_profile() used to never carry the
+    # field through at all, meaning saving *any* Properties change
+    # (even something unrelated, like a Character edit) silently reset
+    # auto_login back to False.
+    world = make_world(
+        characters=[CharacterProfile(name="Guest")], default_character="Guest", auto_login=True
+    )
+    dialog = WorldPropertiesDialog(None, world=world)
+
+    result = dialog.result_profile()
+
+    assert result.auto_login is True

@@ -427,10 +427,17 @@ class WorldPropertiesDialog(QDialog):
         self.login_delay_spin.setRange(0.0, 60.0)
         self.login_delay_spin.setSingleStep(0.5)
         self.login_delay_spin.setSuffix(" s")
+        # Real and functional (post-Phase-9) -- an application-level
+        # Telnet NOP heartbeat, matching Potato's real per-world
+        # checkbox of the same name (verified against potato-telnet.tcl
+        # -- see gui/windows/telnet_bridge.py's docstring). No longer a
+        # placeholder, so it moved out of the disabled section below.
+        self.keepalive_checkbox = QCheckBox("Use NOP Keepalive")
 
         form = QFormLayout()
         form.addRow("Login Format:", self.login_format_edit)
         form.addRow("Login Delay:", self.login_delay_spin)
+        form.addRow("", self.keepalive_checkbox)
 
         # Not yet supported by engine/net -- shown disabled, not hidden,
         # same honesty principle as Phase 7d's toolbar placeholders.
@@ -455,8 +462,6 @@ class WorldPropertiesDialog(QDialog):
         self.proxy_combo.setEnabled(False)
         self.naws_checkbox = QCheckBox("Negotiate NAWS")
         self.naws_checkbox.setEnabled(False)
-        self.keepalive_checkbox = QCheckBox("Use NOP Keepalive")
-        self.keepalive_checkbox.setEnabled(False)
         self.term_checkbox = QCheckBox("Send Client Info")
         self.term_checkbox.setEnabled(False)
 
@@ -466,7 +471,6 @@ class WorldPropertiesDialog(QDialog):
         placeholder_form.addRow("SSL:", self.ssl_checkbox)
         placeholder_form.addRow("Proxy:", self.proxy_combo)
         placeholder_form.addRow("Telnet:", self.naws_checkbox)
-        placeholder_form.addRow("", self.keepalive_checkbox)
         placeholder_form.addRow("", self.term_checkbox)
 
         layout = QVBoxLayout(page)
@@ -524,6 +528,7 @@ class WorldPropertiesDialog(QDialog):
 
         self.login_format_edit.setText(world.login_format)
         self.login_delay_spin.setValue(world.login_delay)
+        self.keepalive_checkbox.setChecked(world.nop_keepalive)
 
         self.autosend_firstconnect_edit.setPlainText(world.autosend_firstconnect)
         self.autosend_connect_edit.setPlainText(world.autosend_connect)
@@ -560,6 +565,15 @@ class WorldPropertiesDialog(QDialog):
             autosend_connect=self.autosend_connect_edit.toPlainText(),
             autosend_login=self.autosend_login_edit.toPlainText(),
             connect_count=self._world.connect_count,
+            # auto_login isn't editable on this dialog (it's a checkbox
+            # on the Address Book's own Worlds list) -- carried over
+            # unchanged, same treatment as connect_count above. A real,
+            # pre-existing bug found and fixed in the same pass as
+            # adding nop_keepalive below: this field was never being
+            # passed through at all, meaning saving *any* Properties
+            # change used to silently reset auto_login back to False.
+            auto_login=self._world.auto_login,
+            nop_keepalive=self.keepalive_checkbox.isChecked(),
         )
 
     def result_scripts(self) -> List[ScriptRecord]:

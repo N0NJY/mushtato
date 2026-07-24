@@ -1709,6 +1709,124 @@ path this phase either -- `ScriptRecord.trusted` remains stored-but-
 inert metadata, exactly as Rick's checkpoint 5 confirmed it should stay
 until Phase 10's script-sharing ecosystem gives it real purpose.
 
+**Post-Phase-9: connection resilience + clickable URLs — done.** New
+`_configure_keepalive()`/`send_nop()` in `engine/net/client.py`, a `NOP`
+constant in `engine/net/telnet.py`, `nop_keepalive`/`send_nop_periodically`
+in `gui/windows/telnet_bridge.py`, `_auto_reconnect_*` in
+`gui/windows/session_tab.py`, `WorldProfile.nop_keepalive` in
+`engine/storage/address_book.py`, and URL-anchor rendering in
+`gui/windows/styled_text_qt.py`.
+
+Rick reported three issues from real, repeated use, not a planned
+phase: several power outages caused an affected tab to just go silent
+with no "[Connection lost]" message (unlike a clean server-side close,
+which already worked); there was no automatic reconnect after a drop;
+and a plain-text URL in the scrollback wasn't clickable. Root-caused
+issue 1 by reading the actual code before proposing anything: the
+`OSError`-catching/message-display path in `telnet_bridge.py`/
+`session_tab.py` was already correct, it simply never got told,
+because `TelnetClient` never enabled TCP keepalive -- a silently-dead
+socket's `read()` just hangs forever with nothing to catch. Checked
+Potato's real source (`~/git/potato/potato.vfs/lib/potato-telnet.tcl`/
+`potato-skin.tcl`) for precedent before designing a fix: Potato's own
+"keepalive" is an app-level Telnet NOP (`send_keepalive`, `IAC NOP`,
+config `world(0,telnet,keepalive)`, default off) whose actual scheduling
+call site could not be found in the visible source (flagged explicitly
+as unverified, not assumed); its real auto-reconnect is
+`world(0,autoreconnect)` (default on) /
+`world(0,autoreconnect,time)` (default 330s), and clicking Disconnect
+cancels a pending auto-reconnect (this part *was* verified, in
+`potato-skin.tcl`).
+
+Two checkpoints before code, per this file's own standing rules.
+First, three real forks: retry interval (Rick chose a fixed 30s for
+every world over a per-world-configurable one, despite Potato's own
+real precedent being configurable); retry limit (Rick chose retry
+forever until success or an explicit Disconnect, matching Potato's own
+real Disconnect-cancels-pending-retry behavior); keepalive scope (Rick
+explicitly chose the larger-scope, non-recommended option -- wire up
+the already-present-but-disabled NOP Keepalive checkbox in World
+Properties -> Connection too, not just the OS-level TCP fix). Second,
+implementation-level forks resolved directly rather than needing
+AskUserQuestion: OS-level `SO_KEEPALIVE` (`engine/net/client.py`,
+platform-specific -- `TCP_KEEPIDLE`/`INTVL`/`CNT` on Linux,
+`TCP_KEEPALIVE` on macOS, `SIO_KEEPALIVE_VALS` on Windows) is always
+on for every connection unconditionally, since it's a correctness fix
+with no real downside, not a feature needing a per-world toggle;
+app-level NOP keepalive is the one that's per-world opt-in, since
+sending unsolicited bytes to a server is a more visible behavioral
+change Rick specifically wanted gated. Auto-reconnect's timer tick
+(`SessionTab._auto_reconnect_tick`) calls the exact same
+`reconnect_bridge()` the manual Reconnect action/hotkey/menu entry
+already use -- not a parallel implementation, same principle this file
+has enforced since Phase 7c. The timer is per-tab, not shared, since
+each tab's connection state is genuinely independent (unlike, say, the
+tab-activity flash timer, which is intentionally shared because
+flashing tabs should blink in sync).
+
+For clickable URLs: kept entirely in `gui/windows/styled_text_qt.py`,
+never touching `engine.ansi.Style`/`StyledSegment` (CLAUDE.md rule 2 --
+a hyperlink target has no ANSI-SGR equivalent and Style must stay
+toolkit/protocol-agnostic). A URL regex (`https?://` only -- bare
+`www.` domains deliberately not matched, no reliable way to
+distinguish a real domain from an ordinary sentence fragment without
+real false-positive risk) splits each segment's text around URL spans
+before insertion; a URL span gets `QTextCharFormat.setAnchor(True)`/
+`.setAnchorHref(...)` plus a distinct color/underline layered on top of
+(not replacing) the segment's own base style, so a URL inside e.g. bold
+MUD text still renders bold. Confirmed (not assumed) that plain
+`QTextEdit` has no `anchorClicked`/`setOpenExternalLinks` -- those are
+`QTextBrowser`-specific -- so `SessionTab.scrollback` and
+`SpawnWindow.scrollback` were switched from `QTextEdit` to
+`QTextBrowser` (a `QTextEdit` subclass; no other call site needed to
+change) with `setOpenExternalLinks(True)`, reusing the exact same
+viewport-palette-fix (`apply_scrollback_theme`) already proven correct
+for `QTextBrowser` by the Help window since Phase 8.
+
+A real, unrelated pre-existing bug found and fixed along the way, not
+introduced by this work: `WorldPropertiesDialog.result_profile()` never
+threaded `auto_login` through to the constructed `WorldProfile` at all
+-- grepping for "auto_login" in the dialog and its test file returned
+zero matches -- meaning saving World Properties for *any* reason (e.g.
+just turning on the new Keepalive checkbox) would silently reset that
+world's auto-login flag back to off. Fixed alongside adding
+`nop_keepalive`, with a dedicated regression test
+(`test_result_profile_preserves_auto_login_unchanged`) proving it, not
+just describing it.
+
+Tested per this file's own standing rule 7 (a claim needs a test that
+would fail if the claim were false), each claim its own test rather
+than reusing another: a real socket's actual keepalive options
+(`_configure_keepalive`) verified directly against a live socket, not
+mocked; a real fake TCP server recording actual bytes received proves
+NOP keepalive really reaches the wire, and a second test proves it's
+silent when disabled; a real, running `QTimer` (not just calling the
+tick handler directly) proves auto-reconnect fires on its own after
+the interval elapses; a `/quit`-in-a-secondary-box-style regression
+test wasn't needed here since URL handling has no command-parsing
+adjacency, but `_split_for_urls` got direct unit tests for its edge
+cases (URL mid-sentence, trailing punctuation trimmed, a bare `www.`
+correctly *not* matched, a `)`-terminated wiki-style URL's documented
+rstrip limitation) plus `QTextCharFormat`-level tests confirming a
+rendered URL is really an anchor with the right href and that
+non-URL/bold-styled text isn't affected. Full suite: 425 passing (up
+from 405 before this round -- 120 engine + a net +20 in GUI).
+
+Verification level, stated plainly per standing rule 8: this round was
+verified with real sockets, a real fake TCP server, and a real running
+`QTimer` -- one level short of a real dropped connection against an
+actual live MUSH server (simulating a genuine network-level silent
+drop, as opposed to a clean server-side close, isn't practical to
+script against a real remote server) or a real browser actually
+opening from a real click, neither of which has been exercised this
+round; Rick can confirm both against the real local RhostMUSH and a
+packaged build when convenient, same pattern as every other
+can't-fully-verify-headless GUI change in this project.
+
+Still NOT wiring `execute_trusted_unrestricted` into any GUI path --
+same deferred decision as every phase since Phase 4b, called out again
+so it stays visible.
+
 Next: Phase 10 (post-1.0 script-sharing ecosystem) is the last item on
 SPEC.md's roadmap; Rick will decide when/whether to start it.
 

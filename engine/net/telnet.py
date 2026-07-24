@@ -20,6 +20,7 @@ WONT = 252
 WILL = 251
 SB = 250
 SE = 240
+NOP = 241  # RFC 854 "no operation" -- used as a keepalive with no visible server effect
 
 _NORMAL = 0
 _GOT_IAC = 1
