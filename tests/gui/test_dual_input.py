@@ -1,6 +1,6 @@
 """Headless tests for Phase 6's dual input: two simultaneous boxes,
 both sending to the same connection, each with independent history.
-Now lives on SessionTab (Phase 9) rather than MainWindow itself.
+Now lives on SessionTab (Phase 7e) rather than MainWindow itself.
 """
 
 from PySide6.QtCore import Qt

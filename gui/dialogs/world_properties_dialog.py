@@ -20,9 +20,10 @@ not hidden.
 
 from __future__ import annotations
 
-from typing import List, Optional
+from typing import List, Optional, Set
 
 from PySide6.QtCore import Signal
+from PySide6.QtGui import QColor
 from PySide6.QtWidgets import (
     QCheckBox,
     QComboBox,
@@ -34,6 +35,7 @@ from PySide6.QtWidgets import (
     QLabel,
     QLineEdit,
     QListWidget,
+    QListWidgetItem,
     QPlainTextEdit,
     QPushButton,
     QSpinBox,
@@ -42,7 +44,7 @@ from PySide6.QtWidgets import (
     QWidget,
 )
 
-from engine.storage import CharacterProfile, WorldProfile
+from engine.storage import CharacterProfile, ScriptRecord, WorldProfile
 
 
 class _CharactersPage(QWidget):
@@ -162,8 +164,175 @@ class _CharactersPage(QWidget):
         self._refresh_list()
 
 
+class _ScriptsPage(QWidget):
+    """Scripts section (Phase 9): a list + name/enabled/source fields +
+    Add/Edit/Delete/Save/Cancel -- deliberately the exact same shape as
+    _CharactersPage above (checked for reuse before building anything
+    new, per CLAUDE.md rule 6), since ScriptRecord is likewise a named,
+    multi-entry-per-world thing edited one at a time.
+
+    ``disabled_trigger_scripts`` (a set of script names) is purely a
+    *display* hint -- passed in by the caller (AddressBookWindow, which
+    can see a currently-open tab's live ScriptWorld) so a script that
+    currently has at least one auto-disabled trigger (Checkpoint 4's
+    5-consecutive-failures mechanism) shows a visible marker here, not
+    just a scrollback line the user may have already scrolled past.
+    This dialog has no live ScriptWorld of its own to compute that from
+    -- it only ever works with static, on-disk ScriptRecords.
+    """
+
+    def __init__(
+        self,
+        parent: Optional[QWidget],
+        scripts: List[ScriptRecord],
+        *,
+        disabled_trigger_scripts: Optional[Set[str]] = None,
+    ) -> None:
+        super().__init__(parent)
+        self.scripts: List[ScriptRecord] = [
+            ScriptRecord(name=s.name, source=s.source, trusted=s.trusted, enabled=s.enabled)
+            for s in scripts
+        ]
+        self._disabled_trigger_scripts = disabled_trigger_scripts or set()
+        self._editing_index: Optional[int] = None  # None = not adding/editing; -1 = adding new
+
+        self.list_widget = QListWidget(self)
+        self._refresh_list()
+
+        self.name_edit = QLineEdit(self)
+        self.enabled_checkbox = QCheckBox("Enabled", self)
+        self.enabled_checkbox.setChecked(True)
+        self.source_edit = QPlainTextEdit(self)
+        self.source_edit.setPlaceholderText(
+            "on_trigger('pattern', callback, ...)\non_alias('pattern', callback, ...)\n..."
+        )
+
+        self.add_button = QPushButton("Add Script")
+        self.edit_button = QPushButton("Edit Script")
+        self.delete_button = QPushButton("Delete Script")
+        self.save_button = QPushButton("Save")
+        self.cancel_button = QPushButton("Cancel")
+
+        self.add_button.clicked.connect(self._start_add)
+        self.edit_button.clicked.connect(self._start_edit)
+        self.delete_button.clicked.connect(self._delete_selected)
+        self.save_button.clicked.connect(self._save_current)
+        self.cancel_button.clicked.connect(self._cancel_edit)
+
+        form = QFormLayout()
+        form.addRow("Name:", self.name_edit)
+        form.addRow("", self.enabled_checkbox)
+
+        edit_buttons = QHBoxLayout()
+        edit_buttons.addWidget(self.save_button)
+        edit_buttons.addWidget(self.cancel_button)
+
+        list_buttons = QHBoxLayout()
+        list_buttons.addWidget(self.add_button)
+        list_buttons.addWidget(self.edit_button)
+        list_buttons.addWidget(self.delete_button)
+
+        layout = QVBoxLayout(self)
+        layout.addWidget(self.list_widget)
+        layout.addLayout(list_buttons)
+        layout.addLayout(form)
+        layout.addWidget(QLabel("Source:"))
+        layout.addWidget(self.source_edit)
+        layout.addLayout(edit_buttons)
+
+        self._set_edit_fields_enabled(False)
+
+    def _refresh_list(self) -> None:
+        self.list_widget.clear()
+        for record in self.scripts:
+            text = record.name
+            if not record.enabled:
+                text += " (disabled)"
+            item = QListWidgetItem(text)
+            if record.name in self._disabled_trigger_scripts:
+                item.setForeground(QColor(220, 120, 0))
+                item.setToolTip(
+                    "A trigger from this script was auto-disabled after 5 "
+                    "consecutive errors -- fix and re-save to re-enable it."
+                )
+            self.list_widget.addItem(item)
+
+    def _set_edit_fields_enabled(self, enabled: bool) -> None:
+        self.name_edit.setEnabled(enabled)
+        self.enabled_checkbox.setEnabled(enabled)
+        self.source_edit.setEnabled(enabled)
+        self.save_button.setEnabled(enabled)
+        self.cancel_button.setEnabled(enabled)
+
+    def _start_add(self) -> None:
+        self._editing_index = -1
+        self.name_edit.clear()
+        self.enabled_checkbox.setChecked(True)
+        self.source_edit.clear()
+        self._set_edit_fields_enabled(True)
+
+    def _start_edit(self) -> None:
+        row = self.list_widget.currentRow()
+        if row < 0:
+            return
+        self._editing_index = row
+        record = self.scripts[row]
+        self.name_edit.setText(record.name)
+        self.enabled_checkbox.setChecked(record.enabled)
+        self.source_edit.setPlainText(record.source)
+        self._set_edit_fields_enabled(True)
+
+    def _save_current(self) -> None:
+        if self._editing_index is None:
+            return
+        name = self.name_edit.text().strip()
+        if not name:
+            return
+        original = (
+            None
+            if self._editing_index == -1
+            else self.scripts[self._editing_index]
+        )
+        record = ScriptRecord(
+            name=name,
+            source=self.source_edit.toPlainText(),
+            trusted=original.trusted if original is not None else False,
+            enabled=self.enabled_checkbox.isChecked(),
+        )
+        if self._editing_index == -1:
+            self.scripts.append(record)
+        else:
+            self.scripts[self._editing_index] = record
+        self._finish_editing()
+
+    def _cancel_edit(self) -> None:
+        self._finish_editing()
+
+    def _finish_editing(self) -> None:
+        self._editing_index = None
+        self.name_edit.clear()
+        self.enabled_checkbox.setChecked(True)
+        self.source_edit.clear()
+        self._set_edit_fields_enabled(False)
+        self._refresh_list()
+
+    def _delete_selected(self) -> None:
+        row = self.list_widget.currentRow()
+        if row < 0:
+            return
+        del self.scripts[row]
+        self._refresh_list()
+
+
 class WorldPropertiesDialog(QDialog):
-    def __init__(self, parent: Optional[QWidget], *, world: WorldProfile) -> None:
+    def __init__(
+        self,
+        parent: Optional[QWidget],
+        *,
+        world: WorldProfile,
+        scripts: Optional[List[ScriptRecord]] = None,
+        disabled_trigger_scripts: Optional[Set[str]] = None,
+    ) -> None:
         super().__init__(parent)
         self.setWindowTitle(f"Properties for '{world.name}'")
         self._world = world
@@ -177,6 +346,7 @@ class WorldPropertiesDialog(QDialog):
         self._build_connection_page()
         self._build_autosends_page()
         self._build_notes_page()
+        self._build_scripts_page(scripts or [], disabled_trigger_scripts)
 
         self.category_list.setCurrentRow(0)
         self.category_list.currentRowChanged.connect(self.pages.setCurrentIndex)
@@ -323,6 +493,16 @@ class WorldPropertiesDialog(QDialog):
         layout.addWidget(self.autosend_login_edit)
         self._add_page("Auto-Sends", page)
 
+    # -- Scripts (Phase 9) --------------------------------------------------
+
+    def _build_scripts_page(
+        self, scripts: List[ScriptRecord], disabled_trigger_scripts: Optional[Set[str]]
+    ) -> None:
+        self._scripts_page = _ScriptsPage(
+            self, scripts, disabled_trigger_scripts=disabled_trigger_scripts
+        )
+        self._add_page("Scripts", self._scripts_page)
+
     # -- Notes -----------------------------------------------------------
 
     def _build_notes_page(self) -> None:
@@ -381,3 +561,10 @@ class WorldPropertiesDialog(QDialog):
             autosend_login=self.autosend_login_edit.toPlainText(),
             connect_count=self._world.connect_count,
         )
+
+    def result_scripts(self) -> List[ScriptRecord]:
+        """The current list of saved scripts (Phase 9) -- separate from
+        result_profile() since scripts live in their own per-world file
+        (engine/storage/script_store.py), not on WorldProfile itself.
+        """
+        return list(self._scripts_page.scripts)

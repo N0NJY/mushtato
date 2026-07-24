@@ -3,7 +3,7 @@ dispatch (not just calling the underlying method directly) -- proving
 the QShortcut wiring itself works, not just that the action it triggers
 works.
 
-Phase 9: hotkeys are host-level (MainWindow), acting on whichever tab
+Phase 7e: hotkeys are host-level (MainWindow), acting on whichever tab
 is currently active, rather than per-connection-window as before.
 
 Under the offscreen test platform, a shortcut only dispatches once its

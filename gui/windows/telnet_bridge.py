@@ -14,19 +14,33 @@ different thread.
 
 This keeps the Qt GUI thread free of anything that could block --
 including, notably, engine.scripting's ``run_with_timeout`` watchdog
-(Phase 4), which is not wired up yet (Phase 5 is connect/display/send
-only) but will be in a later phase: because the read loop already
-lives on this background thread rather than the GUI thread, a future
-integration's calls into run_with_timeout land here too, by
-construction, with no special-casing required to keep the GUI
+(Phase 4): because the read loop already lives on this background
+thread rather than the GUI thread, Phase 9's trigger-dispatch
+integration (``on_text``, below) calls into run_with_timeout here too,
+by construction, with no special-casing required to keep the GUI
 responsive.
+
+``on_text`` (Phase 9): an optional plain-Python callback, invoked
+synchronously on *this* background thread as each raw chunk arrives,
+before ``textReceived`` is emitted. Deliberately not a Qt signal for
+this one hop -- a Qt signal/slot connection is auto-marshaled onto the
+*receiving* QObject's own thread (which is why ``textReceived`` itself
+safely reaches the GUI thread despite being emitted from here), so if
+the processing that needs to run on this background thread (line-
+buffering, ANSI parsing, trigger dispatch -- see
+engine/scripting/line_dispatch.py) lived in a GUI-thread QObject's
+slot, it would run on the GUI thread instead, defeating the whole
+point. A plain callable has no such thread affinity -- it just runs on
+whatever thread calls it, which is exactly what's needed here. This
+class stays fully unaware of ansi/scripting either way -- it just
+invokes whatever opaque callable it's given.
 """
 
 from __future__ import annotations
 
 import asyncio
 import threading
-from typing import Optional
+from typing import Callable, Optional
 
 from PySide6.QtCore import QObject, Signal
 
@@ -39,14 +53,35 @@ class TelnetBridge(QObject):
     connectionClosed = Signal()
     connectionFailed = Signal(str)
 
-    def __init__(self, host: str, port: int, parent: Optional[QObject] = None) -> None:
+    def __init__(
+        self,
+        host: str,
+        port: int,
+        parent: Optional[QObject] = None,
+        *,
+        on_text: Optional[Callable[[str], None]] = None,
+    ) -> None:
         super().__init__(parent)
         self._host = host
         self._port = port
+        self._on_text = on_text
         self._loop: Optional[asyncio.AbstractEventLoop] = None
         self._client: Optional[TelnetClient] = None
         self._thread: Optional[threading.Thread] = None
         self._main_task: Optional[asyncio.Task] = None
+
+    def set_on_text(self, callback: Optional[Callable[[str], None]]) -> None:
+        """Set/replace the ``on_text`` callback after construction.
+
+        SessionTab calls this unconditionally on whatever bridge it
+        ends up with (freshly constructed, or injected for tests) so
+        the same wiring code works for both -- an injected fake bridge
+        only needs to implement this one method (see FakeBridge in
+        tests/gui/test_main_window_smoke.py) to correctly participate
+        in the real on_text-then-textReceived contract ``_run()``
+        follows below.
+        """
+        self._on_text = callback
 
     def start(self) -> None:
         """Spin up the background thread and begin connecting."""
@@ -63,6 +98,28 @@ class TelnetBridge(QObject):
         if self._loop is None or self._client is None:
             return
         asyncio.run_coroutine_threadsafe(self._client.send_line(text), self._loop)
+
+    def run_in_background(self, func) -> None:
+        """Run a blocking, synchronous ``func`` on this connection's
+        background loop's executor -- a worker thread, never the GUI
+        thread and never the loop's own thread either (so the read
+        loop in ``_run()`` keeps running while ``func`` executes).
+
+        Safe to call from the GUI thread (the only thread this should
+        ever be called from), mirroring ``send_line``'s existing
+        pattern. Used for outbound alias expansion (Phase 9):
+        ``AliasEngine.expand()`` can call ``run_with_timeout``, whose
+        blocking wait must never land on the GUI thread, the same
+        reasoning as incoming trigger dispatch (see ``on_text`` above).
+        A no-op if the connection isn't up yet.
+        """
+        if self._loop is None:
+            return
+
+        async def _runner() -> None:
+            await self._loop.run_in_executor(None, func)
+
+        asyncio.run_coroutine_threadsafe(_runner(), self._loop)
 
     def stop(self) -> None:
         """Stop the connection and the background thread.
@@ -124,6 +181,8 @@ class TelnetBridge(QObject):
                     self.connectionClosed.emit()
                     return
                 if chunk:
+                    if self._on_text is not None:
+                        self._on_text(chunk)
                     self.textReceived.emit(chunk)
         finally:
             await client.close()

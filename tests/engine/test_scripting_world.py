@@ -175,3 +175,112 @@ def test_callback_from_a_different_world_is_rejected():
     world_b, _, _ = make_world()  # world_b has no scripts loaded of its own
     with pytest.raises(ScriptAPIError):
         world_b._require_script_owned_callable(stolen_callback, "on_connect()")
+
+
+# -- Named load/unload (Phase 9: clean script reload on edit + re-save) --
+
+
+def test_load_script_without_a_name_behaves_exactly_as_before():
+    """Every pre-Phase-9 caller omits script_name -- must be unaffected."""
+    world, sent, _ = make_world()
+    world.load_script("send('hi')")
+    assert sent == ["hi"]
+
+
+def test_triggers_are_tagged_with_their_source_script():
+    world, _, _ = make_world()
+    source = "on_trigger('gold', lambda m: None, name='gold')\n"
+    world.load_script(source, script_name="loot-alerts")
+
+    trigger = world.triggers.get("gold")
+    assert trigger is not None
+    assert trigger.source_script == "loot-alerts"
+
+
+def test_unload_script_removes_its_triggers():
+    world, _, _ = make_world()
+    world.load_script(
+        "on_trigger('gold', lambda m: None, name='gold')\n", script_name="loot-alerts"
+    )
+    assert world.triggers.get("gold") is not None
+
+    world.unload_script("loot-alerts")
+
+    assert world.triggers.get("gold") is None
+
+
+def test_reloading_a_script_does_not_duplicate_triggers():
+    world, sent, _ = make_world()
+    source_v1 = (
+        "def handle(m):\n    send('v1')\non_trigger('gold', handle, name='gold')\n"
+    )
+    world.load_script(source_v1, script_name="loot-alerts")
+
+    world.unload_script("loot-alerts")
+    source_v2 = (
+        "def handle(m):\n    send('v2')\non_trigger('gold', handle, name='gold')\n"
+    )
+    world.load_script(source_v2, script_name="loot-alerts")
+
+    outcome = world.triggers.dispatch("you see gold here")
+    assert sent == ["v2"]  # only the new version fired, not both
+    assert outcome.matched_triggers == ["gold"]  # not ["gold", "gold"]
+
+
+def test_reloading_a_script_resets_a_disabled_trigger():
+    world, _, _ = make_world()
+    source = (
+        "def boom(m):\n    raise ValueError('boom')\n"
+        "on_trigger('fail', boom, name='broken')\n"
+    )
+    world.load_script(source, script_name="buggy")
+    for _ in range(5):
+        world.triggers.dispatch("fail")
+    disabled_trigger = world.triggers.get("broken")
+    assert disabled_trigger.enabled is False
+    assert disabled_trigger.consecutive_failures == 5
+
+    world.unload_script("buggy")
+    world.load_script(source, script_name="buggy")  # re-saved (even unchanged)
+
+    reloaded_trigger = world.triggers.get("broken")
+    assert reloaded_trigger.enabled is True
+    assert reloaded_trigger.consecutive_failures == 0
+
+
+def test_unload_script_removes_its_aliases():
+    world, _, _ = make_world()
+    source = "on_alias('n', lambda m: None, name='north-alias')\n"
+    world.load_script(source, script_name="movement")
+
+    world.unload_script("movement")
+
+    outcome = world.aliases.expand("n")
+    assert outcome.matched is False
+
+
+def test_unload_script_removes_its_pending_timers():
+    world, _, _ = make_world()
+    source = "def cb():\n    pass\ntimer(5, cb)\n"
+    world.load_script(source, script_name="timed")
+    assert len(world.pending_timers) == 1
+
+    world.unload_script("timed")
+
+    assert world.pending_timers == []
+
+
+def test_unload_script_removes_its_connect_callbacks():
+    world, sent, _ = make_world()
+    source = "def hello():\n    send('hi')\non_connect(hello)\n"
+    world.load_script(source, script_name="greeter")
+
+    world.unload_script("greeter")
+    world.fire_connect_callbacks()
+
+    assert sent == []
+
+
+def test_unload_script_never_loaded_is_a_safe_no_op():
+    world, _, _ = make_world()
+    world.unload_script("nonexistent")  # must not raise

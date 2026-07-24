@@ -1,10 +1,23 @@
 """One connection's content: scrollback + dual input, spawn windows,
-built-in commands (Phase 9: extracted from what used to be MainWindow's
+built-in commands (Phase 7e: extracted from what used to be MainWindow's
 entire content, now that MainWindow is a tabbed shell hosting one or
 more of these instead of being one connection itself).
 
-Deliberately not wired to engine/scripting yet -- see CLAUDE.md's
-Phase 5/6 notes for why that's an explicit deferral, not an oversight.
+Phase 9: engine/scripting is wired in for real here. Every tab gets its
+own ``ScriptWorld`` unconditionally (even a world with zero saved
+scripts gets an empty one -- one uniform pipeline, no "scripting active
+or not" branch), loaded from engine/storage/script_store.py. Incoming
+text is line-buffered, ANSI-parsed, and trigger-dispatched (gag/
+highlight) on the connection's own background thread via
+``LineDispatcher`` (engine/scripting/line_dispatch.py), reached through
+``TelnetBridge``'s ``on_text`` callback -- never the GUI thread, since a
+slow/hung trigger's ``run_with_timeout`` wait must not freeze the UI
+(see telnet_bridge.py's module docstring). Only the final, already-
+processed result crosses back to the GUI thread via
+``_incomingBatchReady``, a plain Qt signal (safe to emit from any
+thread -- Qt marshals delivery based on the *receiving* SessionTab's
+own GUI-thread affinity). Outbound alias expansion gets the same
+treatment via ``TelnetBridge.run_in_background``.
 """
 
 from __future__ import annotations
@@ -15,9 +28,26 @@ from PySide6.QtCore import QDateTime, QTimer, Qt, Signal
 from PySide6.QtGui import QTextCursor
 from PySide6.QtWidgets import QSizePolicy, QSplitter, QTextEdit, QVBoxLayout, QWidget
 
-from engine.ansi import AnsiParser
+from engine.ansi import DEFAULT_STYLE, Style, StyledSegment
 from engine.commands import CommandTable
-from engine.storage import DEFAULT_THEME, CharacterProfile, WorldProfile
+from engine.scripting import (
+    MAX_CONSECUTIVE_TRIGGER_FAILURES,
+    DispatchOutcome,
+    LineDispatcher,
+    LineDispatchResult,
+    ScriptWorld,
+)
+from engine.scripting.errors import ScriptError
+from engine.storage import (
+    DEFAULT_THEME,
+    CharacterProfile,
+    ScriptRecord,
+    WorldProfile,
+    WorldScriptProfile,
+    load_world_scripts,
+    save_world_scripts,
+    world_script_path,
+)
 
 from ..fonts import resolve_input_font, resolve_scrollback_font
 from ..help.markdown_tools import strip_markdown
@@ -26,7 +56,7 @@ from ..theme import apply_scrollback_theme
 from ..version import mushtato_version
 from .history_line_edit import HistoryLineEdit
 from .spawn_window import SpawnWindow
-from .styled_text_qt import append_styled_segments
+from .styled_text_qt import append_styled_segments, replace_tail
 from .telnet_bridge import TelnetBridge
 
 
@@ -42,6 +72,20 @@ class SessionTab(QWidget):
     titleChanged = Signal(str)
     connectionStateChanged = Signal(str)
     activity = Signal()  # new text arrived -- host decides if this tab is "active" or not
+    # Phase 9: carries a LineDispatchResult + a list of newly-registered
+    # TimerRequests, emitted from TelnetBridge's on_text callback on the
+    # connection's background thread -- safe to emit from any thread,
+    # Qt marshals delivery onto this SessionTab's own GUI thread.
+    _incomingBatchReady = Signal(object, object)
+    # echo() is always routed through this signal regardless of which
+    # thread called it (background trigger/alias dispatch, or the GUI
+    # thread itself for load_script/on_connect/timers) -- uniform,
+    # thread-safe handling without needing to branch on caller context.
+    _scriptEchoRequested = Signal(str, object)
+    # (alias_text, AliasOutcome) -- result of a background-thread alias
+    # expansion attempt; AliasOutcome.error carries any failure.
+    _aliasExpansionDone = Signal(str, object)
+    triggerStateChanged = Signal(str)  # a trigger's enabled state changed -- Scripts UI refresh hook
 
     def __init__(
         self,
@@ -60,6 +104,7 @@ class SessionTab(QWidget):
         input_font_family: str = "",
         input_font_size: int = 0,
         splitter_sizes: Optional[List[int]] = None,  # last-dragged split, None -> stretch-factor default
+        script_store_path=None,  # test-only override for world_script_path(world.name); see _script_store_path()
     ) -> None:
         super().__init__()
         self.host = host
@@ -67,12 +112,18 @@ class SessionTab(QWidget):
         self.name = name or f"{host}:{port}"
         self.host_window = host_window
         self.world = world
+        self._script_store_path_override = script_store_path
         self._explicit_character = character
         self._theme = theme if theme is not None else DEFAULT_THEME
         self.connected_at: Optional[QDateTime] = None
         self.connection_state = "Connecting"
-        self._parser = AnsiParser()
         self.spawn_windows: List[SpawnWindow] = []
+        # The "preview" of the still-incomplete trailing line (Phase 9,
+        # see engine/scripting/line_dispatch.py's module docstring) --
+        # tracked as a document position so a later feed() result can
+        # replace it in place rather than appending a duplicate.
+        self._preview_start_position: Optional[int] = None
+        self._preview_segments: List[StyledSegment] = []
 
         self.scrollback = QTextEdit(self)
         self.scrollback.setReadOnly(True)
@@ -140,16 +191,38 @@ class SessionTab(QWidget):
         self._commands = CommandTable()
         self._register_commands()
 
+        # -- Phase 9: scripting --------------------------------------
+        # Unconditional, even for a world with zero saved scripts --
+        # one uniform pipeline for every tab, no "scripting active or
+        # not" branch. send() is a lazy closure (self.bridge doesn't
+        # exist yet at this point) rather than a direct reference.
+        self.script_world = ScriptWorld(
+            send=lambda text: self.bridge.send_line(text),
+            echo=self._script_echo,
+        )
+        self._line_dispatcher = LineDispatcher(self.script_world.triggers)
+        self._script_records: List[ScriptRecord] = []
+        self._load_saved_scripts(load_variables=True)
+
+        self._incomingBatchReady.connect(self._on_incoming_batch_ready)
+        self._scriptEchoRequested.connect(self._on_script_echo_requested)
+        self._aliasExpansionDone.connect(self._on_alias_expansion_done)
+
         # Dependency-injectable so tests can supply a fake bridge that
         # never touches the network (see tests/gui) -- the real
-        # runtime path just omits this argument.
+        # runtime path just omits this argument. set_on_text() is
+        # called uniformly on whichever bridge we end up with (fresh or
+        # injected), rather than only passed at TelnetBridge's own
+        # construction, so a test's FakeBridge participates in the same
+        # on_text-then-textReceived contract a real TelnetBridge does.
         self.bridge = bridge if bridge is not None else TelnetBridge(host, port)
+        self.bridge.set_on_text(self._on_raw_incoming_text)
         self.bridge.connected.connect(self._on_connected)
-        self.bridge.textReceived.connect(self._on_text_received)
         self.bridge.connectionClosed.connect(self._on_connection_closed)
         self.bridge.connectionFailed.connect(self._on_connection_failed)
 
         self._append_plain(f"Connecting to {host}:{port} ...\n")
+        self._drain_and_schedule_pending_timers()
         self.bridge.start()
 
     def showEvent(self, event) -> None:  # noqa: N802 -- Qt override signature
@@ -193,6 +266,232 @@ class SessionTab(QWidget):
         if self.host_window is not None:
             self.host_window.record_splitter_sizes(self.splitter.sizes())
 
+    # -- Phase 9: scripting ---------------------------------------------
+    # engine/scripting wired in for real: every tab gets its own
+    # ScriptWorld (send/echo/gag/highlight/set_var/get_var/timer/
+    # on_trigger/on_connect/on_alias), loaded from engine/storage/
+    # script_store.py. Incoming-line trigger dispatch and outbound
+    # alias expansion both run off the GUI thread (see this module's
+    # docstring); only already-processed results cross back via Qt
+    # signals, which are safe to emit from any thread.
+
+    def _load_saved_scripts(self, *, load_variables: bool) -> None:
+        """Load this world's saved scripts (and, on first load only,
+        its saved variables) into ``self.script_world``.
+
+        ``load_variables=False`` is used by :meth:`reload_scripts` --
+        re-reading variables from disk on a mid-session script reload
+        would silently revert whatever the live session has
+        accumulated via set_var() back to a stale on-disk snapshot,
+        which script source/trigger changes have no business touching.
+        A no-op for a world-less tab (direct-connect, or a standalone
+        test) -- there's nothing saved to load.
+        """
+        if self.world is None:
+            return
+        profile = load_world_scripts(self._script_store_path())
+        if load_variables:
+            self.script_world.variables = dict(profile.variables)
+        for record in profile.scripts:
+            self._script_records.append(record)
+            if not record.enabled:
+                continue
+            self._load_one_script(record)
+
+    def _load_one_script(self, record: ScriptRecord) -> None:
+        try:
+            self.script_world.load_script(record.source, script_name=record.name)
+        except ScriptError as exc:
+            self._append_plain(f"[Script error loading {record.name!r}: {exc}]\n")
+        except Exception as exc:  # noqa: BLE001 - a script's own bug must not crash the tab
+            self._append_plain(
+                f"[Script error loading {record.name!r}: {type(exc).__name__}: {exc}]\n"
+            )
+
+    def reload_scripts(self) -> None:
+        """Re-read this world's saved scripts from disk and apply them
+        to the already-running ScriptWorld, cleanly unloading every
+        previously-loaded script first so an edit-and-resave doesn't
+        leave stale/duplicate registrations (or a stale disabled/
+        failure-counter state) behind. Called by the host when World
+        Properties' Scripts page is saved for a world that has this
+        tab currently open -- the mechanism behind "re-saving resets
+        the [trigger auto-disable] counter."
+
+        Deliberately does not touch ``script_world.variables`` -- see
+        :meth:`_load_saved_scripts`'s docstring.
+        """
+        if self.world is None:
+            return
+        for record in self._script_records:
+            self.script_world.unload_script(record.name)
+        self._script_records = []
+        self._load_saved_scripts(load_variables=False)
+        self._drain_and_schedule_pending_timers()
+
+    def save_script_state(self) -> None:
+        """Persist this world's current script variables to disk.
+
+        Called on disconnect/shutdown, and by the host's periodic
+        dirty-flag autosave (MainWindow's script-autosave timer) --
+        both paths funnel through here rather than each building their
+        own save logic. A no-op for a world-less tab.
+        """
+        if self.world is None:
+            return
+        profile = WorldScriptProfile(
+            scripts=self._script_records, variables=dict(self.script_world.variables)
+        )
+        save_world_scripts(self._script_store_path(), profile)
+        self.script_world.dirty = False
+
+    def _script_store_path(self):
+        """Resolves to the real per-world script file
+        (engine/storage/paths.world_script_path) unless a test
+        explicitly overrode it at construction -- the same
+        dependency-injection pattern MainWindow/AddressBookWindow
+        already use for address_book_storage_path/storage_path, so
+        tests never touch the real user data directory.
+        """
+        if self._script_store_path_override is not None:
+            return self._script_store_path_override
+        return world_script_path(self.world.name)
+
+    def _on_raw_incoming_text(self, raw_text: str) -> None:
+        """The TelnetBridge ``on_text`` callback -- runs on the
+        connection's own background thread, never the GUI thread (see
+        this module's and telnet_bridge.py's docstrings for why that's
+        load-bearing, not incidental). Only the final, already trigger-
+        processed result crosses back to the GUI thread, via a plain
+        Qt signal (safe to emit from any thread).
+        """
+        result = self._line_dispatcher.feed(raw_text)
+        timers = list(self.script_world.pending_timers)
+        self.script_world.pending_timers.clear()
+        self._incomingBatchReady.emit(result, timers)
+
+    def _on_incoming_batch_ready(self, result: LineDispatchResult, timers: list) -> None:
+        any_output = False
+        for finalized in result.finalized:
+            if finalized.gagged:
+                self._clear_preview()
+            elif finalized.segments:
+                self._insert_finalized_segments(finalized.segments)
+                for spawn in self.spawn_windows:
+                    spawn.receive_segments(finalized.segments)
+                any_output = True
+            self._report_dispatch_outcome(finalized.outcome)
+        if result.preview is not None:
+            self._show_preview(result.preview)
+            any_output = True
+        for timer_request in timers:
+            self._schedule_timer_request(timer_request)
+        if any_output:
+            self.activity.emit()
+
+    def _report_dispatch_outcome(self, outcome: DispatchOutcome) -> None:
+        for trigger_name, message in outcome.errors:
+            self._append_plain(f"[Script error in trigger {trigger_name!r}: {message}]\n")
+        for trigger_name in outcome.disabled_triggers:
+            self._append_plain(
+                f"[Trigger {trigger_name!r} disabled after "
+                f"{MAX_CONSECUTIVE_TRIGGER_FAILURES} consecutive errors "
+                "- fix and re-save to re-enable]\n"
+            )
+            self.triggerStateChanged.emit(trigger_name)
+
+    # -- rendering: finalized lines, echo() output, and the replaceable
+    # "preview" of a still-incomplete trailing line all funnel through
+    # here so the invariant "the preview, if any, is always the very
+    # last thing shown" never gets violated by something else being
+    # inserted after it (see engine/scripting/line_dispatch.py's module
+    # docstring for why that invariant matters for gag/highlight
+    # correctness on a line split across chunks).
+
+    def _end_of_document_position(self) -> int:
+        cursor = QTextCursor(self.scrollback.document())
+        cursor.movePosition(QTextCursor.End)
+        return cursor.position()
+
+    def _clear_preview(self) -> None:
+        if self._preview_start_position is not None:
+            replace_tail(self.scrollback, self._preview_start_position, [])
+            self._preview_start_position = None
+            self._preview_segments = []
+
+    def _show_preview(self, segments: List[StyledSegment]) -> None:
+        if self._preview_start_position is None:
+            self._preview_start_position = self._end_of_document_position()
+        replace_tail(self.scrollback, self._preview_start_position, segments)
+        self._preview_segments = segments
+
+    def _insert_finalized_segments(self, segments: List[StyledSegment]) -> None:
+        pending_preview = self._preview_segments if self._preview_start_position is not None else None
+        self._clear_preview()
+        append_styled_segments(self.scrollback, segments)
+        if pending_preview is not None:
+            self._show_preview(pending_preview)
+
+    def _script_echo(self, text: str, style: Optional[Style]) -> None:
+        # Always routed through this signal, regardless of caller --
+        # uniform, thread-safe handling without needing to branch on
+        # context. This is load-bearing, not defensive: engine/
+        # scripting/sandbox.py's run_with_timeout() always runs the
+        # actual script body on its *own* internal worker thread while
+        # the caller blocks on .join() -- true even for script load,
+        # on_connect, and timer firing, which might look GUI-thread-
+        # native from the outside but are not, internally, for the
+        # duration of the script code itself. So this emit is *always*
+        # a genuine cross-thread signal, auto-queued for the GUI
+        # thread's event loop rather than delivered inline -- echo()'s
+        # effect shows up on the next event loop tick, not synchronously
+        # in the same call stack (imperceptible in a real running app;
+        # a test observing it needs QTest.qWait(), see
+        # test_scripting_integration.py's echo test for why).
+        self._scriptEchoRequested.emit(text, style)
+
+    def _on_script_echo_requested(self, text: str, style: Optional[Style]) -> None:
+        seg_style = style if style is not None else DEFAULT_STYLE
+        self._insert_finalized_segments([StyledSegment(text + "\n", seg_style)])
+        self.activity.emit()
+
+    def _schedule_timer_request(self, timer_request) -> None:
+        delay_ms = max(0, int(timer_request.delay_seconds * 1000))
+        QTimer.singleShot(delay_ms, lambda cb=timer_request.callback: self._fire_timer_callback(cb))
+
+    def _fire_timer_callback(self, callback) -> None:
+        try:
+            self.script_world.run_callback(callback)
+        except ScriptError as exc:
+            self._append_plain(f"[Script error in timer: {exc}]\n")
+        except Exception as exc:  # noqa: BLE001 - a script's own bug must not crash the tab
+            self._append_plain(f"[Script error in timer: {type(exc).__name__}: {exc}]\n")
+        # A timer callback might itself register a new timer (e.g. a
+        # "poll every N seconds" pattern) -- already on the GUI thread
+        # here, so draining/scheduling directly is safe.
+        self._drain_and_schedule_pending_timers()
+
+    def _drain_and_schedule_pending_timers(self) -> None:
+        pending = list(self.script_world.pending_timers)
+        self.script_world.pending_timers.clear()
+        for timer_request in pending:
+            self._schedule_timer_request(timer_request)
+
+    def _expand_alias_background(self, text: str) -> None:
+        # Runs on a background worker thread (TelnetBridge.
+        # run_in_background) -- AliasEngine.expand() can call
+        # run_with_timeout, whose blocking wait must never land on the
+        # GUI thread, same reasoning as incoming trigger dispatch.
+        outcome = self.script_world.aliases.expand(text)
+        self._aliasExpansionDone.emit(text, outcome)
+
+    def _on_alias_expansion_done(self, text: str, outcome) -> None:
+        if outcome.error:
+            self._append_plain(f"[Script error in alias {outcome.alias_name!r}: {outcome.error}]\n")
+        elif not outcome.matched:
+            self.bridge.send_line(text)
+        self._drain_and_schedule_pending_timers()
+
     def _append_plain(self, text: str) -> None:
         cursor = QTextCursor(self.scrollback.document())
         cursor.movePosition(QTextCursor.End)
@@ -208,6 +507,9 @@ class SessionTab(QWidget):
         self._append_plain("Connected.\n")
         self.connected_at = QDateTime.currentDateTime()
         self._set_connection_state("Connected")
+        for name, message in self.script_world.fire_connect_callbacks():
+            self._append_plain(f"[Script error in on_connect ({name}): {message}]\n")
+        self._drain_and_schedule_pending_timers()
         self._fire_autosends()
 
     # -- Phase 8b: world-level auto-sends + character login ------------
@@ -288,24 +590,13 @@ class SessionTab(QWidget):
         self._append_plain(masked + "\n")
         self.bridge.send_line(line)
 
-    def _on_text_received(self, text: str) -> None:
-        segments = self._parser.feed(text)
-        if segments:
-            append_styled_segments(self.scrollback, segments)
-            for spawn in self.spawn_windows:
-                spawn.receive_segments(segments)
-            # SessionTab doesn't know (or need to know) whether it's the
-            # currently-active tab -- that's the host shell's call to
-            # make (tab-activity flashing, post-8b addition), same
-            # separation as connectionStateChanged.
-            self.activity.emit()
-
     def _on_connection_closed(self) -> None:
         self._append_plain("\n[Connection closed by server]\n")
         self.input_line.setEnabled(False)
         self.secondary_input.setEnabled(False)
         self.connected_at = None
         self._set_connection_state("Disconnected")
+        self.save_script_state()
 
     def _on_connection_failed(self, message: str) -> None:
         self._append_plain(f"\n[Connection failed: {message}]\n")
@@ -313,14 +604,17 @@ class SessionTab(QWidget):
         self.secondary_input.setEnabled(False)
         self.connected_at = None
         self._set_connection_state("Disconnected")
+        self.save_script_state()
 
     def _send_to_bridge(self, text: str, *, apply_aliases: bool) -> None:
-        # `apply_aliases` is an intentional no-op for now -- engine/
-        # scripting isn't wired into the GUI yet (still deferred, see
-        # CLAUDE.md).
-        del apply_aliases
         self._append_plain(text + "\n")
-        self.bridge.send_line(text)
+        if apply_aliases:
+            # Off the GUI thread -- AliasEngine.expand() can call
+            # run_with_timeout, same reasoning as incoming trigger
+            # dispatch (see this module's docstring).
+            self.bridge.run_in_background(lambda t=text: self._expand_alias_background(t))
+        else:
+            self.bridge.send_line(text)
 
     def _on_primary_send(self) -> None:
         text = self.input_line.text()
@@ -362,6 +656,7 @@ class SessionTab(QWidget):
         self.connected_at = None
         self._set_connection_state("Disconnected")
         self._append_plain("\n[Disconnected]\n")
+        self.save_script_state()
 
     def reconnect_bridge(self) -> None:
         # Calls stop() then start() on the *same* bridge instance --
@@ -377,13 +672,15 @@ class SessionTab(QWidget):
 
     def shutdown(self) -> None:
         """Called by the host shell when this tab is being closed --
-        stops the bridge and closes any spawn windows this tab owns.
+        stops the bridge, closes any spawn windows this tab owns, and
+        persists this world's script variables one last time.
         """
         self.bridge.stop()
         for spawn in list(self.spawn_windows):
             spawn.close()
+        self.save_script_state()
 
-    # -- built-in commands (Phase 7c, moved from MainWindow in Phase 9) --
+    # -- built-in commands (Phase 7c, moved from MainWindow in Phase 7e) --
     # Every command calls the exact same method its GUI equivalent
     # already calls. /connect, /settings, /theme need the host shell;
     # they degrade to "not available" when host_window is None (only

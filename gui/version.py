@@ -1,6 +1,6 @@
 """Single source of truth for the displayed app version.
 
-Split out from main_window.py (Phase 9) so both MainWindow (the host
+Split out from main_window.py (Phase 7e) so both MainWindow (the host
 shell) and SessionTab can import it without creating a circular import
 between those two modules.
 """

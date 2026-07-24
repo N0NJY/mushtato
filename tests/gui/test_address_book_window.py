@@ -1,6 +1,6 @@
 """Headless tests for the address book window: list population, add/
 edit/delete round-tripping through storage, and "Connect" asking the
-host shell to open (or switch to) a tab -- Phase 9 changed this from
+host shell to open (or switch to) a tab -- Phase 7e changed this from
 opening its own independent MainWindow to delegating to the persistent
 host window that spawned it.
 """
@@ -20,17 +20,26 @@ class FakeHostWindow:
     def __init__(self, hotkeys=None) -> None:
         self._hotkeys = hotkeys if hotkeys is not None else dict(DEFAULT_HOTKEYS)
         self.open_tab_calls = []
+        self.reload_scripts_for_world_calls = []
 
     def open_tab(self, host, port, *, name=None, bridge=None, world=None, character=None):
         self.open_tab_calls.append((host, port, name, world, character))
         return (host, port, name)
+
+    def tabs_for_world(self, world_name):
+        return []  # no live tabs in these tests -- see test_scripting_integration.py for that
+
+    def reload_scripts_for_world(self, world_name) -> None:
+        self.reload_scripts_for_world_calls.append(world_name)
 
 
 def make_address_book(tmp_path: Path, worlds=None, host_window=None) -> AddressBookWindow:
     path = tmp_path / "address_book.json"
     if worlds is not None:
         save_address_book(path, worlds)
-    return AddressBookWindow(host_window or FakeHostWindow(), storage_path=path)
+    return AddressBookWindow(
+        host_window or FakeHostWindow(), storage_path=path, scripts_dir=tmp_path / "scripts"
+    )
 
 
 def test_loads_existing_worlds_into_the_list(qapp, tmp_path: Path):

@@ -56,10 +56,18 @@ class AliasOutcome:
     a future integration layer is responsible for sending the raw text
     verbatim in that case, same as an unmatched trigger just displays
     its line as-is.
+
+    ``error`` (Phase 9) is set if the matched alias's own callback
+    raised (a ``ScriptError`` subclass, or any ordinary bug in the
+    script's code) -- ``matched`` stays True in that case (the pattern
+    *did* match; falling back to sending the raw text as a literal
+    command would compound the confusion, not fix it), and the caller
+    is expected to surface ``error`` rather than send anything.
     """
 
     matched: bool = False
     alias_name: Optional[str] = None
+    error: Optional[str] = None
 
 
 @dataclass
@@ -69,6 +77,11 @@ class Alias:
     callback: Callable[[Any], None]
     priority: int = 0
     enabled: bool = True
+    # Which saved script (ScriptRecord.name) registered this alias --
+    # mirrors Trigger.source_script (engine/scripting/triggers.py),
+    # used to cleanly remove an old version's registrations when a
+    # script is edited and re-saved.
+    source_script: str = ""
     compiled: Any = field(init=False, repr=False)
 
     def __post_init__(self) -> None:
@@ -88,13 +101,23 @@ class AliasEngine:
     def add(self, alias: Alias) -> None:
         self._aliases.append(alias)
 
+    def remove_by_source_script(self, script_name: str) -> None:
+        """Drop every alias registered by ``script_name`` -- used when
+        that script is unloaded/reloaded (e.g. edited and re-saved) so
+        the old version's registrations don't linger alongside the new
+        one.
+        """
+        self._aliases = [a for a in self._aliases if a.source_script != script_name]
+
     def expand(self, text: str) -> AliasOutcome:
         """Try to expand ``text`` (the user's literal typed line).
 
         Stops at the first matching, enabled alias (highest priority
         first); that callback runs under the same timeout guard as
         trigger callbacks. Returns ``AliasOutcome(matched=False)`` if
-        nothing matched.
+        nothing matched. A callback that raises is caught here (see
+        ``AliasOutcome.error``'s docstring) rather than propagated --
+        same reasoning as ``TriggerTable.dispatch()``.
         """
         stripped = text.strip()
         enabled = [a for a in self._aliases if a.enabled]
@@ -102,8 +125,13 @@ class AliasEngine:
             match = alias.compiled.fullmatch(stripped)
             if match is None:
                 continue
-            run_with_timeout(
-                lambda a=alias, m=match: a.callback(m), self._timeout_seconds
-            )
+            try:
+                run_with_timeout(
+                    lambda a=alias, m=match: a.callback(m), self._timeout_seconds
+                )
+            except Exception as exc:  # noqa: BLE001 - a script's own bug must not raise here
+                return AliasOutcome(
+                    matched=True, alias_name=alias.name, error=f"{type(exc).__name__}: {exc}"
+                )
             return AliasOutcome(matched=True, alias_name=alias.name)
         return AliasOutcome(matched=False)

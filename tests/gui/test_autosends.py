@@ -24,7 +24,7 @@ def make_world(**kwargs):
 
 
 def test_no_world_means_no_autosends(qapp, tmp_path: Path):
-    host = MainWindow(address_book_storage_path=tmp_path / "ab.json")
+    host = MainWindow(address_book_storage_path=tmp_path / "ab.json", scripts_dir=tmp_path / "scripts")
     bridge = FakeBridge()
     host.open_tab("example.com", 4201, bridge=bridge)  # no world= at all
     bridge.connected.emit()
@@ -34,7 +34,7 @@ def test_no_world_means_no_autosends(qapp, tmp_path: Path):
 
 def test_connect_autosend_fires_every_connect(qapp, tmp_path: Path):
     world = make_world(autosend_connect="look\nwho")
-    host = MainWindow(address_book_storage_path=tmp_path / "ab.json")
+    host = MainWindow(address_book_storage_path=tmp_path / "ab.json", scripts_dir=tmp_path / "scripts")
     bridge = FakeBridge()
     host.open_tab("example.com", 4201, bridge=bridge, world=world)
 
@@ -47,7 +47,7 @@ def test_connect_autosend_fires_every_connect(qapp, tmp_path: Path):
 def test_firstconnect_autosend_only_fires_on_the_very_first_connect(qapp, tmp_path: Path):
     ab_path = tmp_path / "ab.json"
     world = make_world(autosend_firstconnect="welcome script here")
-    host = MainWindow(address_book_storage_path=ab_path)
+    host = MainWindow(address_book_storage_path=ab_path, scripts_dir=tmp_path / "scripts")
     bridge = FakeBridge()
     host.open_tab("example.com", 4201, bridge=bridge, world=world)
 
@@ -77,7 +77,7 @@ def test_firstconnect_does_not_fire_again_after_persisted_restart(qapp, tmp_path
         ab_path,
         [make_world(autosend_firstconnect="one time only", connect_count=1)],
     )
-    host = MainWindow(address_book_storage_path=ab_path)
+    host = MainWindow(address_book_storage_path=ab_path, scripts_dir=tmp_path / "scripts")
     fresh_world = load_address_book(ab_path)[0]
     bridge = FakeBridge()
     host.open_tab("example.com", 4201, bridge=bridge, world=fresh_world)
@@ -96,7 +96,7 @@ def test_login_string_sent_for_default_character_with_password_masked_in_scrollb
         default_character="Thoran",
         login_format="connect {name} {password}",
     )
-    host = MainWindow(address_book_storage_path=tmp_path / "ab.json")
+    host = MainWindow(address_book_storage_path=tmp_path / "ab.json", scripts_dir=tmp_path / "scripts")
     bridge = FakeBridge()
     tab = host.open_tab("example.com", 4201, bridge=bridge, world=world)
 
@@ -116,7 +116,7 @@ def test_no_default_character_skips_login_line_but_not_autosends(qapp, tmp_path:
         default_character="",  # none selected
         autosend_connect="look",
     )
-    host = MainWindow(address_book_storage_path=tmp_path / "ab.json")
+    host = MainWindow(address_book_storage_path=tmp_path / "ab.json", scripts_dir=tmp_path / "scripts")
     bridge = FakeBridge()
     host.open_tab("example.com", 4201, bridge=bridge, world=world)
 
@@ -133,7 +133,7 @@ def test_explicit_character_overrides_the_world_s_default_without_changing_it(qa
     thoran = CharacterProfile(name="Thoran", password="hunter2")
     alt = CharacterProfile(name="Alt", password="altpw")
     world = make_world(characters=[thoran, alt], default_character="Thoran")
-    host = MainWindow(address_book_storage_path=tmp_path / "ab.json")
+    host = MainWindow(address_book_storage_path=tmp_path / "ab.json", scripts_dir=tmp_path / "scripts")
     bridge = FakeBridge()
     tab = host.open_tab("example.com", 4201, bridge=bridge, world=world, character=alt)
 
@@ -154,7 +154,7 @@ def test_full_dispatch_order_matches_potato(qapp, tmp_path: Path):
         default_character="Thoran",
         login_format="connect {name} {password}",
     )
-    host = MainWindow(address_book_storage_path=tmp_path / "ab.json")
+    host = MainWindow(address_book_storage_path=tmp_path / "ab.json", scripts_dir=tmp_path / "scripts")
     bridge = FakeBridge()
     host.open_tab("example.com", 4201, bridge=bridge, world=world)
 
@@ -175,7 +175,7 @@ def test_autosend_lines_bypass_slash_command_processing(qapp, tmp_path: Path):
     # command must be sent to the server literally, never executed
     # locally -- same principle as the secondary pose/says input box.
     world = make_world(autosend_connect="/quit")
-    host = MainWindow(address_book_storage_path=tmp_path / "ab.json")
+    host = MainWindow(address_book_storage_path=tmp_path / "ab.json", scripts_dir=tmp_path / "scripts")
     bridge = FakeBridge()
     host.open_tab("example.com", 4201, bridge=bridge, world=world)
 
@@ -191,7 +191,7 @@ def test_record_world_connected_persists_across_a_fresh_load(qapp, tmp_path: Pat
 
     ab_path = tmp_path / "ab.json"
     save_address_book(ab_path, [make_world(name="Persisted", connect_count=0)])
-    host = MainWindow(address_book_storage_path=ab_path)
+    host = MainWindow(address_book_storage_path=ab_path, scripts_dir=tmp_path / "scripts")
     world = load_address_book(ab_path)[0]
 
     host.record_world_connected(world)

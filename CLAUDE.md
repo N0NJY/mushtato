@@ -98,7 +98,8 @@ system) — done, see below. Phase 7d (menu bar, toolbar, status bar
 chrome) — done, see below. Phase 7e (tabbed session host window) —
 done, see below. Phase 8 (documentation & onboarding) — done, see
 below. Phase 8b (address book / World Properties overhaul) — done,
-see below.** Telnet IAC negotiation is
+see below. Phase 9 (GUI-scripting integration: engine/scripting wired
+into the tabbed session GUI for real) — done, see below.** Telnet IAC negotiation is
 hand-rolled on raw asyncio streams (not telnetlib3)
 — see the Phase 3 discussion for reasoning. `scripts/console_client.py`
 is a throwaway dev tool for manually testing against a real server
@@ -739,7 +740,7 @@ started from) -- confirmed as an intentional, explicit reversal, not
 scope creep.
 
 Architecture split, following from that: `MainWindow` used to be both
-"one connection" and "the window chrome" in the same class. Phase 9
+"one connection" and "the window chrome" in the same class. Phase 7e
 splits those: **`SessionTab`** (`QWidget`, not a window) now owns
 exactly what MainWindow used to own per-connection -- scrollback, dual
 input + splitter, `TelnetBridge`, `CommandTable`, spawn windows, own
@@ -1437,8 +1438,279 @@ showing the terminal pane at a visibly larger font size than the input
 box, not just asserted via `.pointSize()`. Added a new "Fonts" Help
 topic and updated the Dual Input topic to mention the remembered split.
 
-Next: Rick has his own phase document for what comes after Phase 8b --
-not yet assigned a phase number here.
+**Phase 9 (GUI-scripting integration) — done.** New
+`engine/scripting/line_dispatch.py` (`LineDispatcher`), extended
+`engine/scripting/triggers.py`/`aliases.py`/`world.py` (per-trigger
+auto-disable, named script load/unload, `dirty`/error reporting),
+extended `gui/windows/telnet_bridge.py` (`on_text`/`set_on_text`/
+`run_in_background`), rewritten `gui/windows/session_tab.py` (the
+actual wiring), extended `gui/windows/main_window.py`/
+`address_book_window.py` (periodic autosave, live script reload, the
+`scripts_dir` override), extended `gui/dialogs/world_properties_dialog.py`
+(new Scripts page), rewritten `gui/help/topics.py`'s Scripting topic.
+`engine/scripting`'s 10-function API, sandboxed since Phase 4, reaches
+the real GUI for the first time.
+
+Preceded by the most thorough checkpoint of the session, per this
+file's own standing rules: five numbered proposals plus one
+independent finding, all confirmed or fully specified by Rick before
+any code was written. Two of Rick's answers were fully-specified
+requirements, not open questions -- the 5-minute dirty-flag autosave
+timer and the 5-consecutive-failures trigger auto-disable mechanism
+were both implemented exactly as spelled out, with zero remaining
+discretion.
+
+**The Phase 9 / Phase 7e naming collision, resolved as approved:**
+verified (not assumed) that 14 checked-in files' docstrings/comments
+called the tabbed-host-window work "Phase 9" even though SPEC.md's own
+roadmap always called it "7e" -- a real, pre-existing inconsistency
+between the code and the spec, not a typo in this session's own
+writing. Renamed every instance to "Phase 7e" (plus one stray
+"Phase 9" found inside this file's own Phase 7e write-up) so "Phase 9"
+unambiguously means GUI-scripting integration going forward.
+
+**The threading finding, confirmed true and more far-reaching than
+initially scoped.** The checkpoint asked whether Phase 5/6's "the
+GUI thread stays free of run_with_timeout's blocking wait" claim still
+holds once trigger dispatch runs on every incoming line -- verified it
+does *not* hold automatically, and the real fix reaches further than
+the original proposal anticipated. `engine/scripting/sandbox.py`'s
+`run_with_timeout()` always spawns its own internal worker thread for
+the actual script body and blocks the *caller* on `.join()` -- meaning
+every single script execution (not just trigger dispatch) hands off to
+a different thread than whatever called it, including entry points
+that looked GUI-thread-native from the outside (script load at tab
+construction, `on_connect`, a fired `timer()`). This was only
+discovered by writing and running a real test
+(`test_echo_renders_in_real_scrollback`): `echo()`'s effect never
+appeared, because its Qt signal emission from inside `on_connect`
+turned out to be a genuine cross-thread emission needing the event
+loop to actually process it, not the same-thread direct call it looked
+like from the call site. `gag()`/`highlight()` are unaffected by this
+(their effect is baked into `TriggerTable.dispatch()`'s *return
+value*, synchronously observable once the blocking call unwinds) --
+only `echo()` (and, transitively, anything relying on its signal)
+needed this understood and documented, which `session_tab.py`'s
+`_script_echo` docstring now does explicitly, correcting an earlier,
+inaccurate draft of that same comment.
+
+**Architecture, following from that finding:**
+`engine/scripting/line_dispatch.py`'s `LineDispatcher` is a new,
+headless-testable (no Qt) engine-layer class owning line-buffering +
+`AnsiParser` + trigger dispatch together -- it buffers raw incoming
+text into complete lines (`TriggerTable.dispatch()`/gag/highlight need
+a whole line to act on sensibly), and returns a *replaceable* preview
+of the still-incomplete trailing line on every `feed()` call rather
+than an incremental append, so gag/highlight still correctly cover a
+line that happens to arrive split across multiple network reads (the
+caller is expected to erase-and-reinsert the previous preview, never
+append to it -- `gui/windows/styled_text_qt.py`'s new `replace_tail()`
+helper does this). `TelnetBridge` gained one optional hook,
+`on_text`/`set_on_text()` -- a plain Python callable (deliberately not
+a Qt signal for this one hop, since a signal's auto-marshaling follows
+the *receiving* object's thread, which would put the processing back
+on the GUI thread and defeat the purpose) invoked synchronously on its
+own background thread from inside `_run()`'s read loop, before
+`textReceived` is emitted -- and stays fully unaware of ansi/scripting
+either way, just invoking whatever callable it's given. `SessionTab`
+supplies that callable (`_on_raw_incoming_text`), which calls
+`LineDispatcher.feed()` and hands the final, already-processed result
+back to the GUI thread via a Qt signal (`_incomingBatchReady` --safe
+to emit from any thread by construction). Outbound alias expansion
+gets the symmetric fix via a new `TelnetBridge.run_in_background()`
+(schedules a blocking callable onto the connection's own asyncio
+loop's executor, never the GUI thread or the read-loop's own thread).
+
+**A real bug found and fixed while building `LineDispatcher`, before
+any GUI wiring happened:** `_split_on_newlines` deliberately excludes
+the line terminator from the plain text used for trigger matching (so
+patterns never need to account for a trailing `\n`) -- but the first
+draft never added it back to the *rendered* segments, which would have
+made every consecutive line run together on screen with no line break
+at all. Caught by a dedicated test
+(`test_finalized_lines_include_their_trailing_newline`) before it ever
+reached the GUI layer, not discovered by eyeballing rendered output.
+
+**Per-tab `ScriptWorld` lifecycle, exactly as checkpointed:** every
+`SessionTab` builds a `ScriptWorld` unconditionally in `__init__`
+(even a world with zero saved scripts gets an empty one -- one uniform
+pipeline for every tab, confirmed by a test that two tabs on the *same*
+world have genuinely independent `ScriptWorld`/`TriggerTable`
+instances, not just independently-valued ones), loads saved scripts
+from `engine/storage/script_store.py` immediately after construction,
+and persists variables via `save_script_state()` on
+disconnect/shutdown. `ScriptWorld.load_script()` gained an optional
+`script_name` parameter (every pre-Phase-9 caller, including existing
+tests, omits it and is completely unaffected) and a new
+`unload_script()` -- together these let a script be cleanly
+edited-and-reloaded (World Properties' Scripts page saving, or a
+`reload_scripts()` call on an already-open tab) without old trigger/
+alias registrations, and their stale disabled/failure-counter state,
+lingering alongside the new version.
+
+**Checkpoint 1's fully-specified autosave, implemented exactly as
+given, no discretion exercised:** `ScriptWorld` gained a plain
+`dirty` flag, set by `_api_set_var()`, cleared by whatever saves
+(periodic or shutdown/disconnect). `MainWindow._script_autosave_timer`
+(one shared timer iterating every open tab, matching the existing
+`_activity_timer` pattern rather than one timer per tab) fires every 5
+minutes and only writes for a tab whose `script_world.dirty` is
+actually set -- proven with a test that marks one of two open tabs
+dirty and confirms only that one's file gets written. This is
+additional to, not a replacement for, `SessionTab.save_script_state()`
+on disconnect/shutdown.
+
+**Checkpoint 4's fully-specified auto-disable, also implemented
+exactly as given:** `Trigger` gained `consecutive_failures` (reset on
+success, incremented on a caught exception) and `source_script`
+(tagging which saved script registered it, for the Scripts UI marker).
+`TriggerTable.dispatch()` catches `Exception` (not just `ScriptError`
+subclasses -- an ordinary bug in a script's own trigger callback, e.g.
+a typo'd variable name, must be caught exactly the same way, not left
+to crash dispatch for every *other* trigger on the same line) around
+each callback, and disables a trigger that hits 5 consecutive failures
+-- proven with a test driving exactly 5 matching lines and confirming
+`enabled` flips to `False` on the 5th, not the 4th or 6th.
+`AliasEngine.expand()` got the same catch-and-report treatment (not
+the auto-disable counter, which Rick's checkpoint scoped to triggers
+specifically) -- `AliasOutcome` gained an `error` field, and `matched`
+stays `True` on a failing alias (falling back to sending the raw text
+literally would compound the confusion, not fix it -- proven with a
+test that a failing alias never sends anything).
+
+**Error/timeout surfacing reaches every dispatch entrypoint the
+checkpoint listed** -- `load_script` (per-script, doesn't stop other
+scripts from loading), `triggers.dispatch`, `aliases.expand`,
+timer-firing, and `on_connect` (`ScriptWorld.fire_connect_callbacks()`
+now returns `(name, message)` pairs instead of letting a broken
+callback propagate and block autosends from running afterward --
+proven with a test confirming autosends still fire despite a failing
+`on_connect`). Every failure prints one clear scrollback line via
+`_append_plain`, the same channel connection-level errors already use;
+none of them can crash or disconnect the tab.
+
+**Scripts page in World Properties, reusing `_CharactersPage`'s exact
+shape** (checked for reuse before building anything new, per this
+file's own rule 6) -- a new `_ScriptsPage`: list + name/enabled
+checkbox/source-editor fields + Add/Edit/Delete/Save/Cancel. The
+"disabled trigger" visual marker (checkpoint 4's explicit requirement)
+is deliberately *not* something this dialog computes itself -- it only
+ever works with static, on-disk `ScriptRecord`s, with no live
+`ScriptWorld` to ask. `AddressBookWindow._open_properties()` supplies
+it, via two new `MainWindow` methods (`tabs_for_world()`,
+`reload_scripts_for_world()`) that find any tab currently open for
+that world and read its *live* `TriggerTable.disabled_source_scripts()`
+-- proven end-to-end with a test using a real `MainWindow`/
+`AddressBookWindow` pair (not the usual `FakeHostWindow`): a live tab's
+trigger gets disabled after 5 failures, Properties shows the marker,
+re-saving (even unchanged) resets it on the *already-open* tab, not
+just on the next tab opened for that world. Saving Properties preserves
+whatever variables are already on disk unconditionally -- this dialog
+only ever edits script *source*, never the accumulated in-play state a
+session (or a past one) built up.
+
+**A real test-hygiene bug found and fixed mid-phase, not by
+inspection but by actually checking the real disk -- and only fully
+caught on the *second* sweep, worth being honest about rather than
+presenting as clean on the first try:** the first draft of
+`SessionTab`'s script loading called
+`engine.storage.paths.world_script_path()` directly, with no override
+-- meaning any test constructing a `SessionTab`/`MainWindow` with a
+real `world=` (several already existed, from Phase 8b) would read *and
+write* `~/.local/share/MushTato/scripts/`, the real per-user data
+directory, on whatever machine ran the tests. Caught by explicitly
+checking `ls ~/.local/share/MushTato/scripts/` before writing more
+tests, not assumed safe -- and a real file (`Original.json`) had
+already been written by an existing Phase 8b test before the fix,
+confirmed empty/harmless and deleted. Fixed with the same dependency-
+injection pattern `address_book_storage_path` already established:
+`SessionTab` gained `script_store_path`, `MainWindow` gained
+`scripts_dir`, `AddressBookWindow` gained `scripts_dir` -- overridable,
+defaulting to the real path -- and every *known* affected test file
+was updated to pass a `tmp_path`-based override. That first sweep
+missed two more call sites (`test_commands_wiring.py`,
+`test_chrome.py` -- both reach a real `world=` via `/connect`/
+`connect_by_name` rather than a literal `world=` kwarg, which is
+exactly why a plain `grep "world="` first pass didn't catch them) --
+found only because a second, independent disk check (prompted by a
+session interruption, not a scheduled step) turned up a second real
+leaked file, `Estrellita.json`. Fixed the same way, then re-swept
+*every* test file constructing `MainWindow`/`SessionTab`/
+`AddressBookWindow` systematically (not just the two that had just
+leaked) checking for any path that reaches `open_tab`/`connect_by_name`
+with a real world, rather than assuming the fix was now complete.
+Re-verified clean (`ls` reporting "No such file or directory") after
+each fix and after the full suite runs that followed -- this two-round
+history is recorded here deliberately, since claiming it was caught
+cleanly the first time would not have been accurate.
+
+**The accepted TinyFugue-precedent simplification, checkpointed and
+now recorded in SPEC.md section 8** (same treatment as the Phase 4
+GIL/busy-loop gap, not just mentioned in conversation and forgotten):
+an eternally-unterminated trailing partial line (most often an
+interactive prompt) renders immediately for a responsive feel, but is
+never matched against triggers -- real TinyFugue's more elaborate
+`prompt_timeout` mechanism (verified against `~/git/tinyfugue/src/
+socket.c`, not assumed) is deliberately not replicated.
+
+Verified at the levels this file's standing rules ask to distinguish:
+393 tests, all passing whenever the run completes cleanly (151 engine +
+242 gui, up from 385 at the end of the font/splitter work) -- headless
+engine fixtures for `LineDispatcher` (including real ANSI-colored,
+multi-chunk sample text) and the trigger/alias failure-tracking
+mechanism; GUI-level tests exercising the real `QTextEdit` scrollback
+(character-format colors read back via `QTextCursor`, not just
+asserted at the engine layer) and a real `FakeBridge`/`QTimer`; and one
+genuine real-thread confirmation (`test_telnet_bridge_integration.py`'s
+new tests, driving an actual background thread, not a fake one, to
+prove `on_text`/`run_in_background` really execute off the GUI thread).
+**Not** verified against a real MUD server this phase -- unlike several
+earlier phases, there was no live-server pass against
+`127.0.0.1:4444`; stated plainly rather than implied, per this file's
+own rule 8.
+
+**A real, newly-discovered gap, found honestly rather than glossed
+over: `pytest tests/` is flaky, not 100% reliable.** Across roughly ten
+full-suite runs this phase, most passed cleanly, but a real native
+segfault occurred more than once -- always at the identical point,
+`engine/scripting/sandbox.py`'s `run_with_timeout()` blocked in
+`threading.Thread.join()`, waiting for the worker thread it just
+spawned for one `TriggerTable.dispatch()` call. Isolated with real
+effort, not just noted and left: a 2000-iteration `dispatch()` stress
+test with zero Qt involvement never crashed, ruling out the dispatch
+logic or `google-re2` itself in isolation; a specific 3-file GUI subset
+(`test_scripting_integration.py`, `test_world_properties_dialog.py`,
+`test_address_book_window.py`, run together) reproduced the segfault
+reliably. This points at PySide6's offscreen platform plugin
+interacting badly with `run_with_timeout`'s design -- a brand-new
+real `threading.Thread` spawned for *every single* trigger/alias/
+script-load call, unchanged from Phase 4 -- once enough Qt widgets and
+threads have both churned through the same process; Phase 9 is the
+first phase to exercise that pattern at high enough volume/frequency
+(every incoming line, potentially) to expose it. Deliberately **not**
+"fixed" here: the checkpoint's own scope explicitly excluded changing
+`run_with_timeout`'s design ("no changes to the sandboxing model
+itself... this phase is wiring, not redesigning the engine"), and the
+real fix for this almost certainly overlaps with SPEC.md section 8's
+already-tracked "runaway script execution" hardening item (subprocess
+isolation instead of a thread-per-call would sidestep this class of
+problem entirely). Recorded there as a second, related known gap
+rather than silently worked around. A real running app (one process,
+a handful of tabs, dispatch paced by actual network traffic rather
+than hundreds of tests' worth of Qt widgets and thread spawns crammed
+into one process within seconds) has not been observed to hit this,
+but that's an honest "not observed," not a claim it structurally can't
+happen.
+
+Still true, called out one more time for the same reason as every
+phase since Phase 4b: trusted-mode execution
+(`execute_trusted_unrestricted`) is never called from any GUI code
+path this phase either -- `ScriptRecord.trusted` remains stored-but-
+inert metadata, exactly as Rick's checkpoint 5 confirmed it should stay
+until Phase 10's script-sharing ecosystem gives it real purpose.
+
+Next: Phase 10 (post-1.0 script-sharing ecosystem) is the last item on
+SPEC.md's roadmap; Rick will decide when/whether to start it.
 
 ## Standing rules: verification and assumptions
 

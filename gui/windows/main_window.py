@@ -1,4 +1,4 @@
-"""The app's root window (Phase 9): one persistent shell holding a
+"""The app's root window (Phase 7e): one persistent shell holding a
 QTabWidget of SessionTab connections, a shared menu bar/toolbar/status
 bar, and the app's settings. Always present from launch to exit --
 Rick's explicit design call: "the main connection window should be the
@@ -37,7 +37,9 @@ from engine.storage import (
     save_address_book,
     save_settings,
     settings_path,
+    user_data_dir,
 )
+from engine.storage.paths import safe_filename
 
 from ..dialogs.settings_dialog import SettingsDialog
 from ..help.help_window import HelpWindow
@@ -58,6 +60,12 @@ class MainWindow(QMainWindow):
     # same way here).
     ACTIVITY_COLOR = QColor(255, 140, 0)  # orange
     ACTIVITY_BLINK_INTERVAL_MS = 500
+    # Phase 9: how often the shared script-variable autosave timer
+    # checks for dirty tabs. Rick's exact spec -- 5 minutes, dirty-flag
+    # gated, not "save on every set_var()" (which risks a synchronous
+    # atomic JSON write on every incoming line if a trigger fires
+    # often).
+    SCRIPT_AUTOSAVE_INTERVAL_MS = 5 * 60 * 1000
 
     def __init__(
         self,
@@ -65,6 +73,7 @@ class MainWindow(QMainWindow):
         hotkeys: Optional[Dict[str, str]] = None,
         theme: Optional[str] = None,
         address_book_storage_path=None,
+        scripts_dir=None,
         scrollback_font_family: str = "",
         scrollback_font_size: int = 0,
         input_font_family: str = "",
@@ -93,6 +102,13 @@ class MainWindow(QMainWindow):
         self._address_book_path = (
             address_book_storage_path if address_book_storage_path is not None else address_book_path()
         )
+        # Phase 9: same override pattern as address_book_storage_path
+        # above -- defaults to the real per-user scripts directory,
+        # overridable so tests never touch it. Each tab's actual script
+        # file is this directory joined with its world's safe filename
+        # (see open_tab()), computed here rather than per-call so every
+        # tab for the same world agrees on the same path.
+        self._scripts_dir = scripts_dir if scripts_dir is not None else user_data_dir() / "scripts"
         self._address_book_window = None  # lazily constructed on first use
         self._help_window = None  # lazily constructed on first use
 
@@ -124,6 +140,20 @@ class MainWindow(QMainWindow):
         self._splitter_save_timer.setSingleShot(True)
         self._splitter_save_timer.setInterval(400)
         self._splitter_save_timer.timeout.connect(self._save_settings_to_disk)
+
+        # Phase 9: periodic autosave of script variables. One shared
+        # timer iterating every open tab (same reasoning as
+        # _activity_timer above) rather than one timer per tab. Only
+        # writes for a tab whose ScriptWorld.dirty is actually set
+        # (i.e. set_var() has fired since the last save) -- an idle
+        # tab with no variable mutations never touches disk. This is
+        # *in addition to* SessionTab's own save-on-shutdown/disconnect
+        # (session_tab.py's save_script_state()), not a replacement --
+        # it exists to survive a crash/force-quit that skips that path.
+        self._script_autosave_timer = QTimer(self)
+        self._script_autosave_timer.setInterval(self.SCRIPT_AUTOSAVE_INTERVAL_MS)
+        self._script_autosave_timer.timeout.connect(self._autosave_dirty_scripts)
+        self._script_autosave_timer.start()
 
         self._build_chrome()
         self._apply_hotkeys()
@@ -177,6 +207,9 @@ class MainWindow(QMainWindow):
             input_font_family=self._input_font_family,
             input_font_size=self._input_font_size,
             splitter_sizes=self._splitter_sizes or None,
+            script_store_path=(
+                self._scripts_dir / f"{safe_filename(world.name)}.json" if world is not None else None
+            ),
         )
         tab.connectionStateChanged.connect(lambda state, t=tab: self._on_tab_state_changed(t, state))
         tab.activity.connect(lambda t=tab: self._on_tab_activity(t))
@@ -237,6 +270,27 @@ class MainWindow(QMainWindow):
         if self._address_book_window is not None:
             self._address_book_window.worlds = worlds
             self._address_book_window._refresh_list()
+
+    # -- Phase 9: live script reload for an open tab -------------------
+
+    def tabs_for_world(self, world_name: str) -> list:
+        """Every currently-open tab whose world matches ``world_name``
+        (case-insensitive) -- a world-less (direct-connect) tab never
+        matches. Used both to compute the Scripts UI's "this script has
+        a disabled trigger" indicator and to live-reload scripts after
+        World Properties saves changes for a world that's currently
+        connected.
+        """
+        matches = []
+        for index in range(self.tab_widget.count()):
+            tab = self.tab_widget.widget(index)
+            if tab.world is not None and tab.world.name.lower() == world_name.lower():
+                matches.append(tab)
+        return matches
+
+    def reload_scripts_for_world(self, world_name: str) -> None:
+        for tab in self.tabs_for_world(world_name):
+            tab.reload_scripts()
 
     # -- settings persistence (hotkeys/theme/fonts/splitter size) -----
 
@@ -320,6 +374,14 @@ class MainWindow(QMainWindow):
         if not self._tabs_with_activity:
             self._activity_timer.stop()
 
+    # -- Phase 9: periodic script-variable autosave ---------------------
+
+    def _autosave_dirty_scripts(self) -> None:
+        for index in range(self.tab_widget.count()):
+            tab = self.tab_widget.widget(index)
+            if tab.script_world.dirty:
+                tab.save_script_state()
+
     # -- address book / settings (host-level, shared by every tab) ---
 
     def _show_address_book(self) -> None:
@@ -327,7 +389,7 @@ class MainWindow(QMainWindow):
             from .address_book_window import AddressBookWindow
 
             self._address_book_window = AddressBookWindow(
-                self, storage_path=self._address_book_path
+                self, storage_path=self._address_book_path, scripts_dir=self._scripts_dir
             )
         self._address_book_window.show()
         self._address_book_window.raise_()
@@ -412,7 +474,7 @@ class MainWindow(QMainWindow):
 
     def _build_chrome(self) -> None:
         """Menu bar, toolbar, and status bar modeled on Potato's real
-        GUI chrome (Phase 7d). Reworked for Phase 9: everything here is
+        GUI chrome (Phase 7d). Reworked for Phase 7e: everything here is
         host-level chrome that acts on the *active* tab (Reconnect,
         Disconnect, Copy, Spawn Log, Close) or the app as a whole
         (Address Book, Settings, Theme, About, Help, Exit) -- there is

@@ -1,5 +1,5 @@
 """Headless tests for the menu bar / toolbar / status bar chrome on the
-host MainWindow (Phase 9: chrome is host-level now, acting on whichever
+host MainWindow (Phase 7e: chrome is host-level now, acting on whichever
 tab is currently active, rather than per-connection as in Phase 7d).
 
 Every enabled action is expected to call the exact same handler its
@@ -272,7 +272,7 @@ def test_status_bar_reflects_the_active_tab_when_switching(qapp, tmp_path: Path)
 def test_connect_by_name_opens_a_tab_for_a_saved_world(qapp, tmp_path: Path):
     ab_path = tmp_path / "ab.json"
     save_address_book(ab_path, [WorldProfile(name="Estrellita", host="silvren.com", port=4444)])
-    host = make_host(address_book_storage_path=ab_path)
+    host = make_host(address_book_storage_path=ab_path, scripts_dir=tmp_path / "scripts")
 
     result = host.connect_by_name("Estrellita")
 

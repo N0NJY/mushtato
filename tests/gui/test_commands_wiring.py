@@ -2,7 +2,7 @@
 input processes "/" commands, the secondary always bypasses them, and
 each command calls the exact same handler its GUI equivalent uses.
 
-Phase 9: commands live on SessionTab; /connect, /settings, and /theme
+Phase 7e: commands live on SessionTab; /connect, /settings, and /theme
 delegate to the host MainWindow shell that owns the tab.
 """
 
@@ -155,7 +155,7 @@ def test_connect_and_settings_report_unavailable_without_a_host_window(qapp):
 def test_connect_command_calls_the_same_open_tab_as_the_address_book(qapp, tmp_path: Path):
     ab_path = tmp_path / "address_book.json"
     save_address_book(ab_path, [WorldProfile(name="Estrellita", host="silvren.com", port=4444)])
-    host = MainWindow(address_book_storage_path=ab_path)
+    host = MainWindow(address_book_storage_path=ab_path, scripts_dir=tmp_path / "scripts")
     tab = host.open_tab("example.com", 4201, bridge=FakeBridge())
 
     tab.input_line.setText("/connect Estrellita")
@@ -169,7 +169,7 @@ def test_connect_command_calls_the_same_open_tab_as_the_address_book(qapp, tmp_p
 def test_connect_command_with_unknown_world_name_reports_it(qapp, tmp_path: Path):
     ab_path = tmp_path / "address_book.json"
     save_address_book(ab_path, [WorldProfile(name="Estrellita", host="silvren.com", port=4444)])
-    host = MainWindow(address_book_storage_path=ab_path)
+    host = MainWindow(address_book_storage_path=ab_path, scripts_dir=tmp_path / "scripts")
     tab = host.open_tab("example.com", 4201, bridge=FakeBridge())
 
     tab.input_line.setText("/connect NoSuchWorld")

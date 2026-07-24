@@ -5,7 +5,7 @@ that engine features (and by extension, GUI smoke tests) shouldn't
 need a live server.
 
 FakeBridge lives here because it's imported by many other test files
-(Phase 9 renamed MainWindow's old "one connection" role to SessionTab,
+(Phase 7e renamed MainWindow's old "one connection" role to SessionTab,
 but kept this fixture's import path stable rather than force-updating
 every importer's path just for a rename).
 """
@@ -20,6 +20,15 @@ from gui.windows.session_tab import SessionTab
 class FakeBridge(QObject):
     """Same signal shape as TelnetBridge, but start()/send_line()/stop()
     are no-ops -- never touches a real socket or thread.
+
+    Phase 9: also mirrors TelnetBridge's real on_text-then-textReceived
+    contract (set_on_text()/simulate_incoming()) and its
+    run_in_background() hook, so tests exercise the same wiring
+    SessionTab uses against a real bridge. Tests should call
+    simulate_incoming() to simulate the server sending text, not emit
+    textReceived directly -- that signal alone no longer drives
+    anything in SessionTab (see session_tab.py's module docstring);
+    only on_text does.
     """
 
     connected = Signal()
@@ -32,6 +41,7 @@ class FakeBridge(QObject):
         self.sent = []
         self.started = False
         self.stopped = False
+        self._on_text = None
 
     def start(self) -> None:
         self.started = True
@@ -41,6 +51,21 @@ class FakeBridge(QObject):
 
     def stop(self) -> None:
         self.stopped = True
+
+    def set_on_text(self, callback) -> None:
+        self._on_text = callback
+
+    def simulate_incoming(self, text: str) -> None:
+        if self._on_text is not None:
+            self._on_text(text)
+        self.textReceived.emit(text)
+
+    def run_in_background(self, func) -> None:
+        # No real background thread here -- just run it synchronously,
+        # immediately. What matters for a test double is the *effect*
+        # (this must never require an event loop or thread to already
+        # be pumping), not literally reproducing production's threading.
+        func()
 
 
 def test_tab_constructs_with_expected_widgets(qapp):
@@ -72,7 +97,7 @@ def test_incoming_text_is_rendered_in_scrollback(qapp):
     bridge = FakeBridge()
     tab = SessionTab("example.com", 4201, bridge=bridge)
 
-    bridge.textReceived.emit("You see a dusty road.\r\n")
+    bridge.simulate_incoming("You see a dusty road.\r\n")
 
     assert "You see a dusty road." in tab.scrollback.toPlainText()
 

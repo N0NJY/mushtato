@@ -1,6 +1,6 @@
 """Headless tests for the spawn-window feature (log-mirror, the
 concrete first example -- see CLAUDE.md's Phase 6 notes). Owned by
-SessionTab as of Phase 9.
+SessionTab as of Phase 7e.
 """
 
 from gui.windows.session_tab import SessionTab
@@ -12,7 +12,7 @@ def test_spawn_log_window_mirrors_incoming_text(qapp):
     tab = SessionTab("example.com", 4201, bridge=bridge)
 
     spawn = tab.spawn_log_window()
-    bridge.textReceived.emit("You see a dusty road.\r\n")
+    bridge.simulate_incoming("You see a dusty road.\r\n")
 
     assert "You see a dusty road." in tab.scrollback.toPlainText()
     assert "You see a dusty road." in spawn.scrollback.toPlainText()
@@ -22,9 +22,9 @@ def test_spawn_window_does_not_receive_text_from_before_it_was_created(qapp):
     bridge = FakeBridge()
     tab = SessionTab("example.com", 4201, bridge=bridge)
 
-    bridge.textReceived.emit("earlier text\r\n")
+    bridge.simulate_incoming("earlier text\r\n")
     spawn = tab.spawn_log_window()
-    bridge.textReceived.emit("later text\r\n")
+    bridge.simulate_incoming("later text\r\n")
 
     assert "earlier text" not in spawn.scrollback.toPlainText()
     assert "later text" in spawn.scrollback.toPlainText()
@@ -36,7 +36,7 @@ def test_multiple_spawn_windows_all_receive_the_same_text(qapp):
 
     spawn_a = tab.spawn_log_window()
     spawn_b = tab.spawn_log_window()
-    bridge.textReceived.emit("broadcast\r\n")
+    bridge.simulate_incoming("broadcast\r\n")
 
     assert "broadcast" in spawn_a.scrollback.toPlainText()
     assert "broadcast" in spawn_b.scrollback.toPlainText()
@@ -66,7 +66,7 @@ def test_closing_one_spawn_window_does_not_affect_another(qapp):
     assert spawn_a not in tab.spawn_windows
     assert spawn_b in tab.spawn_windows
 
-    bridge.textReceived.emit("still here\r\n")
+    bridge.simulate_incoming("still here\r\n")
     assert "still here" in spawn_b.scrollback.toPlainText()
 
 

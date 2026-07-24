@@ -64,9 +64,11 @@ See `INSTALL.md`'s "Removing your data" section for the exact per-OS
 path.
 
 **Does MushTato support scripting/triggers/macros yet?**
-Not in the GUI yet — see the in-app Help's Scripting topic. The
-underlying engine exists and is tested, but nothing in the app currently
-lets you attach a script to a connection.
+Yes — triggers, gags, highlights, aliases, timers, and persistent
+per-world variables, written in sandboxed Python. Manage scripts via
+Address Book → select a world → Properties... → Scripts. See the
+in-app Help's Scripting topic for the full API and how errors/
+auto-disabled triggers are surfaced.
 
 **Why did my saved hotkey stop working / a hotkey doesn't do anything?**
 Hotkeys are configured in **Options → Settings...**; changes apply

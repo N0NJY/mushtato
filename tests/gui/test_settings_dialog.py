@@ -1,5 +1,5 @@
 """Headless tests for the settings/hotkey dialog itself. Its wiring
-into the app (Phase 9: MainWindow.open_settings(), not
+into the app (Phase 7e: MainWindow.open_settings(), not
 AddressBookWindow) is covered in tests/gui/test_host_window.py.
 """
 

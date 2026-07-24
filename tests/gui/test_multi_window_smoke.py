@@ -1,4 +1,4 @@
-"""Smoke tests for the multi-connection model (Phase 9: multiple tabs
+"""Smoke tests for the multi-connection model (Phase 7e: multiple tabs
 in one host MainWindow, replacing Phase 5/6's multiple independent
 top-level windows) -- confirming one tab's state/teardown never
 affects another's.
@@ -40,7 +40,7 @@ def test_incoming_text_in_one_tab_does_not_appear_in_another(qapp, tmp_path):
     tab_a = host.open_tab("a.example.com", 4000, bridge=bridge_a)
     tab_b = host.open_tab("b.example.com", 5000, bridge=bridge_b)
 
-    bridge_a.textReceived.emit("only for A\r\n")
+    bridge_a.simulate_incoming("only for A\r\n")
 
     assert "only for A" in tab_a.scrollback.toPlainText()
     assert "only for A" not in tab_b.scrollback.toPlainText()

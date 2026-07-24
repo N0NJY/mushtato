@@ -1,5 +1,5 @@
 """Address book: browse/add/edit/delete saved worlds, connect to open
-a tab in the host MainWindow (Phase 9 -- previously this opened its own
+a tab in the host MainWindow (Phase 7e -- previously this opened its own
 independent MainWindow per world; now MainWindow is the persistent
 root and this is a satellite picker spawned *from* it, per Rick's
 explicit design call).
@@ -51,7 +51,17 @@ from PySide6.QtWidgets import (
     QWidget,
 )
 
-from engine.storage import WorldProfile, address_book_path, load_address_book, save_address_book
+from engine.storage import (
+    WorldProfile,
+    WorldScriptProfile,
+    address_book_path,
+    load_address_book,
+    load_world_scripts,
+    save_address_book,
+    save_world_scripts,
+    user_data_dir,
+)
+from engine.storage.paths import safe_filename
 
 from ..dialogs.world_edit_dialog import WorldEditDialog
 from ..dialogs.world_properties_dialog import WorldPropertiesDialog
@@ -63,12 +73,17 @@ class AddressBookWindow(QMainWindow):
         host_window,
         *,
         storage_path: Optional[Path] = None,
+        scripts_dir: Optional[Path] = None,
     ) -> None:
         super().__init__()
         self.setWindowTitle("MushTato — Address Book")
 
         self.host_window = host_window
         self._path = storage_path if storage_path is not None else address_book_path()
+        # Phase 9: same override pattern as storage_path above -- see
+        # MainWindow's own _scripts_dir for the reasoning (defaults to
+        # the real per-user scripts directory, overridable for tests).
+        self._scripts_dir = scripts_dir if scripts_dir is not None else user_data_dir() / "scripts"
 
         self.worlds: List[WorldProfile] = load_address_book(self._path)
 
@@ -282,13 +297,41 @@ class AddressBookWindow(QMainWindow):
         index = self._selected_index()
         if index is None:
             return
-        dialog = WorldPropertiesDialog(self, world=self.worlds[index])
+        world = self.worlds[index]
+        scripts_path = self._scripts_dir / f"{safe_filename(world.name)}.json"
+        existing_scripts_profile = load_world_scripts(scripts_path)
+
+        # A currently-open tab for this world (if any) has the live,
+        # authoritative ScriptWorld -- its auto-disabled triggers (if
+        # any) are what the Scripts page's visible marker reflects,
+        # not something this dialog could otherwise know about (it
+        # only ever works with static, on-disk ScriptRecords).
+        disabled_trigger_scripts: set = set()
+        for tab in self.host_window.tabs_for_world(world.name):
+            disabled_trigger_scripts |= tab.script_world.triggers.disabled_source_scripts()
+
+        dialog = WorldPropertiesDialog(
+            self,
+            world=world,
+            scripts=existing_scripts_profile.scripts,
+            disabled_trigger_scripts=disabled_trigger_scripts,
+        )
         if dialog.exec():
             profile = dialog.result_profile()
             if profile is not None:
                 self.worlds[index] = profile
                 self._save()
                 self._refresh_list()
+            # Variables are preserved as-is -- this dialog only ever
+            # edits script *source*, never the accumulated in-play
+            # state a currently-open tab (or a past session) built up.
+            save_world_scripts(
+                scripts_path,
+                WorldScriptProfile(
+                    scripts=dialog.result_scripts(), variables=existing_scripts_profile.variables
+                ),
+            )
+            self.host_window.reload_scripts_for_world(world.name)
 
     def _log_in_as_selected_character(self) -> None:
         world_index = self._selected_index()

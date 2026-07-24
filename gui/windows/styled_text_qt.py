@@ -58,3 +58,25 @@ def append_styled_segments(text_edit: QTextEdit, segments: Iterable[StyledSegmen
         cursor.insertText(text.replace("\r", ""), style_to_qt_format(style))
     text_edit.setTextCursor(cursor)
     text_edit.ensureCursorVisible()
+
+
+def replace_tail(text_edit: QTextEdit, start_position: int, segments: Iterable[StyledSegment]) -> None:
+    """Erase everything in ``text_edit`` from ``start_position`` to the
+    end of the document, then insert ``segments`` in its place.
+
+    Used by Phase 9's LineDispatcher-driven rendering to replace a
+    previously-shown "preview" of a still-incomplete line with its
+    updated content (or with the finalized, trigger/gag/highlight-
+    resolved version once the line completes) without needing to
+    re-render anything before ``start_position``. Passing an empty
+    ``segments`` just erases the tail (used to clear a preview that
+    turned out to belong to a gagged line).
+    """
+    cursor = QTextCursor(text_edit.document())
+    cursor.setPosition(start_position)
+    cursor.movePosition(QTextCursor.End, QTextCursor.KeepAnchor)
+    cursor.removeSelectedText()
+    for text, style in segments:
+        cursor.insertText(text.replace("\r", ""), style_to_qt_format(style))
+    text_edit.setTextCursor(cursor)
+    text_edit.ensureCursorVisible()

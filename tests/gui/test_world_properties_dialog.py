@@ -3,9 +3,13 @@ Characters add/edit/delete flow, connection-specifics placeholders
 being genuinely disabled, and round-tripping all fields through
 result_profile(). Uses synthetic data only -- never anything from
 ~/.potato.
+
+Phase 9 additions: the Scripts page, built on the exact same list+
+detail pattern as Characters (reused deliberately, see
+world_properties_dialog.py's _ScriptsPage docstring).
 """
 
-from engine.storage import CharacterProfile, WorldProfile
+from engine.storage import CharacterProfile, ScriptRecord, WorldProfile
 from gui.dialogs.world_properties_dialog import WorldPropertiesDialog
 
 
@@ -170,11 +174,11 @@ def test_functional_connection_fields_are_enabled(qapp):
     assert dialog.login_delay_spin.isEnabled() is True
 
 
-def test_category_list_has_five_sections(qapp):
+def test_category_list_has_six_sections(qapp):
     world = make_world()
     dialog = WorldPropertiesDialog(None, world=world)
     titles = [dialog.category_list.item(i).text() for i in range(dialog.category_list.count())]
-    assert titles == ["Basic", "Characters", "Connection", "Auto-Sends", "Notes"]
+    assert titles == ["Basic", "Characters", "Connection", "Auto-Sends", "Notes", "Scripts"]
 
 
 def test_switching_category_switches_the_visible_page(qapp):
@@ -229,3 +233,101 @@ def test_editing_an_existing_character_does_not_trigger_auto_default(qapp):
 
     # Editing isn't adding -- the default should still be unset.
     assert dialog.default_character_combo.currentText() == "(None)"
+
+
+# -- Scripts page (Phase 9) -----------------------------------------------
+
+
+def test_dialog_loads_existing_scripts_into_the_list(qapp):
+    dialog = WorldPropertiesDialog(
+        None, world=make_world(), scripts=[ScriptRecord(name="my-script", source="pass")]
+    )
+
+    page = dialog._scripts_page
+    assert page.list_widget.count() == 1
+    assert page.list_widget.item(0).text() == "my-script"
+
+
+def test_disabled_script_shows_disabled_suffix_in_the_list(qapp):
+    dialog = WorldPropertiesDialog(
+        None,
+        world=make_world(),
+        scripts=[ScriptRecord(name="off", source="pass", enabled=False)],
+    )
+
+    assert dialog._scripts_page.list_widget.item(0).text() == "off (disabled)"
+
+
+def test_add_script_flow(qapp):
+    dialog = WorldPropertiesDialog(None, world=make_world())
+    page = dialog._scripts_page
+
+    page._start_add()
+    page.name_edit.setText("new-script")
+    page.source_edit.setPlainText("on_trigger('x', lambda m: None)")
+    page._save_current()
+
+    assert page.list_widget.count() == 1
+    assert dialog.result_scripts() == [
+        ScriptRecord(name="new-script", source="on_trigger('x', lambda m: None)")
+    ]
+
+
+def test_edit_script_flow_preserves_trusted_flag(qapp):
+    dialog = WorldPropertiesDialog(
+        None,
+        world=make_world(),
+        scripts=[ScriptRecord(name="s1", source="old", trusted=True)],
+    )
+    page = dialog._scripts_page
+
+    page.list_widget.setCurrentRow(0)
+    page._start_edit()
+    page.source_edit.setPlainText("new source")
+    page._save_current()
+
+    result = dialog.result_scripts()
+    assert result == [ScriptRecord(name="s1", source="new source", trusted=True)]
+
+
+def test_delete_script_flow(qapp):
+    dialog = WorldPropertiesDialog(
+        None, world=make_world(), scripts=[ScriptRecord(name="s1", source="pass")]
+    )
+    page = dialog._scripts_page
+
+    page.list_widget.setCurrentRow(0)
+    page._delete_selected()
+
+    assert dialog.result_scripts() == []
+
+
+def test_unchecking_enabled_persists_through_result_scripts(qapp):
+    dialog = WorldPropertiesDialog(
+        None, world=make_world(), scripts=[ScriptRecord(name="s1", source="pass")]
+    )
+    page = dialog._scripts_page
+
+    page.list_widget.setCurrentRow(0)
+    page._start_edit()
+    page.enabled_checkbox.setChecked(False)
+    page._save_current()
+
+    assert dialog.result_scripts()[0].enabled is False
+
+
+def test_a_script_with_a_disabled_trigger_shows_a_visible_marker(qapp):
+    dialog_marked = WorldPropertiesDialog(
+        None,
+        world=make_world(),
+        scripts=[ScriptRecord(name="s1", source="pass")],
+        disabled_trigger_scripts={"s1"},
+    )
+    dialog_unmarked = WorldPropertiesDialog(
+        None, world=make_world(), scripts=[ScriptRecord(name="s1", source="pass")]
+    )
+
+    marked_item = dialog_marked._scripts_page.list_widget.item(0)
+    unmarked_item = dialog_unmarked._scripts_page.list_widget.item(0)
+    assert marked_item.toolTip() != ""
+    assert unmarked_item.toolTip() == ""

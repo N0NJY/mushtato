@@ -7,7 +7,7 @@ Usage:
                                    # open, connected directly (handy for
                                    # dev/testing)
 
-Phase 9: MainWindow is now the persistent root/shell (a tabbed
+Phase 7e: MainWindow is now the persistent root/shell (a tabbed
 connection host), not one connection itself -- see
 gui/windows/main_window.py's module docstring. The address book is a
 satellite window opened *from* the main window, not the app's entry

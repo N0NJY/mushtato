@@ -17,7 +17,7 @@ def test_activity_in_the_currently_active_tab_does_not_flash(qapp, tmp_path):
     tab = host.open_tab("a.example.com", 4000, bridge=bridge)
     assert host.tab_widget.currentWidget() is tab
 
-    bridge.textReceived.emit("hello\r\n")
+    bridge.simulate_incoming("hello\r\n")
 
     assert tab not in host._tabs_with_activity
     assert host._activity_timer.isActive() is False
@@ -31,7 +31,7 @@ def test_activity_in_a_background_tab_marks_it_and_starts_the_timer(qapp, tmp_pa
     tab_b = host.open_tab("b.example.com", 5000, bridge=bridge_b)
     assert host.tab_widget.currentWidget() is tab_b  # b is active, a is backgrounded
 
-    bridge_a.textReceived.emit("someone typed something\r\n")
+    bridge_a.simulate_incoming("someone typed something\r\n")
 
     assert tab_a in host._tabs_with_activity
     assert host._activity_timer.isActive() is True
@@ -45,7 +45,7 @@ def test_ticking_the_flash_toggles_the_color(qapp, tmp_path):
     tab_a = host.open_tab("a.example.com", 4000, bridge=bridge_a)
     host.open_tab("b.example.com", 5000, bridge=FakeBridge())
 
-    bridge_a.textReceived.emit("ping\r\n")
+    bridge_a.simulate_incoming("ping\r\n")
     index_a = host.tab_widget.indexOf(tab_a)
     assert host.tab_widget.tabBar().tabTextColor(index_a) == MainWindow.ACTIVITY_COLOR
 
@@ -61,7 +61,7 @@ def test_switching_to_a_flashing_tab_clears_it(qapp, tmp_path):
     bridge_a = FakeBridge()
     tab_a = host.open_tab("a.example.com", 4000, bridge=bridge_a)
     host.open_tab("b.example.com", 5000, bridge=FakeBridge())
-    bridge_a.textReceived.emit("ping\r\n")
+    bridge_a.simulate_incoming("ping\r\n")
     assert tab_a in host._tabs_with_activity
 
     host.tab_widget.setCurrentWidget(tab_a)
@@ -76,7 +76,7 @@ def test_timer_stops_once_the_last_flashing_tab_is_cleared(qapp, tmp_path):
     bridge_a = FakeBridge()
     tab_a = host.open_tab("a.example.com", 4000, bridge=bridge_a)
     host.open_tab("b.example.com", 5000, bridge=FakeBridge())
-    bridge_a.textReceived.emit("ping\r\n")
+    bridge_a.simulate_incoming("ping\r\n")
     assert host._activity_timer.isActive() is True
 
     host.tab_widget.setCurrentWidget(tab_a)
@@ -91,7 +91,7 @@ def test_activity_keeps_flashing_indefinitely_not_just_a_few_ticks(qapp, tmp_pat
     bridge_a = FakeBridge()
     tab_a = host.open_tab("a.example.com", 4000, bridge=bridge_a)
     host.open_tab("b.example.com", 5000, bridge=FakeBridge())
-    bridge_a.textReceived.emit("ping\r\n")
+    bridge_a.simulate_incoming("ping\r\n")
 
     for _ in range(20):
         host._tick_activity_flash()
@@ -108,8 +108,8 @@ def test_multiple_background_tabs_flash_independently_tracked_but_together(qapp,
     tab_b = host.open_tab("b.example.com", 5000, bridge=bridge_b)
     host.open_tab("c.example.com", 6000, bridge=FakeBridge())  # active tab
 
-    bridge_a.textReceived.emit("ping a\r\n")
-    bridge_b.textReceived.emit("ping b\r\n")
+    bridge_a.simulate_incoming("ping a\r\n")
+    bridge_b.simulate_incoming("ping b\r\n")
 
     assert tab_a in host._tabs_with_activity
     assert tab_b in host._tabs_with_activity
@@ -126,7 +126,7 @@ def test_closing_a_flashing_tab_removes_it_from_tracking(qapp, tmp_path):
     bridge_a = FakeBridge()
     tab_a = host.open_tab("a.example.com", 4000, bridge=bridge_a)
     host.open_tab("b.example.com", 5000, bridge=FakeBridge())
-    bridge_a.textReceived.emit("ping\r\n")
+    bridge_a.simulate_incoming("ping\r\n")
     assert tab_a in host._tabs_with_activity
 
     host.close_tab(tab_a)

@@ -6,6 +6,26 @@ of work, per `CLAUDE.md`/`SPEC.md`'s roadmap) rather than by version
 number, reconstructed from `CLAUDE.md`'s phase-by-phase notes and git
 history. All dates below are from the actual commit history.
 
+## Phase 9 — GUI-scripting integration (2026-07-24)
+
+- `engine/scripting` (sandboxed triggers/aliases/gags/highlights/timers/
+  variables, built in Phase 4) is wired into the real GUI for the first
+  time. Every tab gets its own independent script runtime; incoming
+  text is matched against triggers (which can gag/highlight/echo/send/
+  set variables), typed input against aliases.
+- A new **Scripts** page in World Properties (Address Book → select a
+  world → Properties... → Scripts) for writing/saving scripts per
+  world, alongside the existing Basic/Characters/Connection/Auto-Sends/
+  Notes sections.
+- Script errors and timeouts surface as scrollback lines instead of
+  crashing the tab; a trigger that fails 5 times in a row auto-disables
+  itself (visibly marked in the Scripts page) rather than flooding the
+  scrollback with the same error forever.
+- Trigger/alias dispatch runs on the connection's own background
+  thread, not the GUI thread, so a slow or hung script can't freeze the
+  app.
+- Script variables autosave periodically and on disconnect.
+
 ## Post-8b — Remembered input-pane size + configurable fonts (2026-07-24)
 
 - The dual-input pane's dragged height is now remembered (one global

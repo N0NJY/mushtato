@@ -157,8 +157,13 @@ Two cleanly separated layers:
 8b. **Address book / World Properties overhaul** (Potato parity:
     characters, auto-sends, notes, connection specifics) + corresponding
     Help content update.
-9. **(Post-1.0) Script-sharing ecosystem** — define a shareable script package
-   format, decide on a distribution point (repo, in-app browser, or both).
+9. **GUI-scripting integration** — wire `engine/scripting` (`ScriptWorld`,
+   triggers, aliases) into the tabbed session GUI: per-tab script
+   authoring/storage, live trigger/alias execution against incoming/
+   outgoing text, error/timeout surfacing.
+10. **(Post-1.0) Script-sharing ecosystem** — define a shareable script
+    package format, decide on a distribution point (repo, in-app browser,
+    or both).
 
 ## 8. Open questions to revisit
 
@@ -185,7 +190,25 @@ Two cleanly separated layers:
   script execution in an isolated subprocess with a hard kill, which is
   more scope than a single phase; revisit as a hardening pass once the
   scripting layer sees real use, and especially before any script-sharing
-  feature (section 7, phase 9) ships.
+  feature (section 7, phase 10) ships.
+- **Known gap: `run_with_timeout`'s per-call thread spawn is
+  occasionally implicated in a real native segfault under heavy load
+  (Phase 9).** Discovered via the test suite, not theoretical: a rare
+  but real crash inside `threading.Thread.join()`, at the exact point
+  `run_with_timeout` waits for the worker thread it just spawned for
+  one script/trigger/alias dispatch. Reproduced reliably with a
+  specific GUI test subset that combines many Qt widgets with heavy
+  trigger-dispatch volume in one process; never reproduced in an
+  isolated, Qt-free 2000-iteration dispatch stress test, pointing at
+  PySide6's offscreen platform interacting badly with this design's
+  thread-per-call churn once enough of both have accumulated in one
+  process, not a bug in dispatch logic or RE2 itself. Same underlying
+  design (a fresh `threading.Thread` per call, from Phase 4, unchanged)
+  as the busy-loop gap above, and very likely the same real fix:
+  subprocess isolation instead of a thread per call would sidestep
+  this class of problem too. Not fixed in Phase 9 -- that phase's own
+  checkpoint explicitly scoped out changing the sandboxing model.
+  Revisit together with the busy-loop item above.
 - ~~macOS notarization: pursue Apple Developer Program membership, or ship
   unsigned with a documented Gatekeeper workaround?~~ **Decided (Phase 7):
   ship unsigned for now.** Not a technical call — section 3 already
@@ -195,4 +218,18 @@ Two cleanly separated layers:
   gets the priority backwards. Users get the standard right-click-Open
   workaround in the meantime. Revisit once a real macOS user exists to
   validate against.
+- **Known gap: an eternally-unterminated trailing partial line never gets
+  trigger dispatch (Phase 9).** Real TinyFugue has an actual, fairly
+  elaborate mechanism for this (`src/socket.c`'s `prompt_timeout` —
+  promoting an unfinished line to a "prompt" after a wall-clock delay so
+  it still becomes eligible for prompt-handling logic). MushTato
+  deliberately does not replicate that: a line that never receives its
+  terminating `\n` (most commonly an interactive prompt with no newline,
+  e.g. `HP: 100 > `) is still rendered immediately for a responsive feel,
+  but is never matched against triggers, since matching a still-growing
+  fragment against a pattern that expects the whole line can't be done
+  reliably. This is a deliberate, scoped-down simplification for the
+  Phase 9 wiring work, not an oversight — revisit if a real use case for
+  prompt-matching triggers surfaces (SPEC.md section 7, phase 9's own
+  scope was wiring the existing engine in, not extending its semantics).
 - Format/venue for the eventual script-sharing community.

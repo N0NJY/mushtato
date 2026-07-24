@@ -107,3 +107,83 @@ def test_bridge_connects_receives_and_sends_against_real_server(qapp):
 
     bridge.stop()
     server_loop.call_soon_threadsafe(server_state["task"].cancel)
+
+
+def test_on_text_callback_fires_synchronously_on_the_background_thread_not_the_gui_thread(qapp):
+    # This is the actual claim Phase 9's checkpoint needed verified,
+    # not just asserted: the on_text callback -- where line-buffering/
+    # trigger dispatch will run -- must execute on TelnetBridge's own
+    # background thread, never the GUI thread, since that's what keeps
+    # a slow/hung trigger's run_with_timeout wait off the UI.
+    ready = threading.Event()
+    host_port: dict = {}
+    server_loop, server_state = _start_fake_server_in_background(ready, host_port)
+    assert ready.wait(timeout=3), "fake server never started"
+
+    gui_thread = threading.current_thread()
+    callback_threads = []
+    received_chunks = []
+
+    def on_text(chunk):
+        callback_threads.append(threading.current_thread())
+        received_chunks.append(chunk)
+
+    bridge = TelnetBridge(host_port["host"], host_port["port"], on_text=on_text)
+    bridge.start()
+
+    assert _pump_until(
+        qapp, lambda: any("Welcome to TestMUD!" in c for c in received_chunks)
+    ), f"on_text never fired, got: {received_chunks}"
+
+    assert callback_threads, "on_text was never called"
+    assert all(t is not gui_thread for t in callback_threads)
+
+    bridge.stop()
+    server_loop.call_soon_threadsafe(server_state["task"].cancel)
+
+
+def test_run_in_background_executes_off_the_gui_thread(qapp):
+    ready = threading.Event()
+    host_port: dict = {}
+    server_loop, server_state = _start_fake_server_in_background(ready, host_port)
+    assert ready.wait(timeout=3), "fake server never started"
+
+    bridge = TelnetBridge(host_port["host"], host_port["port"])
+    connected_spy = QSignalSpy(bridge.connected)
+    bridge.start()
+    assert _pump_until(qapp, lambda: connected_spy.count() >= 1), "never connected"
+
+    gui_thread = threading.current_thread()
+    result = {}
+
+    def blocking_work():
+        result["thread"] = threading.current_thread()
+        result["done"] = True
+
+    bridge.run_in_background(blocking_work)
+
+    assert _pump_until(qapp, lambda: result.get("done")), "run_in_background never ran"
+    assert result["thread"] is not gui_thread
+
+    bridge.stop()
+    server_loop.call_soon_threadsafe(server_state["task"].cancel)
+
+
+def test_on_text_callback_fires_before_the_equivalent_textReceived_signal(qapp):
+    ready = threading.Event()
+    host_port: dict = {}
+    server_loop, server_state = _start_fake_server_in_background(ready, host_port)
+    assert ready.wait(timeout=3), "fake server never started"
+
+    order = []
+    bridge = TelnetBridge(
+        host_port["host"], host_port["port"], on_text=lambda chunk: order.append("on_text")
+    )
+    bridge.textReceived.connect(lambda chunk: order.append("textReceived"))
+    bridge.start()
+
+    assert _pump_until(qapp, lambda: len(order) >= 2), f"never got both, got: {order}"
+    assert order[:2] == ["on_text", "textReceived"]
+
+    bridge.stop()
+    server_loop.call_soon_threadsafe(server_state["task"].cancel)

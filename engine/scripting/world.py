@@ -19,7 +19,7 @@ from __future__ import annotations
 
 import json
 import types
-from typing import Any, Callable, Dict, List, Optional
+from typing import Any, Callable, Dict, List, Optional, Tuple
 
 from ..ansi.style import Style
 from .errors import ScriptAPIError
@@ -72,8 +72,25 @@ class ScriptWorld:
         # Globals dicts of every script loaded into this world, used to
         # verify a callback passed to timer()/on_trigger()/on_connect()
         # really was defined inside one of them (see
-        # _require_script_owned_callable).
+        # _require_script_owned_callable). Kept as a plain list (not
+        # keyed) for this original purpose -- unrelated to the
+        # name-keyed tracking added below for unload_script().
         self._script_globals: List[Dict[str, Any]] = []
+        # Phase 9: parallel, *named* tracking so a specific saved script
+        # (ScriptRecord.name) can be cleanly unloaded/reloaded (edited +
+        # re-saved) without its old registrations lingering alongside
+        # the new ones. Additive to self._script_globals above, not a
+        # replacement -- load_script() without a script_name (every
+        # pre-Phase-9 caller, including existing tests) never touches
+        # this and behaves exactly as before.
+        self._script_globals_by_name: Dict[str, Dict[str, Any]] = {}
+        self._currently_loading_script: Optional[str] = None
+        # Phase 9: set whenever set_var() changes `variables`, cleared
+        # by whatever saved it (periodic autosave or shutdown/
+        # disconnect) -- a plain public attribute rather than a
+        # property, since the GUI layer needs to both read and clear
+        # it, and there's no invariant here worth guarding with one.
+        self.dirty: bool = False
 
     # -- scripting API functions (bound as closures into a script's globals) --
 
@@ -97,6 +114,7 @@ class ScriptWorld:
                 f"set_var({name!r}, ...) value must be JSON-serializable: {exc}"
             ) from exc
         self.variables[name] = value
+        self.dirty = True
 
     def _api_get_var(self, name: str, default: Any = None) -> Any:
         return self.variables.get(name, default)
@@ -133,6 +151,7 @@ class ScriptWorld:
             gag=gag,
             highlight_style=highlight_style,
             priority=priority,
+            source_script=self._currently_loading_script or "",
         )
         self.triggers.add(trigger)
 
@@ -154,6 +173,7 @@ class ScriptWorld:
             pattern=pattern,
             callback=callback,
             priority=priority,
+            source_script=self._currently_loading_script or "",
         )
         self.aliases.add(alias)
 
@@ -201,7 +221,9 @@ class ScriptWorld:
             "Style": Style,
         }
 
-    def load_script(self, source: str, *, filename: str = "<script>") -> None:
+    def load_script(
+        self, source: str, *, script_name: Optional[str] = None, filename: str = "<script>"
+    ) -> None:
         """Compile and run ``source`` under the sandbox.
 
         This is always the sandboxed path -- there is no ``trusted``
@@ -215,11 +237,49 @@ class ScriptWorld:
         it returns: API calls like ``on_trigger(pattern, my_callback)``
         happen mid-script, and ``_require_script_owned_callable`` needs
         the ownership check to already be valid at that point.
+
+        ``script_name`` (Phase 9) is optional and additive -- every
+        pre-Phase-9 caller omits it and behaves exactly as before
+        (anonymous, un-reloadable script). When given (the GUI always
+        passes the owning ``ScriptRecord.name``), triggers/aliases this
+        script registers are tagged with it, and the script becomes
+        individually unloadable/reloadable via :meth:`unload_script`
+        without needing to tear down the whole ``ScriptWorld``.
         """
         code = compile_script(source, filename=filename)
         script_globals = build_restricted_globals(self.api_namespace())
         self._script_globals.append(script_globals)
-        execute_compiled(code, script_globals, timeout_seconds=self._timeout_seconds)
+        if script_name is not None:
+            self._script_globals_by_name[script_name] = script_globals
+        previous_loading = self._currently_loading_script
+        self._currently_loading_script = script_name
+        try:
+            execute_compiled(code, script_globals, timeout_seconds=self._timeout_seconds)
+        finally:
+            self._currently_loading_script = previous_loading
+
+    def unload_script(self, script_name: str) -> None:
+        """Remove everything ``script_name`` previously registered --
+        triggers, aliases, pending timers, on_connect callbacks -- so
+        it can be cleanly reloaded (edited + re-saved) without
+        duplicate registrations piling up alongside the new version.
+
+        A no-op if ``script_name`` was never loaded with a name (or
+        already unloaded) -- safe to call unconditionally before every
+        reload.
+        """
+        script_globals = self._script_globals_by_name.pop(script_name, None)
+        self.triggers.remove_by_source_script(script_name)
+        self.aliases.remove_by_source_script(script_name)
+        if script_globals is None:
+            return
+        self._script_globals = [g for g in self._script_globals if g is not script_globals]
+        self.pending_timers = [
+            t for t in self.pending_timers if t.callback.__globals__ is not script_globals
+        ]
+        self._connect_callbacks = [
+            cb for cb in self._connect_callbacks if cb.__globals__ is not script_globals
+        ]
 
     def run_callback(self, callback: Callable[..., None], *args: Any) -> None:
         """Invoke a script-owned callback under the same timeout guard
@@ -230,6 +290,21 @@ class ScriptWorld:
         """
         run_with_timeout(lambda: callback(*args), self._timeout_seconds)
 
-    def fire_connect_callbacks(self) -> None:
+    def fire_connect_callbacks(self) -> List[Tuple[str, str]]:
+        """Run every registered on_connect() callback, in registration
+        order.
+
+        Returns ``(callback_name, message)`` pairs for any that raised
+        -- a broken on_connect callback must not prevent *other*
+        on_connect callbacks (or autosends/login, which the GUI fires
+        around the same point) from running, so failures are caught
+        and reported here rather than propagated.
+        """
+        errors: List[Tuple[str, str]] = []
         for callback in self._connect_callbacks:
-            self.run_callback(callback)
+            try:
+                self.run_callback(callback)
+            except Exception as exc:  # noqa: BLE001 - a script's own bug must not propagate
+                name = getattr(callback, "__name__", "on_connect")
+                errors.append((name, f"{type(exc).__name__}: {exc}"))
+        return errors

@@ -139,7 +139,7 @@ same MUD at once), not a duplicate of an existing connection.
 
 ## World Properties
 
-Properties... opens a separate window with five sections (a category
+Properties... opens a separate window with six sections (a category
 list on the left, that section's fields on the right):
 
 - **Basic** -- world name, host, port, and which saved Character (if
@@ -168,6 +168,9 @@ list on the left, that section's fields on the right):
   principle the Pose/says... box already follows.
 - **Notes** -- one free-text block for anything you want to remember
   about this world.
+- **Scripts** -- triggers, aliases, gags, highlights, and timers for
+  this world, written in sandboxed Python. See the Scripting topic for
+  the full API and how errors/auto-disabled triggers are surfaced.
 
 ## Auto-Login on startup
 
@@ -404,16 +407,106 @@ def _render_commands(ctx: HelpContext) -> str:
 
 def _render_scripting(ctx: HelpContext) -> str:
     del ctx
-    return """# Scripting (Not Yet Available)
+    return """# Scripting
 
-MushTato's design includes full Python scripting -- triggers, macros,
-gags, highlights, and more, running against a sandboxed scripting API
-(`send`, `echo`, `gag`, `highlight`, `set_var`, `get_var`, `timer`,
-`on_trigger`, `on_connect`, `on_alias`). That engine layer exists and
-is tested, but **it is not wired into the GUI yet** -- there is
-currently no way to attach a script to a connection from the app
-itself. This is a deliberate, tracked deferral, not a missing feature
-that was forgotten.
+MushTato has full Python scripting -- triggers, gags, highlights,
+aliases, timers, and persistent per-world variables, running against a
+sandboxed scripting API. Every tab gets its own independent runtime, so
+two tabs connected to the same world (e.g. a main character and an alt
+at once) never share triggers, aliases, or variables with each other.
+
+**Where scripts live:** World Properties' Scripts page (Address Book ->
+select a world -> Properties... -> Scripts). Each saved script has a
+name, an Enabled checkbox, and a source-code box. Add/Edit/Delete/Save/
+Cancel works the same way the Characters page already does. Saving
+takes effect immediately on any tab currently open for that world --
+you don't need to reconnect.
+
+## The scripting API
+
+Ten functions, available to every script:
+
+- `send(text)` -- send a line to the server, as if typed.
+- `echo(text, style=None)` -- print a line locally only, never sent to
+  the server. `style` is an optional `Style(...)` (see below).
+- `gag()` -- suppress the line currently being matched by a trigger
+  from ever appearing in the scrollback. Only valid inside a trigger
+  callback.
+- `highlight(style, span=None)` -- restyle (part of) the line currently
+  being matched. `span` defaults to the whole match. Only valid inside
+  a trigger callback.
+- `set_var(name, value)` / `get_var(name, default=None)` -- persistent,
+  per-world variables (must be JSON-serializable). Saved automatically
+  a few minutes after you last changed one, and again whenever you
+  disconnect -- you don't need to save manually.
+- `timer(delay_seconds, callback)` -- run `callback` once, after a
+  delay.
+- `on_trigger(pattern, callback, *, gag=False, highlight_style=None,
+  priority=0, name=None)` -- run `callback` whenever incoming text
+  matches `pattern` (a regular expression). `gag`/`highlight_style` are
+  a shorthand for calling `gag()`/`highlight()` unconditionally instead
+  of from inside the callback.
+- `on_alias(pattern, callback, *, priority=0, name=None)` -- run
+  `callback` instead of sending a typed line verbatim, when it exactly
+  matches `pattern`. Only the primary Command... box checks aliases --
+  Pose/says... always bypasses them, same as it bypasses `/` commands.
+- `on_connect(callback)` -- run `callback` once, each time this tab
+  connects.
+- `Style(...)` -- the class `highlight()`/`echo()` take, e.g.
+  `Style(fg=(255, 0, 0), bold=True)`.
+
+A concrete example -- highlighting speaker names in a different color
+(trigger patterns compile against RE2, not Python's own `re` -- no
+lookaround or backreferences, but linear-time matching guaranteed; a
+plain `^\\w+` already matches just the leading word here, no lookahead
+needed):
+
+```
+def handle(match):
+    highlight(Style(fg=(255, 200, 0)))
+on_trigger(r'^\\w+', handle, name='speaker-highlight')
+```
+
+## Sandboxing
+
+Scripts run under a restricted Python interpreter -- no `import`,
+`open`, `exec`/`eval`, or file/network access beyond the API above.
+This is always on; there is no way to disable it from the app. A
+script that runs too long is stopped with a timeout error (a genuine
+infinite loop is a known, documented limitation -- see
+TROUBLESHOOTING.md).
+
+## Errors don't crash your session
+
+If a script fails to load, or a trigger/alias/timer/on_connect callback
+raises an error, you'll see a line like:
+
+```
+[Script error in trigger 'speaker-highlight': ValueError: ...]
+```
+
+printed to that tab's scrollback -- the tab keeps working normally,
+and nothing else in the script is affected. A trigger that keeps
+failing on **5 consecutive lines** is automatically disabled (to stop
+flooding the scrollback with the same error and wasting time on
+something guaranteed to keep failing), with a line explaining why:
+
+```
+[Trigger 'speaker-highlight' disabled after 5 consecutive errors - fix and re-save to re-enable]
+```
+
+The Scripts page also shows a visible marker on any script with a
+currently-disabled trigger. Fixing the bug and clicking Save (even
+without changing anything else) resets it.
+
+## A known, deliberate limitation
+
+An incomplete line -- most often an interactive prompt with no
+trailing newline yet, like `HP: 100 >` -- is still shown right away for
+a responsive feel, but triggers never match against it until it's
+actually a complete line. Real TinyFugue has a more elaborate mechanism
+for eventually treating a long-unfinished line as a prompt; MushTato
+doesn't replicate that (see SPEC.md section 8).
 """
 
 
