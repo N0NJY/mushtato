@@ -451,7 +451,15 @@ class MainWindow(QMainWindow):
             )
 
     def _show_about(self) -> None:
-        QMessageBox.information(self, "About MushTato", f"MushTato {mushtato_version()}")
+        QMessageBox.information(
+            self,
+            "About MushTato",
+            f"MushTato {mushtato_version()}\n\n"
+            "Written by Rick Donaldson, 2026\n"
+            "(aka Thoran Yo, aka Fletcher, aka N0NJY)\n\n"
+            "MIT License\n"
+            "Latest copy: github.com/N0NJY/mushtato",
+        )
 
     def show_help(self) -> None:
         """Open the real Help window (Phase 8), replacing the Phase 7c
@@ -512,8 +520,46 @@ class MainWindow(QMainWindow):
         toolbar.addAction(self.address_book_action)
 
         # -- Edit --------------------------------------------------------
+        # Cut/Copy/Paste/Undo/Redo/Select All all dispatch to whichever
+        # widget currently has keyboard focus (see
+        # _dispatch_focused_edit_action's docstring) rather than being
+        # hardcoded to one widget -- Copy used to be hardcoded to the
+        # active tab's scrollback specifically; unified onto the same
+        # focus-dispatch mechanism as the other five for consistency,
+        # since a selection sitting in an input box is what a user
+        # clicking Copy right after typing would actually expect copied.
+        # No "Clear" item (Phase 10 checkpoint, Rick's choice) -- what it
+        # would even clear was never well-defined (the focused input box?
+        # the whole scrollback, a much more destructive and arguably
+        # separate action?) and wasn't worth the ambiguity.
         self.edit_menu = edit_menu = menu_bar.addMenu("&Edit")
-        self.copy_action = add_action(edit_menu, "Copy", self._copy_current_tab_selection)
+        self.cut_action = add_action(
+            edit_menu, "Cut", lambda: self._dispatch_focused_edit_action("cut")
+        )
+        self.cut_action.setShortcut(QKeySequence(QKeySequence.StandardKey.Cut))
+        self.copy_action = add_action(
+            edit_menu, "Copy", lambda: self._dispatch_focused_edit_action("copy")
+        )
+        self.copy_action.setShortcut(QKeySequence(QKeySequence.StandardKey.Copy))
+        self.paste_action = add_action(
+            edit_menu, "Paste", lambda: self._dispatch_focused_edit_action("paste")
+        )
+        self.paste_action.setShortcut(QKeySequence(QKeySequence.StandardKey.Paste))
+        edit_menu.addSeparator()
+        self.undo_action = add_action(
+            edit_menu, "Undo", lambda: self._dispatch_focused_edit_action("undo")
+        )
+        self.undo_action.setShortcut(QKeySequence(QKeySequence.StandardKey.Undo))
+        self.redo_action = add_action(
+            edit_menu, "Redo", lambda: self._dispatch_focused_edit_action("redo")
+        )
+        self.redo_action.setShortcut(QKeySequence(QKeySequence.StandardKey.Redo))
+        edit_menu.addSeparator()
+        self.select_all_action = add_action(
+            edit_menu, "Select All", lambda: self._dispatch_focused_edit_action("selectAll")
+        )
+        self.select_all_action.setShortcut(QKeySequence(QKeySequence.StandardKey.SelectAll))
+        edit_menu.addSeparator()
         self.find_action = add_action(edit_menu, "Find...", None, enabled=False)
 
         # -- View --------------------------------------------------------
@@ -604,7 +650,12 @@ class MainWindow(QMainWindow):
             self.disconnect_action,
             self.close_action,
             self.spawn_log_action,
+            self.cut_action,
             self.copy_action,
+            self.paste_action,
+            self.undo_action,
+            self.redo_action,
+            self.select_all_action,
         ):
             action.setEnabled(has_tab)
 
@@ -639,10 +690,20 @@ class MainWindow(QMainWindow):
         if tab is not None:
             tab.spawn_log_window()
 
-    def _copy_current_tab_selection(self) -> None:
-        tab = self.tab_widget.currentWidget()
-        if tab is not None:
-            tab.scrollback.copy()
+    def _dispatch_focused_edit_action(self, method_name: str) -> None:
+        """Cut/Copy/Paste/Undo/Redo/Select All all act on whichever
+        widget currently has keyboard focus -- an input box or the
+        active tab's scrollback -- rather than being hardcoded to one
+        widget. Cut/Paste/Undo/Redo only make sense against an input
+        box (the scrollback is read-only, no undo stack); a widget
+        without the given method, or with nothing to act on (e.g. Paste
+        against an empty clipboard), is simply a no-op -- Qt's own
+        QLineEdit/QTextEdit methods already handle that gracefully.
+        """
+        widget = QApplication.focusWidget()
+        method = getattr(widget, method_name, None)
+        if callable(method):
+            method()
 
     def _switch_input_focus_on_current_tab(self) -> None:
         tab = self.tab_widget.currentWidget()

@@ -161,9 +161,32 @@ Two cleanly separated layers:
    triggers, aliases) into the tabbed session GUI: per-tab script
    authoring/storage, live trigger/alias execution against incoming/
    outgoing text, error/timeout surfacing.
-10. **(Post-1.0) Script-sharing ecosystem** — define a shareable script
+10. **Quick-win polish** — About box content (credits added alongside
+    the existing Potato/TinyFugue lineage writeup, not replacing it),
+    Edit menu expansion (Cut/Copy/Paste/Undo/Redo/Select All, dispatched
+    to whichever widget has focus — no "Clear" item, dropped per
+    checkpoint), and wiring the Tools menu's existing disabled
+    placeholders (`Editor`, `Mail Window`) as Phases 12a/12c land.
+11. **Medium-complexity usability features** — movable session tabs
+    (`QTabWidget.setMovable(True)`, live-session-only, no persistence
+    across restarts — tabs are live connections, not documents),
+    Save Spawnlog to disk (extends the existing `SpawnWindow`), an
+    Error Log window (genuinely unhandled exceptions only, via
+    `sys.excepthook` — not a mirror of errors already shown per-tab),
+    and Find/Search in the scrollback (the real implementation behind
+    the Edit menu's `Find...` placeholder from Phase 10).
+12. **Large features** — a built-in text editor (fills the Tools menu's
+    `Editor` placeholder), a system tray icon with activity indication
+    (`QSystemTrayIcon`; icon/logo artwork are simple programmatically-
+    generated placeholders pending real branding), and a programmable
+    mail window supporting multiple backends (fills the Tools menu's
+    `Mail Window` placeholder — backend command/regex patterns to be
+    verified against Rick's own real server(s) before implementation,
+    not assumed from a generic BrandyMail/@mail spec).
+13. **(Post-1.0) Script-sharing ecosystem** — define a shareable script
     package format, decide on a distribution point (repo, in-app browser,
-    or both).
+    or both). (Renumbered from Phase 10 to make room for Phases 10-12
+    above, per Rick's explicit checkpoint choice.)
 
 ## 8. Open questions to revisit
 

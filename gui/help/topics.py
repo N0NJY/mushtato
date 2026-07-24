@@ -92,8 +92,14 @@ button *and* a typed command uses the exact same underlying code for
 both -- there's no "easy mode" and "real mode," just two ways to reach
 the same thing.
 
-Full Python scripting (triggers, macros, gags, highlights) is planned
-but **not wired into the GUI yet** -- see the Scripting topic.
+Full Python scripting (triggers, macros, gags, highlights, aliases,
+timers) is wired into every tab -- see the Scripting topic for the API.
+
+## Author
+
+Written by Rick Donaldson, 2026 (aka Thoran Yo, aka Fletcher, aka
+N0NJY). Licensed under the MIT License. Latest copy:
+https://github.com/N0NJY/mushtato
 """
 
 

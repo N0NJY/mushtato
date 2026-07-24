@@ -99,7 +99,11 @@ chrome) — done, see below. Phase 7e (tabbed session host window) —
 done, see below. Phase 8 (documentation & onboarding) — done, see
 below. Phase 8b (address book / World Properties overhaul) — done,
 see below. Phase 9 (GUI-scripting integration: engine/scripting wired
-into the tabbed session GUI for real) — done, see below.** Telnet IAC negotiation is
+into the tabbed session GUI for real) — done, see below. Phase 10
+(quick-win polish: About credits, Edit menu) — done, see below.**
+See `PHASE10-12_PLAN.md` (repo root) for the full Phase 10-12 plan and
+the checkpoint that renumbered script-sharing from Phase 10 to Phase 13.
+Telnet IAC negotiation is
 hand-rolled on raw asyncio streams (not telnetlib3)
 — see the Phase 3 discussion for reasoning. `scripts/console_client.py`
 is a throwaway dev tool for manually testing against a real server
@@ -1880,8 +1884,99 @@ two-call pattern used to confirm the bug before writing the fix) and
 `test_multiple_finalized_lines_plus_trailing_preview_in_one_batch` (the
 non-regression case above). 427 tests passing (up from 425).
 
-Next: Phase 10 (post-1.0 script-sharing ecosystem) is the last item on
-SPEC.md's roadmap; Rick will decide when/whether to start it.
+**Phase 10 (quick-win polish) — done.** `gui/help/topics.py`
+(`_render_about`), `gui/windows/main_window.py` (`_show_about`, the
+Edit menu, `_dispatch_focused_edit_action`).
+
+Rick handed over a 10-item, 3-phase external planning document written
+without seeing the codebase. Per this file's own standing rules, it was
+compiled against the real code before any implementation — corrected
+against actual files/classes, checked for existing machinery to reuse,
+and had six real forks surfaced via checkpoint (`PHASE10-12_PLAN.md`,
+repo root, is the full compiled reference) before writing anything.
+Confirmed at that checkpoint: this work becomes Phases 10-12, renumbering
+script-sharing from Phase 10 to **Phase 13** in `SPEC.md` section 7 (Rick's
+explicit choice, not assumed).
+
+**10a (About box content).** Two existing About surfaces, not the
+single "about.py placeholder" the source doc assumed: the bare
+`Help -> About` `QMessageBox` in `main_window.py`, and the Help
+window's own richer About topic (`gui/help/topics.py`, with a real
+Potato/TinyFugue lineage writeup). Per checkpoint, Rick's credit block
+(name/aliases/license/repo link) was added to **both**, alongside the
+existing lineage content in the Help topic rather than replacing it.
+The repo link in the Help topic renders as a real clickable hyperlink
+for free, confirmed by directly checking the rendered
+`QTextCharFormat` (`isAnchor()`/`anchorHref()`) rather than assuming
+the post-Phase-9 URL-anchor work would apply here — it does.
+
+A real, unrelated staleness bug found and fixed while already editing
+this exact function: the About topic still claimed Python scripting
+"is planned but not wired into the GUI yet" — true before Phase 9,
+false since. Fixed in the same pass rather than left for a future
+session to rediscover.
+
+**10b (Edit menu expansion).** Current Edit menu had exactly **Copy**
+(hardcoded to the active tab's scrollback selection) and a disabled
+`Find...` placeholder — not "Copy, Find" as both working, per the
+source doc's inaccurate "Current State" (it didn't have the code to
+check against). Added Cut/Paste/Undo/Redo/Select All, each with a
+platform-appropriate `QKeySequence.StandardKey` shortcut. No "Clear"
+item — dropped at checkpoint, Rick's choice, since what it would even
+clear was never well-defined by the source doc.
+
+Real design decision made during implementation, not just following
+the source doc verbatim: all six actions (including Copy, changing its
+existing behavior) now dispatch to `QApplication.focusWidget()` and
+call that widget's own `cut()`/`copy()`/`paste()`/`undo()`/`redo()`/
+`selectAll()` if it has one, rather than Copy staying hardcoded to the
+scrollback while the other five dispatch by focus. Reasoned explicitly
+before coding: `SessionTab.scrollback` is read-only (no undo stack,
+nothing to cut/paste into), so Cut/Paste/Undo/Redo can only sensibly
+target whichever input box has focus regardless; leaving Copy as a
+special-cased exception to that same mechanism would have been the
+inconsistent choice, not the safe one — and matches actual user intent
+better (copying a selection just typed in an input box, not stale
+scrollback content). The two input boxes (`HistoryLineEdit`, plain
+`QLineEdit`) already got Cut/Copy/Paste/Undo/Redo/Select All for free
+from Qt's own built-in key handling before this — the new menu items
+add discoverability/mouse-driven access and a `QApplication.
+focusWidget()`-based Copy that now also reaches the scrollback, not
+new capability where literally none existed before.
+
+**10c (Tools menu population) — no-op by design.** The Tools menu
+already exists with three disabled placeholders (`Editor`, `Upload`,
+`Mail Window`) found by reading the actual chrome code before writing
+the plan doc — Phase 12's text editor and mail window items will
+`setEnabled(True)` these directly rather than adding new menu entries.
+Nothing to do in Phase 10 itself.
+
+A real test-behavior consequence of the Copy redesign, caught by
+running the existing suite rather than assumed compatible: the
+pre-existing `test_copy_action_copies_the_active_tab_s_selected_
+scrollback_text` implicitly relied on Copy's old hardcoded-to-
+scrollback behavior and needed rewriting (split into a scrollback-
+focused variant and a new input-box-focused variant proving the actual
+behavior change) rather than just extending it. All new focus-dispatch
+tests needed the same `host.show()` + `widget.setFocus()` +
+`host.activateWindow()` + `QApplication.processEvents()` sequence
+`test_hotkeys.py` had already established for `QApplication.
+focusWidget()` to resolve correctly headlessly — confirmed by hitting
+the exact same failure that pattern exists to avoid, not assumed
+needed in advance. 433 tests passing (up from 427).
+
+Not verified against a real desktop this round — the focus-dispatch
+mechanism is proven correct at the `QAction.trigger()` level (six new
+tests exercise the real dispatch logic against real focused widgets),
+but `.trigger()` doesn't reproduce whatever focus-stealing a real
+mouse click through an actual open `QMenu` popup might do on a real
+window manager; Rick can confirm Cut/Copy/Paste/Undo/Redo/Select All
+behave as expected via the menu on a real desktop when convenient,
+same pattern as every other can't-fully-verify-headless GUI change in
+this project.
+
+Next: Phase 11 (movable tabs, spawnlog save, error log, find/search) —
+see `PHASE10-12_PLAN.md` for the full plan.
 
 ## Standing rules: verification and assumptions
 

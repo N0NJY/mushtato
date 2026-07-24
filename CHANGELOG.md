@@ -6,6 +6,22 @@ of work, per `CLAUDE.md`/`SPEC.md`'s roadmap) rather than by version
 number, reconstructed from `CLAUDE.md`'s phase-by-phase notes and git
 history. All dates below are from the actual commit history.
 
+## Phase 10 — Quick-win polish (2026-07-24)
+
+- About box: added Rick's credit block (name/aliases/license/repo
+  link) to both the `Help -> About` popup and the Help window's About
+  topic, alongside its existing Potato/TinyFugue lineage content.
+  Fixed a stale claim in that same topic that scripting "isn't wired
+  into the GUI yet" (true before Phase 9, false since).
+- Edit menu: added Cut, Paste, Undo, Redo, and Select All (standard
+  platform shortcuts). All six Edit actions, including Copy, now
+  dispatch to whichever widget currently has keyboard focus rather
+  than Copy staying hardcoded to the scrollback.
+- Kicked off a new 3-phase plan (10-12) compiled from an external
+  planning document and corrected against the real codebase; script-
+  sharing (previously Phase 10) is renumbered to Phase 13. See
+  `PHASE10-12_PLAN.md` for the full plan.
+
 ## Post-Phase-9 — Fix duplicated scrollback lines on a split network read (2026-07-24)
 
 - Fixed a real bug where a line arriving split across two network reads

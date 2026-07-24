@@ -10,7 +10,7 @@ tests exist to catch a parallel-implementation regression, not just
 
 from pathlib import Path
 
-from PySide6.QtWidgets import QMessageBox
+from PySide6.QtWidgets import QApplication, QMessageBox
 
 from engine.storage import WorldProfile, save_address_book
 from gui.version import mushtato_version
@@ -20,6 +20,16 @@ from tests.gui.test_main_window_smoke import FakeBridge
 
 def make_host(**kwargs):
     return MainWindow(**kwargs)
+
+
+def _focus(host, widget) -> None:
+    # QApplication.focusWidget() only resolves against the *active*
+    # top-level window -- setFocus() alone isn't enough headlessly
+    # (same pattern test_hotkeys.py already established).
+    host.show()
+    widget.setFocus()
+    host.activateWindow()
+    QApplication.processEvents()
 
 
 def test_menu_bar_has_expected_top_level_menus(qapp, tmp_path: Path):
@@ -68,7 +78,12 @@ def test_chrome_actions_disabled_with_no_tabs_open(qapp, tmp_path: Path):
         host.disconnect_action,
         host.close_action,
         host.spawn_log_action,
+        host.cut_action,
         host.copy_action,
+        host.paste_action,
+        host.undo_action,
+        host.redo_action,
+        host.select_all_action,
     ):
         assert action.isEnabled() is False
 
@@ -81,7 +96,12 @@ def test_chrome_actions_enabled_once_a_tab_is_open(qapp, tmp_path: Path):
         host.disconnect_action,
         host.close_action,
         host.spawn_log_action,
+        host.cut_action,
         host.copy_action,
+        host.paste_action,
+        host.undo_action,
+        host.redo_action,
+        host.select_all_action,
     ):
         assert action.isEnabled() is True
 
@@ -176,13 +196,85 @@ def test_about_action_shows_the_version(qapp, tmp_path: Path, monkeypatch):
     assert mushtato_version() in shown[0]
 
 
-def test_copy_action_copies_the_active_tab_s_selected_scrollback_text(qapp, tmp_path: Path):
+def test_copy_action_copies_whichever_widget_has_focus_scrollback(qapp, tmp_path: Path):
+    # Copy dispatches to the focused widget rather than being hardcoded
+    # to the scrollback -- explicitly focus it here to exercise that.
     host = make_host(address_book_storage_path=tmp_path / "ab.json")
     tab = host.open_tab("example.com", 4201, bridge=FakeBridge())
     tab.scrollback.selectAll()
+    _focus(host, tab.scrollback)
     host.copy_action.trigger()
     clipboard_text = qapp.clipboard().text()
     assert "Connecting to example.com:4201" in clipboard_text
+
+
+def test_copy_action_copies_whichever_widget_has_focus_input_line(qapp, tmp_path: Path):
+    # The behavior change from Phase 10: Copy used to always target the
+    # scrollback regardless of focus. Now, with an input box focused and
+    # a selection there, Copy targets that selection instead.
+    host = make_host(address_book_storage_path=tmp_path / "ab.json")
+    tab = host.open_tab("example.com", 4201, bridge=FakeBridge())
+    tab.input_line.setText("look")
+    tab.input_line.selectAll()
+    _focus(host, tab.input_line)
+    host.copy_action.trigger()
+    assert qapp.clipboard().text() == "look"
+
+
+def test_cut_action_cuts_from_the_focused_input_box(qapp, tmp_path: Path):
+    host = make_host(address_book_storage_path=tmp_path / "ab.json")
+    tab = host.open_tab("example.com", 4201, bridge=FakeBridge())
+    tab.input_line.setText("look")
+    tab.input_line.selectAll()
+    _focus(host, tab.input_line)
+    host.cut_action.trigger()
+    assert qapp.clipboard().text() == "look"
+    assert tab.input_line.text() == ""
+
+
+def test_paste_action_pastes_into_the_focused_input_box(qapp, tmp_path: Path):
+    host = make_host(address_book_storage_path=tmp_path / "ab.json")
+    tab = host.open_tab("example.com", 4201, bridge=FakeBridge())
+    qapp.clipboard().setText("north")
+    tab.input_line.clear()
+    _focus(host, tab.input_line)
+    host.paste_action.trigger()
+    assert tab.input_line.text() == "north"
+
+
+def test_select_all_action_selects_the_focused_input_box_text(qapp, tmp_path: Path):
+    host = make_host(address_book_storage_path=tmp_path / "ab.json")
+    tab = host.open_tab("example.com", 4201, bridge=FakeBridge())
+    tab.input_line.setText("look")
+    _focus(host, tab.input_line)
+    host.select_all_action.trigger()
+    assert tab.input_line.selectedText() == "look"
+
+
+def test_undo_action_undoes_the_focused_input_box(qapp, tmp_path: Path):
+    host = make_host(address_book_storage_path=tmp_path / "ab.json")
+    tab = host.open_tab("example.com", 4201, bridge=FakeBridge())
+    _focus(host, tab.input_line)
+    tab.input_line.insert("look")
+    host.undo_action.trigger()
+    assert tab.input_line.text() == ""
+
+
+def test_edit_actions_are_a_no_op_when_nothing_relevant_has_focus(qapp, tmp_path: Path):
+    # Triggering these when the focused widget has no such method (or
+    # nothing is focused at all) must not raise.
+    host = make_host(address_book_storage_path=tmp_path / "ab.json")
+    host.open_tab("example.com", 4201, bridge=FakeBridge())
+    host.setFocus()  # focus something with no cut/paste/undo/redo methods
+    for action in (
+        host.cut_action,
+        host.copy_action,
+        host.paste_action,
+        host.undo_action,
+        host.redo_action,
+        host.select_all_action,
+    ):
+        action.trigger()  # must not raise
 
 
 def test_placeholder_actions_are_disabled(qapp, tmp_path: Path):
