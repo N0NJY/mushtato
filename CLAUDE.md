@@ -78,9 +78,13 @@ CLAUDE.md
   in PRs/commits when something needs a Mac-based human check.
 - This is free/open-source with no license-key or DRM system — don't add
   licensing gates, paywalls, or telemetry "phone home" logic.
-- Scripting security matters even though the project is free, because the
-  long-term plan includes a script/plugin sharing community — sandboxing
-  decisions should assume scripts may come from strangers.
+- Scripting security matters even though the project is free: sandboxing
+  is the default for any script regardless of origin (a user's own, or
+  one copied in from elsewhere), so a mistake or a bad copy-paste can't
+  do arbitrary damage by accident. (There is no plan for a script/plugin
+  sharing community or in-app distribution of scripts -- Rick's explicit
+  decision, 2026-07-25; see the Phase 13 note near the end of this file
+  for why. Don't build toward that goal.)
 
 ## Current phase
 
@@ -104,10 +108,16 @@ into the tabbed session GUI for real) — done, see below. Phase 10
 11 (movable tabs, spawnlog save, error log, find/search) — done, see
 below. Phase 12a (Text Editor) — done, see below. Phase 12b (Mail
 Window) — done, see below. Phase 12c (system tray icon) — done, see
-below. This completes the Phase 10-12 plan.** See `PHASE10-12_PLAN.md`
-(repo root) for the full plan and the checkpoint that renumbered
-script-sharing from Phase 10 to Phase 13. Telnet IAC negotiation is
-hand-rolled on raw asyncio streams (not telnetlib3)
+below. This completes the Phase 10-12 plan.** A post-12c Upload feature
+(Tools > Upload / `/upload`) — done, see below — filled the toolbar's
+last real placeholder from the original Potato-parity list. Phase 13
+(originally "script-sharing ecosystem") is **deprecated, not being
+pursued** — Rick's explicit decision (2026-07-25); see the Phase 13
+note near the end of this file. `PHASE10-12_PLAN.md` (repo root, since
+deleted once that plan completed) held the full plan and the checkpoint
+that renumbered script-sharing from Phase 10 to Phase 13, before its
+later deprecation. Telnet IAC negotiation is hand-rolled on raw asyncio
+streams (not telnetlib3)
 — see the Phase 3 discussion for reasoning. `scripts/console_client.py`
 is a throwaway dev tool for manually testing against a real server
 (e.g. Rick's RhostMUSH); it is not part of the shipped product.
@@ -1714,7 +1724,12 @@ phase since Phase 4b: trusted-mode execution
 (`execute_trusted_unrestricted`) is never called from any GUI code
 path this phase either -- `ScriptRecord.trusted` remains stored-but-
 inert metadata, exactly as Rick's checkpoint 5 confirmed it should stay
-until Phase 10's script-sharing ecosystem gives it real purpose.
+until a real GUI use for it exists. (Note, recorded later: the
+script-sharing ecosystem this note originally expected to eventually
+give it that purpose -- then Phase 10, renumbered to Phase 13 -- was
+deprecated on 2026-07-25; see the Phase 13 note near the end of this
+file. `trusted` stays inert metadata for the foreseeable future, not
+just "until Phase 13.")
 
 **Post-Phase-9: connection resilience + clickable URLs — done.** New
 `_configure_keepalive()`/`send_nop()` in `engine/net/client.py`, a `NOP`
@@ -2622,9 +2637,10 @@ confirm when convenient.
 Phase 10 (quick-win polish), Phase 11 (movable tabs/spawnlog save/
 error log/find-search), Phase 12a (Text Editor), Phase 12b (Mail
 Window), Phase 12c (tray icon), plus the post-12b active-tab-highlight
-addition, are all done. Only Phase 13 (post-1.0 script-sharing
-ecosystem, the last item on SPEC.md's roadmap) remains; Rick will
-decide when/whether to start it.
+addition, are all done. Phase 13 (post-1.0 script-sharing ecosystem,
+the last item on SPEC.md's roadmap at the time) was still open as of
+this write-up; see the Upload entry immediately below, and the Phase 13
+deprecation note further down, for what happened next.
 
 **Post-Phase-12c: Upload — done.** New `engine/upload_format.py`
 (`UploadOptions`, `escape_mpp`, `UploadStepper`, `delay_ms`), new
@@ -2752,6 +2768,62 @@ Not verified against a real MUD server or a real desktop file picker
 this round -- same honest gap as most GUI-only additions this session;
 Rick can confirm against the real local RhostMUSH and a packaged build
 when convenient.
+
+**Phase 13 (script-sharing ecosystem) — deprecated 2026-07-25, not
+being pursued.** Originally "define a shareable script package format,
+decide on a distribution point" (SPEC.md section 7, renumbered here
+from Phase 10 during the Phase 10-12 checkpoint). Raised for real
+discussion once Upload closed out the last toolbar placeholder and
+Rick was about to begin a full manual testing pass -- examined against
+the actual current state of the codebase before proposing anything
+(`ScriptRecord.trusted` already exists as inert metadata;
+`engine/scripting/trusted.py`'s own docstring already states, unprompted,
+that a shared script's own `trusted` flag must never be honored; SPEC.md
+section 8 already flags that the sandbox's busy-loop-can't-be-killed gap
+should be hardened "especially before any script-sharing feature ships").
+
+Checkpointed via `AskUserQuestion` on sequencing (harden the sandbox
+first vs. design the format first), distribution point (repo+manual-
+import vs. an in-app browser/registry vs. both), package format
+richness (minimal single-script+manifest vs. multi-script bundles with
+declared capabilities), and trust model for imported scripts. Rick's
+answer to the first question reframed the whole premise rather than
+picking an option: **"Perhaps we should rethink this about sharing
+scripts?"** -- deferred the other three ("hold off").
+
+**Rick's actual decision, once discussed:** not a sequencing question at
+all -- there is no need for this feature, full stop. Two real reasons,
+both his own: (1) MushTato's Python scripting layer (triggers/macros/
+aliases) is personal, local client-side automation -- a fundamentally
+different thing from *MUSH code* (the in-game softcode used to build
+objects/rooms/exits on the server itself, in whatever softcode language
+that MU*'s server runs); (2) MUSH code already has established community
+sites for sharing it, so a MushTato-side distribution ecosystem would
+duplicate infrastructure that already exists for a superficially similar
+but genuinely distinct need, for no real benefit. An initial "downgrade
+to just Export/Import of a portable script file, no distribution
+infrastructure" counter-proposal was floated before this reasoning
+surfaced, then correctly superseded by it -- the right call was reached
+by Rick directly, not by picking from a menu of my options.
+
+Consequences, applied consistently rather than left implicit: SPEC.md
+section 2's goals no longer list a "community script/plugin sharing
+ecosystem," section 6's feature checklist drops that line item, section
+7's Phase 13 entry is marked deprecated (slot intentionally left open
+for reuse -- Rick's explicit call -- rather than renumbered again),
+and section 8's open questions are updated (the busy-loop-hardening
+gap keeps its own standing justification -- a hung trigger dispatch is
+a real reliability concern regardless of where a script came from --
+but loses the "especially before script-sharing ships" framing, since
+there's no launch to gate). `engine/scripting/trusted.py`'s docstring
+still correctly states real project-wide policy (a shared/copied-in
+script's own `trusted` flag must never be honored) even with no sharing
+feature planned -- that's a sound sandboxing default on its own merits,
+not conditional on this deprecated phase, so it wasn't touched.
+
+No code changes -- this was a planning-only conversation, and the only
+artifacts are these updated docs (`SPEC.md`, `CLAUDE.md`). Nothing else
+remains open on the roadmap as of this note.
 
 ## Standing rules: verification and assumptions
 

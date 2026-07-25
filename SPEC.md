@@ -23,14 +23,13 @@ expert users/scripters who want TinyFugue-level (or greater) programmability.
 - One unified underlying system: GUI-built triggers/macros and hand-written Python
   scripts are the *same* object internally. The dialog builder just authors scripts;
   it isn't a separate "lite" system that drifts from the "real" one.
-- A bounded, sandboxed scripting API (not raw `exec()` of arbitrary Python) so that
-  shared/downloaded community scripts can't do arbitrary damage to a user's machine.
+- A bounded, sandboxed scripting API (not raw `exec()` of arbitrary Python) so a
+  script — a user's own, or one copied in from elsewhere — can't do arbitrary
+  damage to a user's machine by accident.
 - Cross-platform packaging via CI (GitHub Actions), including macOS builds despite
   no local Mac hardware.
 - Free and open-source. Monetization via GitHub Sponsors / donation links only —
   no license keys, no DRM, no paid tiers.
-- Eventually: a community script/plugin sharing ecosystem (repo of shareable
-  trigger packs, similar in spirit to TinyFugue's community `.tf` files).
 
 ## 3. Non-goals (for now)
 
@@ -118,7 +117,6 @@ Two cleanly separated layers:
 **New/unique to this project:**
 - [ ] Sandboxed Python scripting API (not present in either original)
 - [ ] "View generated script" bridge between GUI builder and raw code
-- [ ] Script/plugin sharing format + (eventually) a community repo
 
 ## 7. Roadmap (phased; one phase per Claude Code focus session)
 
@@ -183,10 +181,20 @@ Two cleanly separated layers:
     `Mail Window` placeholder — backend command/regex patterns to be
     verified against Rick's own real server(s) before implementation,
     not assumed from a generic BrandyMail/@mail spec).
-13. **(Post-1.0) Script-sharing ecosystem** — define a shareable script
-    package format, decide on a distribution point (repo, in-app browser,
-    or both). (Renumbered from Phase 10 to make room for Phases 10-12
-    above, per Rick's explicit checkpoint choice.)
+13. **(Deprecated 2026-07-25 — slot reserved, not a live roadmap item.)**
+    Originally "script-sharing ecosystem" (renumbered here from Phase 10
+    to make room for Phases 10-12 above). Rick's explicit decision on
+    review: not pursuing this. MushTato's Python scripting layer
+    (triggers/macros/aliases, `engine/scripting`) is personal, local
+    client-side automation — a fundamentally different thing from *MUSH
+    code* (in-game softcode used to build objects/rooms/exits on the
+    server itself), which already has established community sites for
+    sharing; building a distribution ecosystem for the former would
+    duplicate infrastructure that already exists for a superficially
+    similar but distinct need, for no real benefit. This phase number is
+    intentionally left open for reuse (bug-fix passes, later features)
+    rather than renumbered again — see CLAUDE.md's Phase 13 note for the
+    full discussion.
 
 ## 8. Open questions to revisit
 
@@ -199,8 +207,10 @@ Two cleanly separated layers:
   whitelist would have to independently rediscover known sandbox-escape
   techniques (dunder-attribute traversal, format-string tricks, etc.) that
   RestrictedPython's guarded attribute/item access and maintained
-  safe-builtins baseline already close off. Relevant given this project
-  expects scripts from strangers once script-sharing exists (section 2).
+  safe-builtins baseline already close off. Still the right default even
+  with script-sharing off the table (Phase 13, deprecated) — a user's own
+  script, or one copied in from elsewhere, should never be able to do
+  arbitrary damage by accident.
 - **Known gap: runaway script execution isn't fully bounded (Phase 4).**
   Script execution runs under a best-effort watchdog timeout, but a true
   CPU-bound busy loop in restricted Python (e.g. `while True: pass`) is
@@ -212,8 +222,11 @@ Two cleanly separated layers:
   relying on this timeout.) The real fix for the busy-loop gap is running
   script execution in an isolated subprocess with a hard kill, which is
   more scope than a single phase; revisit as a hardening pass once the
-  scripting layer sees real use, and especially before any script-sharing
-  feature (section 7, phase 10) ships.
+  scripting layer sees enough real use to justify it. (No longer gated on
+  a script-sharing launch — Phase 13 is deprecated, see section 7 — but
+  still a legitimate reliability concern on its own: a user's own buggy
+  script hanging one trigger dispatch is a real, if rare, annoyance
+  regardless of where the script came from.)
 - **Known gap: `run_with_timeout`'s per-call thread spawn is
   occasionally implicated in a real native segfault under heavy load
   (Phase 9).** Discovered via the test suite, not theoretical: a rare
@@ -269,4 +282,6 @@ Two cleanly separated layers:
   Phase 9 wiring work, not an oversight — revisit if a real use case for
   prompt-matching triggers surfaces (SPEC.md section 7, phase 9's own
   scope was wiring the existing engine in, not extending its semantics).
-- Format/venue for the eventual script-sharing community.
+- ~~Format/venue for the eventual script-sharing community.~~ **Decided
+  (2026-07-25): not pursuing a script-sharing ecosystem at all.** See
+  section 7, Phase 13.
