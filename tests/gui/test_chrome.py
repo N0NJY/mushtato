@@ -314,19 +314,41 @@ def test_edit_actions_are_a_no_op_when_nothing_relevant_has_focus(qapp, tmp_path
 
 
 def test_placeholder_actions_are_disabled(qapp, tmp_path: Path):
-    # find_action (Phase 11), editor_action (Phase 12a), and
-    # mail_window_action (Phase 12b) are real now -- covered separately
-    # (test_find_action_toggles_the_active_tab_s_find_bar below,
-    # test_editor_action_opens_a_new_window_each_click in
-    # test_text_editor_window.py, and the mail_window_action tests
-    # below), not permanently disabled like these genuine remaining
-    # Tools placeholders.
+    # find_action (Phase 11), editor_action (Phase 12a),
+    # mail_window_action (Phase 12b), and upload_action (post-12c) are
+    # real now -- covered separately (test_find_action_toggles_the_
+    # active_tab_s_find_bar below, test_editor_action_opens_a_new_
+    # window_each_click in test_text_editor_window.py, the
+    # mail_window_action tests below, and the upload_action tests
+    # below), not permanently disabled like events_action, the one
+    # genuine remaining Tools placeholder.
     host = make_host(address_book_storage_path=tmp_path / "ab.json")
-    for action in (
-        host.upload_action,
-        host.events_action,
-    ):
-        assert action.isEnabled() is False
+    assert host.events_action.isEnabled() is False
+
+
+def test_upload_action_disabled_with_no_tabs_open(qapp, tmp_path: Path):
+    host = make_host(address_book_storage_path=tmp_path / "ab.json")
+    assert host.upload_action.isEnabled() is False
+
+
+def test_upload_action_enabled_once_a_tab_is_open(qapp, tmp_path: Path):
+    host = make_host(address_book_storage_path=tmp_path / "ab.json")
+    host.open_tab("example.com", 4201, bridge=FakeBridge())
+    assert host.upload_action.isEnabled() is True
+
+
+def test_upload_action_calls_the_active_tab_s_open_upload_dialog(qapp, tmp_path: Path):
+    # A never-connected tab's open_upload_dialog() safely short-circuits
+    # to a "[Not connected.]" scrollback message rather than opening a
+    # real modal dialog -- enough to prove the toolbar/menu action
+    # reaches the same method /upload and a real connected upload use.
+    # See test_upload_wiring.py for the full connected/real-file path.
+    host = make_host(address_book_storage_path=tmp_path / "ab.json")
+    tab = host.open_tab("example.com", 4201, bridge=FakeBridge())
+
+    host.upload_action.trigger()
+
+    assert "[Not connected.]" in tab.scrollback.toPlainText()
 
 
 def test_mail_window_action_disabled_with_no_tabs_open(qapp, tmp_path: Path):

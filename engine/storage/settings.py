@@ -71,6 +71,10 @@ class Settings:
     # Last directory used in the editor's Open/Save dialogs -- empty
     # means "no saved preference yet, default to drafts_dir()".
     editor_last_dir: str = ""
+    # Last directory used in the Upload dialog's file picker -- same
+    # "no saved preference yet" empty-string convention as
+    # editor_last_dir above.
+    upload_last_dir: str = ""
 
 
 def load_settings(path: Path) -> Settings:
@@ -109,6 +113,7 @@ def load_settings(path: Path) -> Settings:
         editor_word_wrap=data.get("editor_word_wrap", True),
         editor_window_geometry=list(data.get("editor_window_geometry", [])),
         editor_last_dir=data.get("editor_last_dir", ""),
+        upload_last_dir=data.get("upload_last_dir", ""),
     )
 
 
@@ -128,6 +133,7 @@ def save_settings(path: Path, settings: Settings) -> None:
         "editor_word_wrap": settings.editor_word_wrap,
         "editor_window_geometry": settings.editor_window_geometry,
         "editor_last_dir": settings.editor_last_dir,
+        "upload_last_dir": settings.upload_last_dir,
     }
     path.parent.mkdir(parents=True, exist_ok=True)
     tmp_path = path.with_suffix(path.suffix + ".tmp")

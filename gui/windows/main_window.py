@@ -106,6 +106,7 @@ class MainWindow(QMainWindow):
         editor_word_wrap: bool = True,
         editor_window_geometry: Optional[list] = None,
         editor_last_dir: str = "",
+        upload_last_dir: str = "",
     ) -> None:
         super().__init__()
         self.setWindowTitle("MushTato")
@@ -168,6 +169,10 @@ class MainWindow(QMainWindow):
         # Rick's checkpoint choice).
         self._editor_window_geometry = list(editor_window_geometry) if editor_window_geometry else []
         self._editor_last_dir = editor_last_dir
+        # Shared "next Upload dialog's starting directory" preference,
+        # same non-live-updating-already-open-tabs reasoning as
+        # editor_last_dir above.
+        self._upload_last_dir = upload_last_dir
         self._address_book_window = None  # lazily constructed on first use
         self._help_window = None  # lazily constructed on first use
         self._error_log_window = None  # lazily constructed on first use
@@ -298,6 +303,7 @@ class MainWindow(QMainWindow):
                 self._scripts_dir / f"{safe_filename(world.name)}.json" if world is not None else None
             ),
             logs_dir_override=self._logs_dir,
+            upload_last_dir=self._upload_last_dir,
         )
         tab.connectionStateChanged.connect(lambda state, t=tab: self._on_tab_state_changed(t, state))
         tab.activity.connect(lambda t=tab: self._on_tab_activity(t))
@@ -389,6 +395,11 @@ class MainWindow(QMainWindow):
         if tab is not None:
             tab.open_mail_window()
 
+    def _open_upload_for_current_tab(self) -> None:
+        tab = self.tab_widget.currentWidget()
+        if tab is not None:
+            tab.open_upload_dialog()
+
     # -- Phase 9: live script reload for an open tab -------------------
 
     def tabs_for_world(self, world_name: str) -> list:
@@ -427,6 +438,7 @@ class MainWindow(QMainWindow):
             editor_word_wrap=self._editor_word_wrap,
             editor_window_geometry=self._editor_window_geometry,
             editor_last_dir=self._editor_last_dir,
+            upload_last_dir=self._upload_last_dir,
         )
 
     def _save_settings_to_disk(self) -> None:
@@ -474,6 +486,10 @@ class MainWindow(QMainWindow):
 
     def record_editor_last_dir(self, directory: str) -> None:
         self._editor_last_dir = directory
+        self._splitter_save_timer.start()
+
+    def record_upload_last_dir(self, directory: str) -> None:
+        self._upload_last_dir = directory
         self._splitter_save_timer.start()
 
     def open_text_editor(self) -> TextEditor:
@@ -645,6 +661,9 @@ class MainWindow(QMainWindow):
             self._editor_word_wrap = result.editor_word_wrap
             self._editor_window_geometry = result.editor_window_geometry
             self._editor_last_dir = result.editor_last_dir
+            # upload_last_dir isn't editable in the dialog either --
+            # same pass-through reasoning as splitter_sizes/editor_last_dir.
+            self._upload_last_dir = result.upload_last_dir
             self._save_settings_to_disk()
             self._apply_hotkeys()  # only one owner of hotkeys now -- live-reload is cheap
             app = QApplication.instance()
@@ -849,11 +868,11 @@ class MainWindow(QMainWindow):
         self.settings_action = add_action(options_menu, "Settings...", self.open_settings)
         toolbar.addAction(self.settings_action)
 
-        # -- Tools (Upload/Events are still placeholders; Potato has
-        # these, MushTato doesn't yet. Editor and Mail Window are real.) --
+        # -- Tools (Events is still a placeholder; Potato has this,
+        # MushTato doesn't yet. Editor, Upload, and Mail Window are real.) --
         self.tools_menu = tools_menu = menu_bar.addMenu("&Tools")
         self.editor_action = add_action(tools_menu, "Editor", self.open_text_editor)
-        self.upload_action = add_action(tools_menu, "Upload", None, enabled=False)
+        self.upload_action = add_action(tools_menu, "Upload", self._open_upload_for_current_tab)
         self.mail_window_action = add_action(tools_menu, "Mail Window", self._open_mail_window_for_current_tab)
         self.events_action = add_action(tools_menu, "Events", None, enabled=False)
         tools_menu.addSeparator()
@@ -917,6 +936,7 @@ class MainWindow(QMainWindow):
             self.select_all_action,
             self.find_action,
             self.mail_window_action,
+            self.upload_action,
         ):
             action.setEnabled(has_tab)
 

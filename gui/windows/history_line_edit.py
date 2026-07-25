@@ -22,7 +22,14 @@ class HistoryLineEdit(QLineEdit):
         self.returnPressed.connect(self._remember_current_text)
 
     def _remember_current_text(self) -> None:
-        text = self.text()
+        self.remember(self.text())
+
+    def remember(self, text: str) -> None:
+        """Add ``text`` to this box's recall history without changing
+        its currently displayed text -- used by Upload's "Add to
+        History?" option, where lines are sent programmatically and
+        never actually typed into this box.
+        """
         if text and (not self._history or self._history[-1] != text):
             self._history.append(text)
         self._history_index = len(self._history)

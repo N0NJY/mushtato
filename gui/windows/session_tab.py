@@ -22,6 +22,7 @@ treatment via ``TelnetBridge.run_in_background``.
 
 from __future__ import annotations
 
+from pathlib import Path
 from typing import List, Optional
 
 from PySide6.QtCore import QDateTime, QTimer, Qt, Signal
@@ -60,6 +61,8 @@ from .mail_window import MailWindow
 from .spawn_window import SpawnWindow
 from .styled_text_qt import append_styled_segments, replace_tail
 from .telnet_bridge import TelnetBridge
+from .upload_dialog import UploadDialog
+from .upload_session import UploadSession
 
 
 class SessionTab(QWidget):
@@ -118,6 +121,7 @@ class SessionTab(QWidget):
         splitter_sizes: Optional[List[int]] = None,  # last-dragged split, None -> stretch-factor default
         script_store_path=None,  # test-only override for world_script_path(world.name); see _script_store_path()
         logs_dir_override=None,  # Phase 11: passed straight through to each spawn window; see spawn_log_window()
+        upload_last_dir: str = "",  # shared "next Upload dialog's starting directory" preference
     ) -> None:
         super().__init__()
         self.host = host
@@ -137,6 +141,11 @@ class SessionTab(QWidget):
         # existing one), a deliberate difference from the Text Editor's
         # unlimited-simultaneous-windows precedent (Phase 12b checkpoint).
         self.mail_window: Optional[MailWindow] = None
+        # One per tab, same reasoning as mail_window above -- matches
+        # Potato's real "already uploading -> show progress instead of
+        # a new file picker" behavior (uploadWindow's dispatcher).
+        self.upload_session: Optional[UploadSession] = None
+        self._upload_last_dir = upload_last_dir
         # The "preview" of the still-incomplete trailing line (Phase 9,
         # see engine/scripting/line_dispatch.py's module docstring) --
         # tracked as a document position so a later feed() result can
@@ -681,12 +690,23 @@ class SessionTab(QWidget):
         self._append_plain(masked + "\n")
         self.bridge.send_line(line)
 
+    def _cancel_upload_if_running(self) -> None:
+        # A dropped/closed connection would otherwise let an in-flight
+        # UploadSession keep "sending" into a bridge whose send_line()
+        # silently no-ops once stopped -- the progress window would
+        # reach 100% and report success despite nothing after the drop
+        # ever reaching the server. Cancelling here makes that failure
+        # visible instead of silently swallowed.
+        if self.upload_session is not None:
+            self.upload_session.cancel()
+
     def _on_connection_closed(self) -> None:
         self._append_plain("\n[Connection closed by server]\n")
         self.input_line.setEnabled(False)
         self.secondary_input.setEnabled(False)
         self.connected_at = None
         self._set_connection_state("Disconnected")
+        self._cancel_upload_if_running()
         self.save_script_state()
         self._start_auto_reconnect()
 
@@ -696,6 +716,7 @@ class SessionTab(QWidget):
         self.secondary_input.setEnabled(False)
         self.connected_at = None
         self._set_connection_state("Disconnected")
+        self._cancel_upload_if_running()
         self.save_script_state()
         self._start_auto_reconnect()
 
@@ -798,6 +819,58 @@ class SessionTab(QWidget):
         if self.host_window is not None:
             self.host_window.save_mail_settings_for_world(world)
 
+    def open_upload_dialog(self) -> None:
+        """Open the Upload file-picker/options dialog -- or, if an
+        upload is already running on this tab, just show its progress
+        window instead, matching Potato's real ``uploadWindow``
+        dispatcher (only one upload in flight per connection at a
+        time).
+        """
+        if self.upload_session is not None:
+            self.upload_session.show_progress_window()
+            return
+        if self.connection_state != "Connected":
+            self._append_plain("[Not connected.]\n")
+            return
+
+        dialog = UploadDialog(self, initial_dir=self._upload_last_dir)
+        if not dialog.exec():
+            return
+
+        filepath = dialog.selected_file()
+        try:
+            text = Path(filepath).read_text(encoding="utf-8", errors="replace")
+        except OSError as exc:
+            self._append_plain(f'[Unable to open file "{filepath}": {exc}]\n')
+            return
+
+        self._upload_last_dir = dialog.selected_directory()
+        if self.host_window is not None:
+            self.host_window.record_upload_last_dir(self._upload_last_dir)
+
+        self._append_plain(f'[Uploading file "{filepath}"...]\n')
+        session = UploadSession(
+            filepath,
+            text.splitlines(),
+            dialog.options(),
+            send_line=lambda t: self._send_to_bridge(t, apply_aliases=False),
+            add_to_history=self.input_line.remember,
+            parent=self,
+        )
+        session.finished.connect(self._on_upload_finished)
+        self.upload_session = session
+        session.start()
+        session.show_progress_window()
+
+    def _on_upload_finished(self, completed: bool) -> None:
+        if self.upload_session is not None:
+            file_name = Path(self.upload_session.file_path).name
+            if completed:
+                self._append_plain(f'[Upload of "{file_name}" complete.]\n')
+            else:
+                self._append_plain(f'[Upload of "{file_name}" cancelled.]\n')
+        self.upload_session = None
+
     def disconnect_bridge(self) -> None:
         # Explicitly cancels any pending auto-reconnect -- Disconnect
         # is the user's deliberate "stop trying" action, matching real
@@ -805,6 +878,7 @@ class SessionTab(QWidget):
         # where the Disconnect button is reused as "cancel reconnect"
         # while a retry is scheduled).
         self._stop_auto_reconnect()
+        self._cancel_upload_if_running()
         self.bridge.stop()
         self.input_line.setEnabled(False)
         self.secondary_input.setEnabled(False)
@@ -831,6 +905,7 @@ class SessionTab(QWidget):
         persists this world's script variables one last time.
         """
         self._stop_auto_reconnect()
+        self._cancel_upload_if_running()
         self.bridge.stop()
         for spawn in list(self.spawn_windows):
             spawn.close()
@@ -859,6 +934,7 @@ class SessionTab(QWidget):
             "reconnect": self._cmd_reconnect,
             "editor": self._cmd_editor,
             "mail": self._cmd_mail,
+            "upload": self._cmd_upload,
         }
         for name, help_text in COMMAND_HELP:
             self._commands.register(name, handlers[name], help_text)
@@ -934,6 +1010,13 @@ class SessionTab(QWidget):
         del args
         self.open_mail_window()
         return "Opened the Mail Window."
+
+    def _cmd_upload(self, args: str) -> Optional[str]:
+        # Tab-scoped, like /spawnlog and /mail -- doesn't need
+        # host_window (owned by this tab directly, one per tab).
+        del args
+        self.open_upload_dialog()
+        return None
 
     def _cmd_version(self, args: str) -> Optional[str]:
         del args

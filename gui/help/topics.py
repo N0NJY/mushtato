@@ -52,6 +52,7 @@ COMMAND_HELP: List[Tuple[str, str]] = [
     ("reconnect", "Reconnect to the server"),
     ("editor", "Open a new Text Editor window"),
     ("mail", "Open this tab's Mail Window (compose/send)"),
+    ("upload", "Upload a file to this tab, line by line"),
 ]
 
 
@@ -337,18 +338,19 @@ buttons, plus a status bar at the bottom.
   active tab).
 - **Options** -- Settings... (hotkeys and theme).
 - **Tools** -- Editor (opens a new Text Editor window; see below),
+  Upload (send a file to the active tab, line by line; see below),
   Mail Window (compose/send mail for the active tab's world; see
   below), Error Log (unhandled-exception history; see below).
 - **Help** -- Help (this window) and About.
 
 **Not implemented yet -- shown disabled/grayed out on purpose, not
-missing by accident:** the Tools menu's Upload. Modeled on a real
+missing by accident:** the Tools menu's Events. Modeled on a real
 feature from Potato that MushTato doesn't have a working equivalent
 for yet. A grayed-out item means "planned, not yet built," not
 "broken."
 
-Reconnect, Disconnect, Close, Spawn Log Window, Mail Window, and the
-Edit menu's six focus-dispatched actions plus Find are disabled
+Reconnect, Disconnect, Close, Spawn Log Window, Upload, Mail Window,
+and the Edit menu's six focus-dispatched actions plus Find are disabled
 whenever there's no tab open at all, since there's nothing for them to
 act on. Editor, Error Log, Address Book, Settings, Help, and About stay
 available with zero tabs open, since none of them are tied to any one
@@ -377,6 +379,41 @@ retroactively change a *different* already-open editor window.
 Files default to save under MushTato's own per-OS data directory (see
 `INSTALL.md`'s "Removing your data" section for the exact path) --
 Save/Save As remembers whatever directory you last used.
+
+## Upload
+
+Tools -> Upload (or `/upload`) sends a file from disk to the active
+tab, one line at a time -- modeled closely on Potato's own real Upload
+feature. Only **one** upload runs per tab at a time -- using the
+action again while one's already running just brings its progress
+window back to the front instead of starting a second.
+
+Picking Upload opens an options + file-picker dialog:
+
+- **Ignore empty lines?** (on by default) -- skips blank lines in the
+  file rather than sending them as empty commands.
+- **Add to History?** -- sent lines join the Command box's recall
+  history, as if you'd typed them yourself.
+- **MPP Formatted?** -- a MU*-specific line-continuation convention:
+  lines starting with `>` join into a single send (with special
+  characters escaped), a line starting with a space or tab is an
+  unformatted continuation of the previous send, and lines starting
+  with `@@` (or blank/whitespace-only lines) are treated as comments
+  and skipped. Leave this off for an ordinary plain-text file of
+  commands.
+- **Delay (seconds)** -- how long to pace between each line actually
+  sent (0 means as fast as possible) -- useful for a large file, to
+  avoid flooding the server's command queue.
+- **Prefix** -- a string prepended to every line sent (e.g. a command
+  name before a batch of arguments).
+
+Clicking Upload validates the file (selected, exists, readable) and
+starts sending -- a progress window shows bytes processed of the
+file's total, with Hide (dismiss the window without stopping the
+upload) and Cancel (confirms first) buttons. Sends go straight to the
+server, bypassing alias/slash-command processing entirely, the same
+reasoning the Pose/says... box and auto-sends already use. Closing the
+tab, or disconnecting, cancels any upload still running on it.
 
 ## Mail Window
 
@@ -716,7 +753,7 @@ build already bundles the libraries it needs; on an unusually minimal
 system, install `libxcb-cursor0` and its usual companions yourself (see
 `INSTALL.md` for the exact package list).
 
-**A toolbar/menu item does nothing when clicked** -- Upload is shown
+**A toolbar/menu item does nothing when clicked** -- Events is shown
 disabled on purpose; see the Menus & Toolbar topic.
 
 **I checked "auto-login" on a world but nothing happens at startup** --

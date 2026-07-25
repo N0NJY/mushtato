@@ -77,6 +77,7 @@ class SettingsDialog(QDialog):
         self._editor_word_wrap = settings.editor_word_wrap
         self._editor_window_geometry = settings.editor_window_geometry
         self._editor_last_dir = settings.editor_last_dir
+        self._upload_last_dir = settings.upload_last_dir
 
         layout = QVBoxLayout(self)
 
@@ -173,4 +174,5 @@ class SettingsDialog(QDialog):
             editor_word_wrap=self._editor_word_wrap,
             editor_window_geometry=self._editor_window_geometry,
             editor_last_dir=self._editor_last_dir,
+            upload_last_dir=self._upload_last_dir,
         )

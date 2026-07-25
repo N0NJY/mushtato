@@ -6,6 +6,22 @@ of work, per `CLAUDE.md`/`SPEC.md`'s roadmap) rather than by version
 number, reconstructed from `CLAUDE.md`'s phase-by-phase notes and git
 history. All dates below are from the actual commit history.
 
+## Post-Phase-12c — Upload (2026-07-25)
+
+- New Upload feature (Tools → Upload, or `/upload`): send a file from
+  disk to the active tab, one line at a time, modeled closely on
+  Potato's own real Upload feature. Options: Ignore Empty Lines (on by
+  default), Add to History, MPP Formatted (Potato's `>`-continuation/
+  escaping/comment convention), a Delay (seconds) between sends, and a
+  Prefix applied to every line sent. A progress window shows bytes
+  processed with Hide/Cancel (confirmed) buttons. Only one upload runs
+  per tab at a time — reopening it while one's in flight just shows
+  its progress window. Disconnecting, an unexpected connection drop, or
+  closing the tab all cancel any upload still running on it, so it
+  can't silently keep "sending" into a dead connection.
+- This completes the last of Potato's toolbar/menu features that had
+  been shown as a placeholder pending a real implementation.
+
 ## Phase 12c — System tray icon (2026-07-25)
 
 - MushTato now shows a system tray icon (where the OS supports one):

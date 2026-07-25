@@ -2626,6 +2626,133 @@ addition, are all done. Only Phase 13 (post-1.0 script-sharing
 ecosystem, the last item on SPEC.md's roadmap) remains; Rick will
 decide when/whether to start it.
 
+**Post-Phase-12c: Upload — done.** New `engine/upload_format.py`
+(`UploadOptions`, `escape_mpp`, `UploadStepper`, `delay_ms`), new
+`gui/windows/upload_dialog.py` (`UploadDialog`), new
+`gui/windows/upload_progress_window.py` (`UploadProgressWindow`), new
+`gui/windows/upload_session.py` (`UploadSession`), extended
+`gui/windows/session_tab.py`/`main_window.py`, extended
+`engine/storage/settings.py` (`upload_last_dir`), extended
+`gui/help/topics.py`. This was the toolbar's last remaining
+placeholder from the original Potato-parity list (Rick's exact
+request: "I should be able to upload a file directly to the focused
+tab from disk. A) this ability needs to have a disk directory search
+B) chosing a file C) send it to the focus window").
+
+Rick's own stated ask (A/B/C above) was noticeably simpler than
+Potato's real Upload feature -- researched directly from
+`~/git/potato/potato.vfs/lib/potato.tcl` (`uploadWindow`/
+`uploadWindowStart`/`uploadWindowInvoke`/`uploadBegin`/
+`uploadProgressWindow`/`uploadCancel`/`uploadEnd`, lines ~1044-1401)
+before proposing anything, per this file's standing rule 1. Real
+Potato sends one line at a time on a recursive `after $delay`-scheduled
+timer (not the whole file instantly), with five real options: Ignore
+Empty Lines (default on), Add to History (default off), MPP Formatted
+(default off -- a MU*-specific `>`-continuation/escaping/comment
+convention), Delay in seconds (default 0.0), and a Prefix string; plus
+a progress window (bytes-of-total with a progress bar) and a
+confirmed Cancel. Checkpointed via `AskUserQuestion` before writing any
+code, per standing rule 2 (four real forks: pacing/delay, MPP mode,
+progress UI, and a bundled question on Ignore Empty/Prefix/History) --
+Rick chose full Potato parity on every one, not the simpler v1 a couple
+of the options offered.
+
+Architecture, following CLAUDE.md rule 2 (already-established pattern
+from `engine/mail_format.py`): `engine/upload_format.py` is pure,
+Qt-free, headlessly-testable logic deciding *what* (if anything) to
+send for one original file line at a time -- `UploadStepper.step()`
+mirrors Potato's real `uploadBegin` call-per-tick shape exactly (one
+call per original line; a step that consumes the last real line does
+NOT yet report `done` -- matching Potato's own "check eof, *then* read
+a line" ordering, where the *next* tick is what actually detects EOF).
+Pacing (the `QTimer` between steps) and the progress window are
+GUI-layer concerns in `gui/windows/upload_session.py`
+(`UploadSession`), not the pure module's job.
+
+Two real, deliberate deviations from Potato, found by verifying the
+source rather than assumed and called out rather than silently ported:
+(1) Potato's own `uploadBegin` does NOT apply the configured Prefix to
+the final MPP-buffer flush at end-of-file (every *other* send in the
+same proc does) -- almost certainly a real oversight in Potato's own
+code, not an intentional asymmetry; fixed here to apply Prefix
+uniformly, with a test proving the fix
+(`test_mpp_eof_flush_applies_prefix_a_deliberate_fix_over_potato`).
+(2) Progress is tracked as `len(line.encode("utf-8")) + 1` bytes per
+line, not Potato's own `tell`/`bytelength`-based real newline-length
+auto-detection -- a documented simplification, not exact byte parity.
+One genuine Potato *quirk*, verified and deliberately reproduced rather
+than "fixed": `mpp,gt` starts false, so a file whose very first line is
+already `>`-prefixed still gets a leading `%r` prepended (the "else
+prepend %r" branch fires even with an empty buffer) -- confirmed
+directly in the source, kept as-is since it's a faithful reproduction
+of real behavior, not a bug worth silently smoothing over.
+
+Only one upload runs per tab at a time, matching Potato's own real
+`uploadWindow` dispatcher exactly (`SessionTab.open_upload_dialog()`:
+if `self.upload_session is not None`, show its progress window instead
+of opening a new file-picker dialog). A real gap found and fixed while
+writing this: `disconnect_bridge()`, `_on_connection_closed()`, and
+`_on_connection_failed()` didn't originally touch `upload_session` at
+all -- `TelnetBridge.send_line()` silently no-ops once stopped, so an
+in-flight upload would have kept "sending" into a dead connection,
+its progress bar reaching 100% and reporting success despite nothing
+after the drop ever reaching the server. Fixed via one shared
+`_cancel_upload_if_running()` helper called from all three of those
+plus `shutdown()` (which already cancelled it), rather than four
+separate ad hoc checks.
+
+Sends reuse `SessionTab._send_to_bridge(text, apply_aliases=False)` --
+the same established "raw, bypasses alias/slash-command processing"
+path autosends (Phase 8b) and Mail Window (Phase 12b) already use, for
+the identical reason: an uploaded line starting with e.g. `/quit` must
+reach the server literally, never get reinterpreted. `upload_last_dir`
+follows the exact same Settings/`MainWindow`/`SettingsDialog`
+pass-through pattern Phase 12a's `editor_last_dir` already established
+(an empty-string "no preference yet" sentinel, threaded through
+untouched by the dialog itself).
+
+A real test-authoring bug found and fixed while writing this feature's
+own tests, not a production bug: an early draft of
+`test_cmd_upload_is_registered` called `/upload` against a *connected*
+tab with `UploadDialog.exec()` left unmocked -- since the tab really is
+connected, `open_upload_dialog()` proceeds to construct a real dialog
+and call the real modal `exec()`, which blocked forever waiting for a
+user click that headless test environment can never provide. Caught by
+actually running the test (it hung, rather than by inspection) and
+fixed by stubbing `exec()` to return immediately, the same monkeypatch
+discipline this project's `QMessageBox`-blocking tests already use.
+
+Verified per standing rule 7: 12 new engine tests
+(`tests/engine/test_upload_format.py`) with traces hand-worked against
+the real Tcl source (MPP continuation/escaping/comment/buffer-flush
+sequences, the EOF-detection-lags-one-tick behavior, the prefix
+deviation, the `mpp,gt` quirk); 7 dialog tests, 8 session/pacing tests
+(a real `QTimer` with `delay_seconds=0.0`/small real delays, not a
+mocked timer), and 7 wiring tests (connected-gating, `/upload`
+registration, a real small file's lines actually reaching a
+`FakeBridge`, the single-upload-per-tab dispatcher, cancellation, and
+shutdown cleanup) -- 34 new tests total. Also added regression
+coverage to already-existing files: `test_chrome.py` (Upload
+action enabled/disabled/wired, same pattern as Mail Window's), and
+`test_settings_dialog.py`/`test_settings.py` (`upload_last_dir`
+pass-through/round-trip, mirroring `editor_last_dir`'s existing
+coverage). Full suite: all of the above passing; a run of the complete
+`tests/` directory hit the same pre-existing, already-documented Phase
+9 gap (an intermittent segfault in `engine/scripting/sandbox.py`'s
+`run_with_timeout()` under heavy Qt/thread churn, SPEC.md section 8) --
+confirmed this is not a new regression by running the three specific
+files known to reproduce it (`test_scripting_integration.py`,
+`test_world_properties_dialog.py`, `test_address_book_window.py`)
+both together and individually, all passing cleanly every time; the
+segfault only reproduces as part of the full multi-hundred-test run,
+consistent with the existing documented gap, not something Upload's
+own code touches or introduces.
+
+Not verified against a real MUD server or a real desktop file picker
+this round -- same honest gap as most GUI-only additions this session;
+Rick can confirm against the real local RhostMUSH and a packaged build
+when convenient.
+
 ## Standing rules: verification and assumptions
 
 These apply to every session, every phase, not just security-sensitive ones.

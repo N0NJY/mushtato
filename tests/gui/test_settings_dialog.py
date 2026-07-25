@@ -205,3 +205,13 @@ def test_result_settings_preserves_editor_state_not_shown_in_this_dialog(qapp):
     assert result.editor_word_wrap is False
     assert result.editor_window_geometry == [10, 20, 640, 480]
     assert result.editor_last_dir == "/some/dir"
+
+
+def test_result_settings_preserves_upload_last_dir_not_shown_in_this_dialog(qapp):
+    # upload_last_dir has no UI here either -- it's set by the Upload
+    # dialog's own file picker, not this dialog.
+    dialog = SettingsDialog(settings=Settings(upload_last_dir="/some/upload/dir"))
+
+    result = dialog.result_settings()
+
+    assert result.upload_last_dir == "/some/upload/dir"

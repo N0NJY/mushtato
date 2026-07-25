@@ -91,7 +91,7 @@ immediately in the same session. Check there for the current binding —
 see the in-app Help's Hotkeys topic for the full current list.
 
 **A toolbar/menu item does nothing when I click it**
-Upload is shown disabled (grayed out) on purpose — modeled on a real
+Events is shown disabled (grayed out) on purpose — modeled on a real
 Potato feature MushTato doesn't have a working equivalent for yet, not
 a broken button. See the in-app Help's Menus & Toolbar topic.
 

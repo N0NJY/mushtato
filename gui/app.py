@@ -128,6 +128,7 @@ def main() -> int:
         editor_word_wrap=settings.editor_word_wrap,
         editor_window_geometry=settings.editor_window_geometry,
         editor_last_dir=settings.editor_last_dir,
+        upload_last_dir=settings.upload_last_dir,
     )
     window.resize(900, 700)
     window.show()

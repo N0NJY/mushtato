@@ -147,6 +147,7 @@ def test_editor_fields_default_to_sentinels(tmp_path: Path):
     assert settings.editor_word_wrap is True
     assert settings.editor_window_geometry == []
     assert settings.editor_last_dir == ""
+    assert settings.upload_last_dir == ""
 
 
 def test_editor_fields_round_trip(tmp_path: Path):
@@ -158,6 +159,7 @@ def test_editor_fields_round_trip(tmp_path: Path):
         editor_word_wrap=False,
         editor_window_geometry=[100, 200, 800, 600],
         editor_last_dir="/home/user/drafts",
+        upload_last_dir="/home/user/macros",
     )
 
     save_settings(path, original)
@@ -196,3 +198,4 @@ def test_pre_editor_settings_format_json_defaults_the_new_fields(tmp_path: Path)
     assert settings.editor_word_wrap is True
     assert settings.editor_window_geometry == []
     assert settings.editor_last_dir == ""
+    assert settings.upload_last_dir == ""
