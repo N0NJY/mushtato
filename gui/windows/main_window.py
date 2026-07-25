@@ -39,11 +39,14 @@ from engine.storage import (
     settings_path,
     user_data_dir,
 )
+from engine.storage import logs_dir as default_logs_dir
 from engine.storage.paths import safe_filename
+from engine.errorlog import get_error_log
 
 from ..dialogs.settings_dialog import SettingsDialog
 from ..help.help_window import HelpWindow
 from ..theme import apply_theme
+from .error_log_window import ErrorLogWindow
 from ..version import mushtato_version
 from .session_tab import SessionTab
 from .telnet_bridge import TelnetBridge
@@ -74,6 +77,8 @@ class MainWindow(QMainWindow):
         theme: Optional[str] = None,
         address_book_storage_path=None,
         scripts_dir=None,
+        logs_dir=None,
+        error_log=None,
         scrollback_font_family: str = "",
         scrollback_font_size: int = 0,
         input_font_family: str = "",
@@ -109,11 +114,30 @@ class MainWindow(QMainWindow):
         # (see open_tab()), computed here rather than per-call so every
         # tab for the same world agrees on the same path.
         self._scripts_dir = scripts_dir if scripts_dir is not None else user_data_dir() / "scripts"
+        # Phase 11: same override pattern as scripts_dir above, threaded
+        # through to every SpawnWindow via SessionTab -- tests must
+        # never touch the real per-user logs directory when saving a
+        # spawnlog (the exact class of leak Phase 9 already hit once
+        # with world_script_path).
+        self._logs_dir = logs_dir if logs_dir is not None else default_logs_dir()
+        # Phase 11: defaults to the real process-wide singleton (sys.
+        # excepthook/threading.excepthook are themselves inherently
+        # process-global, so there's naturally one shared ErrorLog in
+        # the real app) -- overridable so tests get an independent,
+        # disk-isolated instance instead of polluting/reading the real
+        # one shared across the whole test process.
+        self._error_log = error_log if error_log is not None else get_error_log()
         self._address_book_window = None  # lazily constructed on first use
         self._help_window = None  # lazily constructed on first use
+        self._error_log_window = None  # lazily constructed on first use
 
         self.tab_widget = QTabWidget(self)
         self.tab_widget.setTabsClosable(False)
+        # Phase 11: Qt's own native drag-to-reorder -- session-only per
+        # checkpoint (tabs are live connections, not documents; nothing
+        # currently reopens closed tabs except the separate auto-login
+        # feature), so this is the entire scope, no persistence layer.
+        self.tab_widget.setMovable(True)
         self.tab_widget.currentChanged.connect(self._on_current_tab_changed)
         self.setCentralWidget(self.tab_widget)
 
@@ -210,6 +234,7 @@ class MainWindow(QMainWindow):
             script_store_path=(
                 self._scripts_dir / f"{safe_filename(world.name)}.json" if world is not None else None
             ),
+            logs_dir_override=self._logs_dir,
         )
         tab.connectionStateChanged.connect(lambda state, t=tab: self._on_tab_state_changed(t, state))
         tab.activity.connect(lambda t=tab: self._on_tab_activity(t))
@@ -478,6 +503,21 @@ class MainWindow(QMainWindow):
         self._help_window.raise_()
         self._help_window.activateWindow()
 
+    def show_error_log(self) -> None:
+        """Open the Error Log window (Phase 11) -- a lazily-constructed
+        singleton, same reuse pattern as the Help/Address Book windows.
+        Available with zero tabs open, same reasoning as Help: this
+        shows unhandled-exception history, not anything tied to one
+        connection.
+        """
+        if self._error_log_window is None:
+            self._error_log_window = ErrorLogWindow(self._error_log)
+        else:
+            self._error_log_window.refresh()
+        self._error_log_window.show()
+        self._error_log_window.raise_()
+        self._error_log_window.activateWindow()
+
     # -- chrome: menu bar, toolbar, status bar -------------------------
 
     def _build_chrome(self) -> None:
@@ -560,7 +600,13 @@ class MainWindow(QMainWindow):
         )
         self.select_all_action.setShortcut(QKeySequence(QKeySequence.StandardKey.SelectAll))
         edit_menu.addSeparator()
-        self.find_action = add_action(edit_menu, "Find...", None, enabled=False)
+        # Phase 11: real implementation of what was a disabled
+        # placeholder through Phase 10 -- toggles the active tab's own
+        # FindBar, same "same handler" principle as every other chrome
+        # action (Ctrl+F and this menu item both call toggle_find_bar()
+        # on whichever tab is active).
+        self.find_action = add_action(edit_menu, "Find...", self._toggle_find_on_current_tab)
+        self.find_action.setShortcut(QKeySequence(QKeySequence.StandardKey.Find))
 
         # -- View --------------------------------------------------------
         self.view_menu = view_menu = menu_bar.addMenu("&View")
@@ -593,12 +639,16 @@ class MainWindow(QMainWindow):
         self.settings_action = add_action(options_menu, "Settings...", self.open_settings)
         toolbar.addAction(self.settings_action)
 
-        # -- Tools (placeholders; Potato has these, MushTato doesn't yet) --
+        # -- Tools (Editor/Upload/Mail Window/Events are placeholders;
+        # Potato has these, MushTato doesn't yet -- filled in as later
+        # Phase 12 items land, per PHASE10-12_PLAN.md) --
         self.tools_menu = tools_menu = menu_bar.addMenu("&Tools")
         self.editor_action = add_action(tools_menu, "Editor", None, enabled=False)
         self.upload_action = add_action(tools_menu, "Upload", None, enabled=False)
         self.mail_window_action = add_action(tools_menu, "Mail Window", None, enabled=False)
         self.events_action = add_action(tools_menu, "Events", None, enabled=False)
+        tools_menu.addSeparator()
+        self.error_log_action = add_action(tools_menu, "Error Log", self.show_error_log)
         toolbar.addSeparator()
         toolbar.addAction(self.editor_action)
         toolbar.addAction(self.upload_action)
@@ -656,6 +706,7 @@ class MainWindow(QMainWindow):
             self.undo_action,
             self.redo_action,
             self.select_all_action,
+            self.find_action,
         ):
             action.setEnabled(has_tab)
 
@@ -704,6 +755,11 @@ class MainWindow(QMainWindow):
         method = getattr(widget, method_name, None)
         if callable(method):
             method()
+
+    def _toggle_find_on_current_tab(self) -> None:
+        tab = self.tab_widget.currentWidget()
+        if tab is not None:
+            tab.toggle_find_bar()
 
     def _switch_input_focus_on_current_tab(self) -> None:
         tab = self.tab_widget.currentWidget()

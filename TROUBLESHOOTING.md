@@ -91,10 +91,16 @@ immediately in the same session. Check there for the current binding —
 see the in-app Help's Hotkeys topic for the full current list.
 
 **A toolbar/menu item does nothing when I click it**
-Some items (Editor, Upload, Mail Window, Find) are shown disabled
-(grayed out) on purpose — they're modeled on real Potato features
-MushTato doesn't have working equivalents for yet, not broken buttons.
-See the in-app Help's Menus & Toolbar topic.
+Some items (Editor, Upload, Mail Window) are shown disabled (grayed
+out) on purpose — they're modeled on real Potato features MushTato
+doesn't have working equivalents for yet, not broken buttons. See the
+in-app Help's Menus & Toolbar topic.
+
+**Where did the Error Log come from, and what does it show?**
+Tools → Error Log shows genuinely *unhandled* exceptions only — not a
+duplicate of errors already shown directly in a tab's scrollback
+(script/trigger/connection errors stay exactly where they already
+were). See the in-app Help's Menus & Toolbar topic.
 
 **Does MushTato make URLs in the scrollback clickable?**
 Yes — any `http://` or `https://` URL in a tab's scrollback (or a spawned

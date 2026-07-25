@@ -14,9 +14,11 @@ canonical record going forward, same pattern as every prior phase —
 this file can be deleted once Phase 12 is done and its content has been
 absorbed there.
 
-**Nothing in Phases 10-12 has been implemented yet.** Per CLAUDE.md
-rule 1 ("one phase at a time"), work proceeds Phase 10 -> 11 -> 12 in
-order, each phase done and tested before the next starts.
+**Phase 10 and Phase 11 are done** (see CLAUDE.md for the full write-up
+of each). **Phase 12 has not started.** Per CLAUDE.md rule 1 ("one
+phase at a time"), work proceeds in order, each phase done and tested
+before the next starts. Q6 (which real mail system Rick's server(s)
+run) is still open and needs an answer before 12c starts.
 
 ---
 

@@ -54,6 +54,7 @@ from ..help.markdown_tools import strip_markdown
 from ..help.topics import COMMAND_HELP, HelpContext, TOPICS, get_topic
 from ..theme import apply_scrollback_theme
 from ..version import mushtato_version
+from .find_bar import FindBar
 from .history_line_edit import HistoryLineEdit
 from .spawn_window import SpawnWindow
 from .styled_text_qt import append_styled_segments, replace_tail
@@ -115,6 +116,7 @@ class SessionTab(QWidget):
         input_font_size: int = 0,
         splitter_sizes: Optional[List[int]] = None,  # last-dragged split, None -> stretch-factor default
         script_store_path=None,  # test-only override for world_script_path(world.name); see _script_store_path()
+        logs_dir_override=None,  # Phase 11: passed straight through to each spawn window; see spawn_log_window()
     ) -> None:
         super().__init__()
         self.host = host
@@ -123,6 +125,7 @@ class SessionTab(QWidget):
         self.host_window = host_window
         self.world = world
         self._script_store_path_override = script_store_path
+        self._logs_dir_override = logs_dir_override
         self._explicit_character = character
         self._theme = theme if theme is not None else DEFAULT_THEME
         self.connected_at: Optional[QDateTime] = None
@@ -207,8 +210,14 @@ class SessionTab(QWidget):
         # MainWindow.record_splitter_sizes's docstring.
         self.splitter.splitterMoved.connect(self._on_splitter_moved)
 
+        # Phase 11: hidden by default, toggled via Ctrl+F/Edit > Find...
+        # (MainWindow) or /find. Operates on this tab's own scrollback
+        # specifically -- each tab searches its own content.
+        self.find_bar = FindBar(self.scrollback, self)
+
         layout = QVBoxLayout(self)
         layout.setContentsMargins(0, 0, 0, 0)
+        layout.addWidget(self.find_bar)
         layout.addWidget(self.splitter)
 
         apply_scrollback_theme(self.scrollback, self._theme)
@@ -710,13 +719,40 @@ class SessionTab(QWidget):
         self.secondary_input.clear()
         self._send_to_bridge(text, apply_aliases=False)
 
+    def toggle_find_bar(self) -> None:
+        """Show the find bar (focused, ready to type) if hidden, or
+        hide it (clearing highlights) if already shown -- the same
+        toggle behavior Ctrl+F conventionally has in text editors/
+        browsers.
+
+        Checks ``isHidden()``, not ``isVisible()`` -- a real bug caught
+        by a headless test, not just a style preference:
+        ``isVisible()`` depends on the *entire* ancestor chain actually
+        being on-screen, which is false whenever this tab isn't the
+        QTabWidget's current tab (its page is hidden by the tab widget
+        itself). Using it here would have made toggling on a
+        background tab always re-open instead of closing an
+        already-open find bar. ``isHidden()`` reflects only this
+        widget's own explicit shown/hidden state, independent of
+        whether an ancestor happens to be on-screen right now.
+        """
+        if self.find_bar.isHidden():
+            self.find_bar.open_bar()
+        else:
+            self.find_bar.close_bar()
+
     def spawn_log_window(self) -> SpawnWindow:
         """Pop a new window that live-mirrors this connection's
         incoming text from this point forward. Bound to this one tab
         specifically -- to log a different connection, spawn a
         separate log window from that connection's own tab.
         """
-        window = SpawnWindow(f"MushTato — {self.name} — Log", parent=None, theme=self._theme)
+        window = SpawnWindow(
+            f"MushTato — {self.name} — Log",
+            parent=None,
+            theme=self._theme,
+            logs_dir_override=self._logs_dir_override,
+        )
         window.closed.connect(lambda: self._remove_spawn_window(window))
         self.spawn_windows.append(window)
         window.resize(500, 400)

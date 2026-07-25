@@ -233,6 +233,24 @@ This replaced an earlier design (one separate top-level window per
 connection) -- if you're used to an older MushTato build, this is the
 intentional current model, not a bug.
 
+## Reordering tabs
+
+Drag a tab to a different position in the tab bar to reorder it. This
+is a live, in-session arrangement only -- it isn't saved, and doesn't
+affect what order tabs open in on a future launch (including
+auto-login's own connect order, which follows the address book's
+saved world order instead).
+
+## Finding text
+
+`Ctrl+F` or Edit -> Find... opens a find bar for the active tab's
+scrollback -- type to search (live, case-insensitive by default; the
+"Aa" checkbox makes it case-sensitive). Every match is highlighted;
+Enter or the Next button jumps to the next one, Shift+Enter or the
+Previous button jumps back, wrapping around at either end. Escape
+closes the bar and clears the highlights. Each tab has its own
+independent find bar, searching only that tab's own content.
+
 ## Tab activity
 
 If text arrives on a tab you're *not* currently looking at, its label
@@ -286,22 +304,41 @@ buttons, plus a status bar at the bottom.
 **Functional today:**
 - **File** -- Address Book..., Reconnect, Disconnect, Close (closes
   the active tab), Exit (quits MushTato).
-- **Edit** -- Copy (copies the active tab's selected scrollback text).
+- **Edit** -- Cut, Copy, Paste, Undo, Redo, Select All (all act on
+  whichever widget currently has keyboard focus -- an input box, or
+  the active tab's scrollback for Copy/Select All), and Find...
+  (`Ctrl+F`, see the Sessions & Tabs topic).
 - **View** -- Theme submenu (Dark/Light).
 - **Logging** -- Spawn Log Window (opens a log-mirror window for the
   active tab).
 - **Options** -- Settings... (hotkeys and theme).
+- **Tools** -- Error Log (unhandled-exception history; see below).
 - **Help** -- Help (this window) and About.
 
 **Not implemented yet -- shown disabled/grayed out on purpose, not
-missing by accident:** Edit -> Find..., and the Tools menu's Editor,
-Upload, and Mail Window. These are modeled on real features from
-Potato that MushTato doesn't have working equivalents for yet. A
-grayed-out item means "planned, not yet built," not "broken."
+missing by accident:** the Tools menu's Editor, Upload, and Mail
+Window. These are modeled on real features from Potato that MushTato
+doesn't have working equivalents for yet. A grayed-out item means
+"planned, not yet built," not "broken."
 
-Reconnect, Disconnect, Close, Spawn Log Window, and Copy are disabled
-whenever there's no tab open at all, since there's nothing for them to
-act on.
+Reconnect, Disconnect, Close, Spawn Log Window, and the Edit menu's
+six focus-dispatched actions plus Find are disabled whenever there's no
+tab open at all, since there's nothing for them to act on. Error Log,
+Address Book, Settings, Help, and About stay available with zero tabs
+open, since none of them are tied to any one connection.
+
+## Error Log
+
+Tools -> Error Log shows a history of *unhandled* exceptions only --
+genuine bugs that would otherwise have nowhere to go. It does **not**
+duplicate errors this app already shows you directly (script/trigger
+errors, connection failures, and similar all still appear in the
+relevant tab's scrollback exactly as before). Search narrows the list;
+Export saves whatever's currently listed (respecting an active search)
+to a text file; Clear empties the in-memory list but never touches the
+on-disk log file, which is written per-day under the same directory
+spawnlogs default to. Updates live, even for an error from a
+background connection thread.
 """
 
 
@@ -352,6 +389,13 @@ it, for as long as it stays open -- it keeps mirroring that one
 connection even if you switch to a different tab afterward. To log a
 different connection, switch to that connection's tab first, then open
 a new spawn window from there.
+
+**Saving to disk:** the "Save Spawnlog" button writes the window's full
+text so far as plaintext, with a timestamp header, defaulting to a
+`spawnlog_YYYYMMDD_HHMMSS.txt` filename in MushTato's own per-OS data
+directory (see `INSTALL.md`'s "Removing your data" section for the
+exact path) -- the save dialog lets you pick a different name or
+location instead.
 """
 
 

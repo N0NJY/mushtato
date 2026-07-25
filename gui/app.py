@@ -43,6 +43,7 @@ from typing import List
 
 from PySide6.QtWidgets import QApplication
 
+from engine.errorlog import get_error_log, install_excepthook, install_thread_excepthook
 from engine.storage import (
     Settings,
     WorldProfile,
@@ -99,6 +100,14 @@ def main() -> int:
     parser.add_argument("host", nargs="?", help="MUD/MUSH server hostname or IP")
     parser.add_argument("port", nargs="?", type=int, help="server port")
     args = parser.parse_args()
+
+    # Installed here, once, at real startup only -- never from
+    # MainWindow's own constructor, since sys.excepthook/threading.
+    # excepthook are process-global and MainWindow is constructed
+    # repeatedly across the test suite; installing there would leak
+    # global state across unrelated tests.
+    install_excepthook(get_error_log())
+    install_thread_excepthook(get_error_log())
 
     app = QApplication(sys.argv)
 

@@ -38,6 +38,13 @@ def test_menu_bar_has_expected_top_level_menus(qapp, tmp_path: Path):
     assert titles == ["File", "Edit", "View", "Logging", "Options", "Tools", "Help"]
 
 
+def test_tab_widget_is_movable(qapp, tmp_path: Path):
+    # Phase 11: native Qt drag-to-reorder, session-only (no persistence
+    # -- tabs are live connections, not documents).
+    host = make_host(address_book_storage_path=tmp_path / "ab.json")
+    assert host.tab_widget.isMovable() is True
+
+
 def test_address_book_action_is_always_enabled(qapp, tmp_path: Path):
     host = make_host(address_book_storage_path=tmp_path / "ab.json")
     assert host.address_book_action.isEnabled() is True
@@ -186,6 +193,35 @@ def test_help_window_content_includes_every_topic_and_command(qapp, tmp_path: Pa
         assert f"/{name}" in text
 
 
+def test_error_log_action_works_with_zero_tabs_open(qapp, tmp_path: Path):
+    from engine.errorlog import ErrorLog
+
+    host = make_host(
+        address_book_storage_path=tmp_path / "ab.json", error_log=ErrorLog(log_dir=tmp_path / "logs")
+    )
+    assert host.tab_widget.count() == 0
+    host.error_log_action.trigger()
+    assert host._error_log_window is not None
+    assert host._error_log_window.isVisible() is True
+
+
+def test_error_log_action_reuses_the_same_window_on_repeated_clicks(qapp, tmp_path: Path):
+    from engine.errorlog import ErrorLog
+
+    host = make_host(
+        address_book_storage_path=tmp_path / "ab.json", error_log=ErrorLog(log_dir=tmp_path / "logs")
+    )
+    host.error_log_action.trigger()
+    first = host._error_log_window
+    host.error_log_action.trigger()
+    assert host._error_log_window is first
+
+
+def test_error_log_action_is_always_enabled(qapp, tmp_path: Path):
+    host = make_host(address_book_storage_path=tmp_path / "ab.json")
+    assert host.error_log_action.isEnabled() is True
+
+
 def test_about_action_shows_the_version(qapp, tmp_path: Path, monkeypatch):
     shown = []
     monkeypatch.setattr(
@@ -278,15 +314,39 @@ def test_edit_actions_are_a_no_op_when_nothing_relevant_has_focus(qapp, tmp_path
 
 
 def test_placeholder_actions_are_disabled(qapp, tmp_path: Path):
+    # find_action is real as of Phase 11 -- it's covered separately by
+    # test_find_action_toggles_the_active_tab_s_find_bar below, and is
+    # gated by has_tab like the rest of the tab-scoped chrome, not
+    # permanently disabled like these genuine Tools placeholders.
     host = make_host(address_book_storage_path=tmp_path / "ab.json")
     for action in (
-        host.find_action,
         host.editor_action,
         host.upload_action,
         host.mail_window_action,
         host.events_action,
     ):
         assert action.isEnabled() is False
+
+
+def test_find_action_toggles_the_active_tab_s_find_bar(qapp, tmp_path: Path):
+    # host.show() matters here -- a child widget's isVisible() depends
+    # on its whole ancestor chain actually being shown, same headless
+    # gotcha test_hotkeys.py's own focus tests already established.
+    host = make_host(address_book_storage_path=tmp_path / "ab.json")
+    tab = host.open_tab("example.com", 4201, bridge=FakeBridge())
+    host.show()
+    assert tab.find_bar.isVisible() is False
+
+    host.find_action.trigger()
+    assert tab.find_bar.isVisible() is True
+
+    host.find_action.trigger()
+    assert tab.find_bar.isVisible() is False
+
+
+def test_find_action_disabled_with_no_tabs_open(qapp, tmp_path: Path):
+    host = make_host(address_book_storage_path=tmp_path / "ab.json")
+    assert host.find_action.isEnabled() is False
 
 
 def test_theme_menu_reflects_current_theme_and_switching_applies_it(

@@ -81,6 +81,28 @@ def test_tab_starts_the_bridge_on_construction(qapp):
     assert bridge.started is True
 
 
+def test_toggle_find_bar_shows_and_hides_it(qapp):
+    tab = SessionTab("example.com", 4201, bridge=FakeBridge())
+    assert tab.find_bar.isHidden() is True
+
+    tab.toggle_find_bar()
+    assert tab.find_bar.isHidden() is False
+
+    tab.toggle_find_bar()
+    assert tab.find_bar.isHidden() is True
+
+
+def test_find_bar_can_search_the_tab_s_own_scrollback(qapp):
+    bridge = FakeBridge()
+    tab = SessionTab("example.com", 4201, bridge=bridge)
+    bridge.simulate_incoming("You see a dusty road.\r\n")
+
+    tab.toggle_find_bar()
+    tab.find_bar.search_field.setText("dusty")
+
+    assert len(tab.find_bar._matches) == 1
+
+
 def test_typing_and_pressing_enter_echoes_locally_and_sends(qapp):
     bridge = FakeBridge()
     tab = SessionTab("example.com", 4201, bridge=bridge)

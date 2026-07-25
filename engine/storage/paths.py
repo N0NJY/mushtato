@@ -42,6 +42,13 @@ def world_script_path(world_name: str) -> Path:
     return user_data_dir() / "scripts" / f"{safe_filename(world_name)}.json"
 
 
+def logs_dir() -> Path:
+    # Shared by spawnlog-save (Phase 11) and the error log (Phase 11) --
+    # one real per-OS location, not the ad-hoc ~/.mushtato/logs/-style
+    # path an earlier planning doc guessed without checking this module.
+    return user_data_dir() / "logs"
+
+
 def safe_filename(name: str) -> str:
     """Sanitize an arbitrary world name for safe use as a filename."""
     cleaned = "".join(c if c.isalnum() or c in "-_ " else "_" for c in name).strip()

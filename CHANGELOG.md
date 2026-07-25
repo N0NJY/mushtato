@@ -6,6 +6,21 @@ of work, per `CLAUDE.md`/`SPEC.md`'s roadmap) rather than by version
 number, reconstructed from `CLAUDE.md`'s phase-by-phase notes and git
 history. All dates below are from the actual commit history.
 
+## Phase 11 — Movable tabs, spawnlog save, error log, find/search (2026-07-24)
+
+- Session tabs can now be dragged to reorder (live-session-only, no
+  persistence across restarts).
+- Spawn (log-mirror) windows gained a "Save Spawnlog" button, saving
+  UTF-8 plaintext with a timestamp header to the real per-OS data
+  directory by default.
+- New Error Log (Tools menu): a crash guard for genuinely unhandled
+  exceptions (both on the GUI thread and background connection
+  threads) -- does not duplicate errors already shown per-tab. Export/
+  Clear/search, with live updates.
+- New Find/Search bar in every tab's scrollback (`Ctrl+F` / `Edit ->
+  Find...`): live, case-insensitive by default, highlights every match
+  without altering the underlying text, Prev/Next with wraparound.
+
 ## Phase 10 — Quick-win polish (2026-07-24)
 
 - About box: added Rick's credit block (name/aliases/license/repo

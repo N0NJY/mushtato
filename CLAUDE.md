@@ -100,10 +100,11 @@ done, see below. Phase 8 (documentation & onboarding) — done, see
 below. Phase 8b (address book / World Properties overhaul) — done,
 see below. Phase 9 (GUI-scripting integration: engine/scripting wired
 into the tabbed session GUI for real) — done, see below. Phase 10
-(quick-win polish: About credits, Edit menu) — done, see below.**
-See `PHASE10-12_PLAN.md` (repo root) for the full Phase 10-12 plan and
-the checkpoint that renumbered script-sharing from Phase 10 to Phase 13.
-Telnet IAC negotiation is
+(quick-win polish: About credits, Edit menu) — done, see below. Phase
+11 (movable tabs, spawnlog save, error log, find/search) — done, see
+below.** See `PHASE10-12_PLAN.md` (repo root) for the full Phase 10-12
+plan and the checkpoint that renumbered script-sharing from Phase 10 to
+Phase 13. Telnet IAC negotiation is
 hand-rolled on raw asyncio streams (not telnetlib3)
 — see the Phase 3 discussion for reasoning. `scripts/console_client.py`
 is a throwaway dev tool for manually testing against a real server
@@ -1975,8 +1976,138 @@ behave as expected via the menu on a real desktop when convenient,
 same pattern as every other can't-fully-verify-headless GUI change in
 this project.
 
-Next: Phase 11 (movable tabs, spawnlog save, error log, find/search) —
-see `PHASE10-12_PLAN.md` for the full plan.
+**Phase 11 (movable tabs, spawnlog save, error log, find/search) —
+done.** New `engine/errorlog.py`, `gui/windows/error_log_window.py`,
+`gui/windows/find_bar.py`; extended `engine/storage/paths.py`
+(`logs_dir()`), `gui/windows/main_window.py`, `gui/windows/
+session_tab.py`, `gui/windows/spawn_window.py`, `gui/app.py`.
+
+Rick handed over a second external planning document mirroring
+`PHASE10-12_PLAN.md`'s already-confirmed Phase 11 scope almost
+item-for-item, but repeating two things already corrected in that
+compiled plan (the guessed `~/.mushtato/...` storage paths, and movable
+tabs' acceptance criteria listing persistence-across-restart despite
+the Q2 checkpoint already settling on session-only) -- proceeded per
+the already-confirmed decisions rather than re-litigating them, noted
+inline rather than silently overridden.
+
+**11a (movable tabs).** `MainWindow.tab_widget.setMovable(True)` --
+Qt's own native drag-to-reorder, not the custom mouse-event handling
+the source doc's pseudocode described (unnecessary once the actual Qt
+widget's own capabilities were checked). Session-only per the Phase
+10-12 checkpoint: no persistence layer, nothing saved.
+
+**11b (Save Spawnlog).** Added a "Save Spawnlog" button to the
+existing `SpawnWindow` (not a new window) -- `QFileDialog.
+getSaveFileName()` defaulting to a new `engine/storage/paths.
+logs_dir()` (`user_data_dir()/logs`, the real per-OS convention, not
+the doc's guessed path) and a timestamped filename, writing UTF-8
+plaintext with a header. `logs_dir` threaded through as an explicit
+override -- `MainWindow` -> `SessionTab` -> `SpawnWindow` -- the exact
+same dependency-injection pattern `scripts_dir`/`script_store_path`
+already established, so tests never touch the real per-user logs
+directory. Caught before it could leak (not after): the first draft of
+`test_save_spawnlog_defaults_to_logs_dir_and_timestamped_filename`
+would have called `logs_dir().mkdir(...)` against the real disk path
+had the override not been threaded through -- fixed during writing,
+verified clean with a real before/after `ls` check on the actual
+directory, the same discipline Phase 9's `world_script_path` leak
+taught.
+
+**11c (error log), scoped deliberately narrow per checkpoint:**
+genuinely *unhandled* exceptions only -- explicitly does **not**
+mirror errors this app already shows per-tab (script/trigger/
+connection errors stay exactly as they are, untouched by this item).
+`engine/errorlog.py` (`ErrorLog`, Qt-free per CLAUDE.md rule 2, a
+day-rotated log file + a capped 100-record in-memory ring buffer) is
+wired in via `sys.excepthook` **and** `threading.excepthook` --
+verified directly, not assumed, that PySide6 *does* route an exception
+raised inside a Qt slot through `sys.excepthook` (confirmed with a
+real `QApplication` event loop), but that a background thread's
+exception (e.g. inside a `TelnetBridge` connection thread) does *not*
+reach `sys.excepthook` at all -- Python routes those through the
+separate `threading.excepthook` mechanism instead, also confirmed
+directly. The source doc's pseudocode only mentioned `sys.excepthook`;
+installing both is a real, deliberate extension beyond it, reasoned
+through given this app's actual per-connection-background-thread
+architecture, not scope creep for its own sake.
+
+Both hooks are installed exactly once, from `gui/app.py`'s real
+`main()` only -- never from `MainWindow.__init__`, since they mutate
+process-global state and `MainWindow` is constructed repeatedly across
+the test suite; installing there would have leaked global state across
+unrelated tests. `MainWindow` takes an `error_log=` override (defaults
+to a module-level `get_error_log()` singleton, matching how the hooks
+themselves are inherently process-global) so tests get an independent,
+disk-isolated `ErrorLog` instance instead.
+
+`ErrorLogWindow` (a lazily-constructed singleton, same reuse pattern as
+`AddressBookWindow`/`HelpWindow`) uses a small `_ErrorLogSignalBridge`
+QObject with one signal for live updates -- the exact same cross-thread
+-safe-delivery pattern `telnet_bridge.py`'s own signals already
+established, needed here because a record can genuinely originate from
+a non-GUI thread (an uncaught background-thread exception). Export
+respects the active search filter rather than needing a separate
+multi-select mechanism; Clear only empties the in-memory list, never
+the on-disk file, proven by a dedicated test rather than described
+only.
+
+**11d (find/search), the one item with a real technical correction
+to the source doc's own pseudocode, not just its "current state"
+claims:** its `cursor.setCharFormat()` approach would have permanently
+overwritten -- not overlaid -- a match's real ANSI-derived color/style
+directly on the document, with no way back short of manually recording
+and restoring every affected character's original format. Verified
+`QTextEdit.setExtraSelections()` directly against this PySide6 version
+before writing `find_bar.py` around it (a real script confirming match
+count, extra-selection count, and that `toPlainText()` is unchanged
+after searching) -- the correct, standard Qt idiom for a non-destructive
+highlight overlay. New `gui/windows/find_bar.py` (`FindBar`, reusable --
+takes any `QTextEdit`/`QTextBrowser`, not hardcoded to `SessionTab`'s
+scrollback specifically) is embedded per-tab (`SessionTab.find_bar`,
+hidden by default), toggled via `Ctrl+F`/`Edit > Find...`
+(`MainWindow._toggle_find_on_current_tab`) -- the real implementation
+behind what was a disabled placeholder through Phase 10. Live search
+(updates on every keystroke), case-insensitive by default with a
+toggle, Prev/Next wrap at either end, Escape closes and clears
+highlights, Shift+Return goes to the previous match (needed a small
+`_FindLineEdit` subclass -- neither Shift+Return nor Escape has a
+dedicated `QLineEdit` signal to hook directly).
+
+A real bug caught by a headless test, not just a style preference:
+`SessionTab.toggle_find_bar()`'s first draft checked `find_bar.
+isVisible()` to decide open-vs-close -- `isVisible()` depends on the
+*entire* ancestor chain actually being on-screen, which is false
+whenever a tab isn't the `QTabWidget`'s current page (Qt hides other
+tabs' pages itself). That would have made toggling Find on a background
+tab always re-open instead of closing an already-open bar. Fixed by
+checking `isHidden()` instead (the widget's own explicit shown/hidden
+state, independent of any ancestor's visibility) -- caught directly by
+a test failing in the exact way the bug predicts, not spotted by
+inspection.
+
+Tested per this file's own standing rule 7 throughout: `FindBar` has
+13 dedicated tests (match/highlight correctness, non-destructive
+document, wrap-around, case sensitivity, Escape/Shift+Return key
+handling); `ErrorLog` has 9 engine-level tests including the excepthook
+-chaining and background-thread-exception claims each proven with a
+real hook install/restore and a real `threading.Thread`, not asserted;
+`ErrorLogWindow` has 9 tests including one that raises an exception on
+a genuine background `threading.Thread` and confirms it reaches the
+window via the signal bridge, not just via a direct same-thread call.
+476 tests passing (up from 438 at the end of Phase 10).
+
+Not verified against a real desktop this round -- same honest gap as
+Phase 10's Edit-menu work, now compounded by three more GUI-facing
+features (movable tabs' real drag feel, the Error Log's tray-adjacent
+window chrome, Find's on-screen highlight legibility against a real
+scrollback). Rick can confirm all of Phase 11 against a real desktop
+build when convenient.
+
+Next: Phase 12 (text editor, tray icon, mail window) -- see
+`PHASE10-12_PLAN.md` for the full plan; 12c (mail) still has an open
+question (which real mail system Rick's server(s) run) to resolve
+before its backend patterns are implemented.
 
 ## Standing rules: verification and assumptions
 
