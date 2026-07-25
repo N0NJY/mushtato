@@ -25,6 +25,7 @@ DEFAULT_HOTKEYS: Dict[str, str] = {
     "spawn_log_window": "Ctrl+L",
     "switch_input_focus": "Ctrl+Tab",
     "close_window": "Ctrl+W",
+    "open_text_editor": "Ctrl+Shift+E",
 }
 
 # "dark" is the default (Phase 7b checkpoint): matches engine/ansi's
@@ -53,6 +54,23 @@ class Settings:
     # for every newly-opened tab. Empty list means "no saved preference
     # yet, use the built-in 5:1 stretch-factor default."
     splitter_sizes: List[int] = field(default_factory=list)
+    # Phase 12 (Text Editor): a third font category, same "no override"
+    # sentinel convention as the two above. Editor windows can be
+    # multiple and simultaneous (Rick's checkpoint choice) -- these are
+    # the *shared* starting values for every newly-opened one, not
+    # per-window state.
+    editor_font_family: str = ""
+    editor_font_size: int = 0
+    editor_line_numbers: bool = True
+    editor_word_wrap: bool = True
+    # [x, y, width, height] of the most recently moved/resized editor
+    # window -- one shared "starting geometry for the next new window"
+    # preference, same non-live-updating-already-open-windows reasoning
+    # as splitter_sizes above. Empty means "no saved preference yet."
+    editor_window_geometry: List[int] = field(default_factory=list)
+    # Last directory used in the editor's Open/Save dialogs -- empty
+    # means "no saved preference yet, default to drafts_dir()".
+    editor_last_dir: str = ""
 
 
 def load_settings(path: Path) -> Settings:
@@ -66,7 +84,8 @@ def load_settings(path: Path) -> Settings:
     an unrecognized or missing value falls back to the default rather
     than raising. Font fields and splitter_sizes default the same way
     (missing -> "no override" sentinel) so a pre-font-settings
-    settings.json still loads correctly.
+    settings.json still loads correctly -- the Phase 12 editor_* fields
+    follow the identical pattern for the same reason.
     """
     if not path.exists():
         return Settings()
@@ -84,6 +103,12 @@ def load_settings(path: Path) -> Settings:
         input_font_family=data.get("input_font_family", ""),
         input_font_size=data.get("input_font_size", 0),
         splitter_sizes=list(data.get("splitter_sizes", [])),
+        editor_font_family=data.get("editor_font_family", ""),
+        editor_font_size=data.get("editor_font_size", 0),
+        editor_line_numbers=data.get("editor_line_numbers", True),
+        editor_word_wrap=data.get("editor_word_wrap", True),
+        editor_window_geometry=list(data.get("editor_window_geometry", [])),
+        editor_last_dir=data.get("editor_last_dir", ""),
     )
 
 
@@ -97,6 +122,12 @@ def save_settings(path: Path, settings: Settings) -> None:
         "input_font_family": settings.input_font_family,
         "input_font_size": settings.input_font_size,
         "splitter_sizes": settings.splitter_sizes,
+        "editor_font_family": settings.editor_font_family,
+        "editor_font_size": settings.editor_font_size,
+        "editor_line_numbers": settings.editor_line_numbers,
+        "editor_word_wrap": settings.editor_word_wrap,
+        "editor_window_geometry": settings.editor_window_geometry,
+        "editor_last_dir": settings.editor_last_dir,
     }
     path.parent.mkdir(parents=True, exist_ok=True)
     tmp_path = path.with_suffix(path.suffix + ".tmp")

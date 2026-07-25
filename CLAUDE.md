@@ -102,9 +102,10 @@ see below. Phase 9 (GUI-scripting integration: engine/scripting wired
 into the tabbed session GUI for real) — done, see below. Phase 10
 (quick-win polish: About credits, Edit menu) — done, see below. Phase
 11 (movable tabs, spawnlog save, error log, find/search) — done, see
-below.** See `PHASE10-12_PLAN.md` (repo root) for the full Phase 10-12
-plan and the checkpoint that renumbered script-sharing from Phase 10 to
-Phase 13. Telnet IAC negotiation is
+below. Phase 12a (Text Editor) — done, see below.** See
+`PHASE10-12_PLAN.md` (repo root) for the full Phase 10-12 plan and the
+checkpoint that renumbered script-sharing from Phase 10 to Phase 13.
+Telnet IAC negotiation is
 hand-rolled on raw asyncio streams (not telnetlib3)
 — see the Phase 3 discussion for reasoning. `scripts/console_client.py`
 is a throwaway dev tool for manually testing against a real server
@@ -2104,10 +2105,201 @@ window chrome, Find's on-screen highlight legibility against a real
 scrollback). Rick can confirm all of Phase 11 against a real desktop
 build when convenient.
 
-Next: Phase 12 (text editor, tray icon, mail window) -- see
-`PHASE10-12_PLAN.md` for the full plan; 12c (mail) still has an open
-question (which real mail system Rick's server(s) run) to resolve
-before its backend patterns are implemented.
+**Phase 12a (Text Editor) — done.** New `gui/windows/text_editor_window.py`
+(`TextEditor`, `_EditorTextEdit`, `_LineNumberArea`); extended
+`engine/storage/paths.py` (`drafts_dir()`), `engine/storage/settings.py`
+(six new `editor_*` fields + `open_text_editor` hotkey),
+`gui/fonts.py` (`resolve_editor_font`), `gui/dialogs/settings_dialog.py`
+(Editor Font row), `gui/windows/main_window.py`, `gui/windows/
+session_tab.py` (`/editor`), `gui/app.py`.
+
+Rick handed over a second external implementation guide (mirroring
+`PHASE10-12_PLAN.md`'s already-confirmed 12a scope), again written
+without seeing the code -- checked against the real codebase and two
+real technical claims in it were tested directly rather than trusted,
+per this file's own standing rules, before any code was written.
+
+**Real, load-bearing finding, confirmed empirically before designing
+around it:** the doc's own Integration Points section claimed
+MainWindow's existing focus-dispatch Edit menu (`_dispatch_focused_
+edit_action`, Phase 10) "should work automatically" for a separate
+Text Editor window, while its own pseudocode contradicted that by
+building a second, independent Edit menu anyway. Resolved by testing
+directly, not by picking a side of the doc's own contradiction: a real
+script driving two separate `QMainWindow`s showed `QApplication.
+focusWidget()` returns `None` the instant a *different* top-level
+window (MainWindow) is activated -- which merely clicking MainWindow's
+own menu bar requires. So the claim is false for this app's actual
+architecture: MainWindow's Edit/Find actions structurally cannot reach
+a separate window's own widget. `TextEditor` therefore owns its own
+independent Edit menu and its own `FindBar` instance -- not a parallel
+implementation in the sense CLAUDE.md rule 6 warns against, since a
+single-text-widget window has nothing to dispatch *between* the way
+MainWindow's three widgets (two inputs + scrollback) do. Also verified
+directly (a real script, not assumed from either class's docs) that
+`QPlainTextEdit` -- the correct widget choice for a plain-text editor,
+not `QTextEdit`/`QTextBrowser` -- is fully compatible with the existing
+`FindBar` class as-is: both share `document()`/`setTextCursor()`/
+`ensureCursorVisible()`/`setExtraSelections()` with identical
+signatures, confirmed with real match-count and extra-selection
+assertions before writing `text_editor_window.py` around that
+assumption.
+
+**Four real forks surfaced via checkpoint before implementation, per
+this file's standing rules** (full detail in `PHASE10-12_PLAN.md`'s
+predecessor checkpoint, folded in here): (1) **Editor Font joins
+Settings** as a third font category (Terminal/Input/Editor), reusing
+`gui/fonts.py`'s existing sentinel-resolution pattern and
+`SettingsDialog`'s existing `QFontComboBox`+`QSpinBox` row helper,
+*not* the source doc's inline dropdown/spinner mockup living in the
+editor's own toolbar -- Rick's explicit choice to reuse existing
+machinery over matching the doc's mockup literally. Unrestricted font
+filter (unlike Terminal Font's monospaced-only) since drafting prose is
+an explicit named use case for this editor, not just macros/code. (2)
+**"Remember last file" scoped down** to just the last-used directory
+for Open/Save dialogs -- not auto-reopening the last file's actual
+content on every new editor window, which would have been a bigger,
+more surprising behavioral commitment interacting awkwardly with
+"New"/unsaved-changes tracking. (3) **Multiple simultaneous editor
+windows** -- Rick's explicit choice, the non-recommended option, over
+the single-reused-window pattern every other satellite window in this
+app (Help/Address Book/Error Log) uses. Implemented by reusing the
+*already-established* alternative pattern instead (`SessionTab.
+spawn_windows`, a tracked list) rather than inventing a third pattern:
+`MainWindow._text_editor_windows: List[TextEditor]`, `open_text_editor()`
+always constructs a new instance, a `closed` signal removes it from the
+list. (4) storage paths -- the doc guessed `~/.mushtato/drafts/` again,
+the same recurring mistake already corrected twice this phase-group
+(Phase 11's `logs_dir()`); fixed with a new `drafts_dir()` following
+the identical real established convention.
+
+**Settings additions, following the exact established pattern:**
+`editor_font_family`/`editor_font_size` (empty/0 sentinels, same as
+the other two font categories), `editor_line_numbers`/`editor_word_wrap`
+(default `True`, matching the doc's own defaults), `editor_window_geometry`
+(`[x, y, width, height]`, empty = unset) and `editor_last_dir` -- all
+five are *shared, one-preference* values applied as the starting
+default for the *next* newly-opened editor window, never live-updating
+an already-open *different* editor window, the identical reasoning
+`splitter_sizes` already established (dragging one thing shouldn't
+silently resize/retheme something else already open). `MainWindow`
+reuses its existing debounced settings-save timer (previously
+splitter-specific in name only, already generic in effect) for editor
+geometry/toggle changes rather than adding a second timer.
+
+**A real, structural bug in `MainWindow.__init__` found and fixed
+while wiring the new `open_text_editor` hotkey, not by inspection but
+by running the existing suite:** `self._hotkeys = hotkeys if hotkeys is
+not None else dict(DEFAULT_HOTKEYS)` trusted any explicitly-passed
+`hotkeys` dict to already be complete -- true by coincidence for every
+hotkey added before this one, but a real, immediate `KeyError` the
+moment a fifth action was added and an existing test's hand-rolled
+four-key dict (predating this phase) got passed straight through
+without merging. Fixed by merging with `DEFAULT_HOTKEYS` the same way
+`engine/storage/settings.py`'s own `load_settings()` already does for a
+saved file -- structurally closes this off for any *future* new
+hotkey too, not just this one. A second, unrelated test
+(`test_open_settings_live_reloads_hotkeys`) had hardcoded `_hotkey_
+shortcuts[-1]` to mean "the close_window shortcut," which silently
+stopped being true the moment a fifth shortcut was appended after it --
+fixed to check by key-sequence value instead of position, so it can't
+silently drift again as more hotkeys are added.
+
+**A real, environment-specific testing gotcha found and diagnosed, not
+worked around blindly:** a test resizing a freshly-constructed,
+never-shown `TextEditor` and asserting its `resizeEvent`-driven
+geometry-recording callback fired came back with an empty call list.
+Root-caused with a real, isolated script rather than guessed at: the
+offscreen QPA platform delivers a top-level window's *very first*
+resize event synchronously even while unshown, but silently drops
+every *subsequent* resize on a window that still hasn't been shown --
+confirmed by reproducing the exact symptom with a bare `QMainWindow`
+subclass, then confirming `.show()` fixes it. This is an offscreen-
+environment quirk, not a real bug: a real, visible window (as in
+actual use) resizes and fires normally, confirmed with the same
+script. The test calls `.show()` to reproduce that; documented inline
+so a future reader doesn't mistake the fix for arbitrary.
+
+**A real bug in the Text Editor itself, found and fixed before it
+could ship, not by the source doc's own pseudocode (which never
+created any directory at all):** neither the default drafts directory
+nor a save target's parent directory were ever created before
+writing -- `Path.write_text()` doesn't create missing parent
+directories, so saving a brand-new file for the first time would have
+failed outright. Fixed with the same up-front `mkdir(parents=True,
+exist_ok=True)` pattern `SpawnWindow.save_spawnlog` (Phase 11) already
+established, applied both to the dialog's default starting directory
+and to the actual save target's parent, covering a custom path the
+user might type that doesn't exist yet either.
+
+**A real, genuine bug found while confirming the suite still passes
+cleanly -- not glossed over as "the same known Phase 9 flakiness"
+without checking first.** A full-suite run intermittently hung rather
+than completing. Root-caused with a real diagnostic, not guessed at:
+`PYTHONFAULTHANDLER=1`/`python -X faulthandler` plus `timeout -s ABRT`
+to force a full per-thread stack dump on hang, rather than just
+retrying and hoping. The first dump showed a genuinely new defect: a
+background thread stuck *inside* the stdlib `logging` module's own
+`makeRecord`/handler-`emit` machinery, with the main thread blocked on
+`Thread.join()` waiting for it -- `engine/errorlog.py`'s first draft
+(built on `logging.getLogger()` + `logging.FileHandler`, following the
+source doc's own suggestion to "use Python's logging module") shared
+that module's process-wide lock and global logger registry with every
+other `ErrorLog` instance *and* every other lingering background
+thread anywhere else in the same test process (idle `TelnetBridge`
+asyncio loops, idle executor workers) -- exactly the kind of volume
+this project's own suite genuinely exercises. Rewritten on plain file
+I/O guarded by one instance-scoped `threading.Lock` instead (same
+public API, so nothing outside `engine/errorlog.py` needed to change) --
+confirmed fixed by re-running the exact full suite with the same
+`faulthandler` instrumentation repeatedly afterward: that specific
+deadlock signature never reappeared.
+
+**A second, separate, pre-existing hang was found in the same
+investigation and is explicitly *not* claimed fixed:** even after the
+`logging`-deadlock fix, the full suite can still hang (or, per Phase
+9's original notes, crash) strictly *after* every test has already
+passed, during interpreter shutdown, with real background threads from
+entirely unrelated pre-existing files (`test_telnet_bridge_integration.py`'s
+live asyncio loops, `engine/scripting/sandbox.py`'s worker threads)
+still alive. Confirmed via the same `faulthandler` dumps, twice, with
+identical lingering threads both times -- not something this phase's
+own new code touches or could fix; this is the already-tracked risk
+SPEC.md section 8 documents (real threads + PySide6 + process teardown
+fragility), now simply easier to trigger with more Qt windows/threads
+in the mix. Recorded here rather than silently retried until it looked
+clean, per this file's own standing rule 8 (distinguish "fixed" from
+"still an accepted gap").
+
+Verified per this file's standing rule 7 throughout: 42 new tests (36
+in `test_text_editor_window.py` covering file operations -- including
+all three Yes/No/Cancel unsaved-changes-prompt paths -- line numbers,
+word wrap, status bar counts, its own independent Edit menu and Find
+bar, font live-reload, and two fully-independent simultaneous windows;
+5 in `test_chrome.py` covering the Tools-menu action opening a new
+window per click, the hotkey via a real `QTest.keyClick`, the `/editor`
+command, and Settings-driven font live-reload propagating to an
+already-open editor; 1 net new in `test_errorlog.py` replacing the
+internal-state-poking day-rotation test with one matching the
+simplified, no-cached-state design). Every Text Editor test passes an
+explicit `drafts_dir_override` -- confirmed clean via a real
+before/after `ls` on the actual per-user data directory, the same
+discipline every phase since the Phase 9 `world_script_path` leak has
+followed. 530 tests passing (up from 488 at the end of Phase 11),
+confirmed with multiple full, clean `530 passed` runs despite the
+separate shutdown-hang risk noted above.
+
+Not verified against a real desktop this round -- same honest gap as
+Phase 10/11's GUI work, now including the Text Editor's line-number
+gutter rendering and multi-window behavior specifically. Rick can
+confirm when convenient.
+
+Still open: **Q6 (mail backend reference)** -- which real mail
+system(s) Rick's own server(s) actually run -- needed before Phase
+12c (mail window) starts. **12b (tray icon)** is also still pending.
+
+Next: Phase 12b (tray icon, placeholder graphics) or 12c (mail,
+pending Q6) -- see `PHASE10-12_PLAN.md` for the full plan.
 
 ## Standing rules: verification and assumptions
 

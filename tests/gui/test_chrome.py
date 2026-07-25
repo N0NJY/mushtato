@@ -314,18 +314,116 @@ def test_edit_actions_are_a_no_op_when_nothing_relevant_has_focus(qapp, tmp_path
 
 
 def test_placeholder_actions_are_disabled(qapp, tmp_path: Path):
-    # find_action is real as of Phase 11 -- it's covered separately by
-    # test_find_action_toggles_the_active_tab_s_find_bar below, and is
-    # gated by has_tab like the rest of the tab-scoped chrome, not
-    # permanently disabled like these genuine Tools placeholders.
+    # find_action (Phase 11) and editor_action (Phase 12) are real now
+    # -- covered separately (test_find_action_toggles_the_active_tab_s_
+    # find_bar below, and test_editor_action_opens_a_new_window_each_
+    # click in test_text_editor_window.py), not permanently disabled
+    # like these genuine remaining Tools placeholders.
     host = make_host(address_book_storage_path=tmp_path / "ab.json")
     for action in (
-        host.editor_action,
         host.upload_action,
         host.mail_window_action,
         host.events_action,
     ):
         assert action.isEnabled() is False
+
+
+def test_editor_action_is_always_enabled(qapp, tmp_path: Path):
+    host = make_host(address_book_storage_path=tmp_path / "ab.json")
+    assert host.editor_action.isEnabled() is True
+
+
+def test_editor_action_opens_a_new_window_each_click(qapp, tmp_path: Path):
+    # Rick's checkpoint choice: multiple simultaneous editor windows,
+    # not the single-reused-window pattern Help/Address Book/Error Log
+    # use -- confirmed by clicking twice and checking the count grows,
+    # not that the same instance is reused.
+    host = make_host(
+        address_book_storage_path=tmp_path / "ab.json", drafts_dir=tmp_path / "drafts"
+    )
+    assert host._text_editor_windows == []
+
+    host.editor_action.trigger()
+    assert len(host._text_editor_windows) == 1
+    first = host._text_editor_windows[0]
+
+    host.editor_action.trigger()
+    assert len(host._text_editor_windows) == 2
+    assert host._text_editor_windows[0] is first
+    assert host._text_editor_windows[1] is not first
+
+
+def test_closing_an_editor_window_removes_it_from_the_host_s_list(qapp, tmp_path: Path):
+    host = make_host(
+        address_book_storage_path=tmp_path / "ab.json", drafts_dir=tmp_path / "drafts"
+    )
+    host.editor_action.trigger()
+    window = host._text_editor_windows[0]
+
+    window.close()
+
+    assert host._text_editor_windows == []
+
+
+def test_open_text_editor_hotkey_opens_a_new_window(qapp, tmp_path: Path):
+    from PySide6.QtCore import Qt
+    from PySide6.QtTest import QTest
+
+    host = make_host(
+        address_book_storage_path=tmp_path / "ab.json", drafts_dir=tmp_path / "drafts"
+    )
+    host.show()
+    host.activateWindow()
+    QApplication.processEvents()
+    QTest.keyClick(
+        host, Qt.Key.Key_E, Qt.KeyboardModifier.ControlModifier | Qt.KeyboardModifier.ShiftModifier
+    )
+    QApplication.processEvents()
+
+    assert len(host._text_editor_windows) == 1
+
+
+def test_editor_command_opens_a_new_window(qapp, tmp_path: Path):
+    host = make_host(
+        address_book_storage_path=tmp_path / "ab.json", drafts_dir=tmp_path / "drafts"
+    )
+    tab = host.open_tab("example.com", 4201, bridge=FakeBridge())
+
+    outcome = tab._commands.process("/editor")
+
+    assert len(host._text_editor_windows) == 1
+    assert outcome.text == "Opened a new Text Editor window."
+
+
+def test_open_settings_refonts_open_editor_windows(qapp, tmp_path: Path, monkeypatch):
+    host = make_host(
+        address_book_storage_path=tmp_path / "ab.json", drafts_dir=tmp_path / "drafts"
+    )
+    monkeypatch.setattr("gui.windows.main_window.settings_path", lambda: tmp_path / "settings.json")
+    host.editor_action.trigger()
+    window = host._text_editor_windows[0]
+
+    class FakeDialog:
+        def __init__(self, parent, *, settings):
+            self.settings = settings
+
+        def exec(self):
+            return 1
+
+        def result_settings(self):
+            from engine.storage import Settings
+
+            return Settings(
+                hotkeys=self.settings.hotkeys,
+                editor_font_family="Courier New",
+                editor_font_size=17,
+            )
+
+    monkeypatch.setattr("gui.windows.main_window.SettingsDialog", FakeDialog)
+    host.open_settings()
+
+    assert window.text_edit.font().family() == "Courier New"
+    assert window.text_edit.font().pointSize() == 17
 
 
 def test_find_action_toggles_the_active_tab_s_find_bar(qapp, tmp_path: Path):

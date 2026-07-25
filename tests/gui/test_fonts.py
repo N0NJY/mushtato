@@ -4,7 +4,12 @@ stores, since that module can't compute a real font default itself
 (no PySide6 import allowed in /engine).
 """
 
-from gui.fonts import default_scrollback_font, resolve_input_font, resolve_scrollback_font
+from gui.fonts import (
+    default_scrollback_font,
+    resolve_editor_font,
+    resolve_input_font,
+    resolve_scrollback_font,
+)
 
 
 def test_resolve_scrollback_font_with_no_override_matches_the_fixed_width_default(qapp):
@@ -38,3 +43,14 @@ def test_resolve_input_font_with_explicit_family_and_size(qapp):
     resolved = resolve_input_font("Arial", 16)
     assert resolved.family() == "Arial"
     assert resolved.pointSize() == 16
+
+
+def test_resolve_editor_font_with_no_override_matches_the_fixed_width_default(qapp):
+    resolved = resolve_editor_font("", 0)
+    assert resolved.family() == default_scrollback_font().family()
+
+
+def test_resolve_editor_font_with_explicit_family_and_size(qapp):
+    resolved = resolve_editor_font("Courier New", 15)
+    assert resolved.family() == "Courier New"
+    assert resolved.pointSize() == 15

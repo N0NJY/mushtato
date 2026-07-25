@@ -50,6 +50,7 @@ COMMAND_HELP: List[Tuple[str, str]] = [
     ("theme", "Switch theme: /theme [dark|light]"),
     ("disconnect", "Disconnect from the server"),
     ("reconnect", "Reconnect to the server"),
+    ("editor", "Open a new Text Editor window"),
 ]
 
 
@@ -312,20 +313,45 @@ buttons, plus a status bar at the bottom.
 - **Logging** -- Spawn Log Window (opens a log-mirror window for the
   active tab).
 - **Options** -- Settings... (hotkeys and theme).
-- **Tools** -- Error Log (unhandled-exception history; see below).
+- **Tools** -- Editor (opens a new Text Editor window; see below),
+  Error Log (unhandled-exception history; see below).
 - **Help** -- Help (this window) and About.
 
 **Not implemented yet -- shown disabled/grayed out on purpose, not
-missing by accident:** the Tools menu's Editor, Upload, and Mail
-Window. These are modeled on real features from Potato that MushTato
-doesn't have working equivalents for yet. A grayed-out item means
-"planned, not yet built," not "broken."
+missing by accident:** the Tools menu's Upload and Mail Window. These
+are modeled on real features from Potato that MushTato doesn't have
+working equivalents for yet. A grayed-out item means "planned, not yet
+built," not "broken."
 
 Reconnect, Disconnect, Close, Spawn Log Window, and the Edit menu's
 six focus-dispatched actions plus Find are disabled whenever there's no
-tab open at all, since there's nothing for them to act on. Error Log,
-Address Book, Settings, Help, and About stay available with zero tabs
-open, since none of them are tied to any one connection.
+tab open at all, since there's nothing for them to act on. Editor,
+Error Log, Address Book, Settings, Help, and About stay available with
+zero tabs open, since none of them are tied to any one connection.
+
+## Text Editor
+
+Tools -> Editor (or `Ctrl+Shift+E`, or `/editor`) opens a new,
+independent Text Editor window -- unlike every other satellite window
+in this app (Address Book, Help, Error Log), you can have as many Text
+Editor windows open at once as you want; each is its own separate
+document.
+
+It's a plain-text editor for composing and saving macros, triggers, or
+drafts -- File menu has New/Open/Save/Save As (prompting to save
+unsaved changes before discarding them), and its own independent Edit
+menu (Cut/Copy/Paste/Undo/Redo/Select All) and Find bar (`Ctrl+F`) --
+separate from the main window's own versions of those, since a Text
+Editor is its own top-level window. The status bar shows live word/
+line/character counts and cursor position. View menu toggles line
+numbers and word wrap. Font, line-number, and word-wrap preferences
+are shared across newly-opened editor windows (set via Options ->
+Settings..., or by toggling them in an open editor) but don't
+retroactively change a *different* already-open editor window.
+
+Files default to save under MushTato's own per-OS data directory (see
+`INSTALL.md`'s "Removing your data" section for the exact path) --
+Save/Save As remembers whatever directory you last used.
 
 ## Error Log
 
@@ -631,9 +657,9 @@ build already bundles the libraries it needs; on an unusually minimal
 system, install `libxcb-cursor0` and its usual companions yourself (see
 `INSTALL.md` for the exact package list).
 
-**A toolbar/menu item does nothing when clicked** -- some items (Editor,
-Upload, Mail Window, Find) are shown disabled on purpose; see the Menus
-& Toolbar topic.
+**A toolbar/menu item does nothing when clicked** -- some items (Upload,
+Mail Window) are shown disabled on purpose; see the Menus & Toolbar
+topic.
 
 **I checked "auto-login" on a world but nothing happens at startup** --
 auto-login also needs that world to have a default Character set (a

@@ -24,11 +24,34 @@ those through the separate ``threading.excepthook`` mechanism instead
 (also confirmed directly) -- hence both hooks are installed, covering
 a real gap the source planning doc's "sys.excepthook only" pseudocode
 would have missed for this app's actual threading architecture.
+
+Deliberately does NOT use the stdlib ``logging`` module, despite that
+being the source doc's own suggestion -- a real bug, not a style
+choice: an earlier draft built this on ``logging.getLogger()`` +
+``logging.FileHandler``, and a full-suite test run reproducibly hung
+with ``faulthandler``'s own thread dump showing a background thread
+stuck *inside* ``logging``'s internal ``makeRecord``/handler-emit
+machinery while the main thread waited on ``Thread.join()`` -- ``
+logging``'s module-level lock and global logger registry are shared
+process-wide by every ``ErrorLog`` instance and every other lingering
+background thread in the same test process (idle ``TelnetBridge``
+asyncio loops, idle executor workers), a combination this project's
+own test suite genuinely exercises at volume. Rewritten on plain file
+I/O guarded by one *instance-scoped* ``threading.Lock`` instead --
+confirmed via repeated ``faulthandler``-instrumented full-suite runs
+that this specific deadlock signature no longer appears. A separate,
+pre-existing, already-documented risk remains (SPEC.md section 8):
+the full suite can still hang or crash *after* every test has already
+passed, during interpreter shutdown, when real background threads from
+unrelated tests (``test_telnet_bridge_integration.py``'s live asyncio
+loops, ``engine/scripting/sandbox.py``'s worker threads) are still
+alive -- confirmed to be the same lingering threads regardless of
+whether this module's own tests are even included, i.e. not something
+this module introduces or can fix on its own.
 """
 
 from __future__ import annotations
 
-import logging
 import sys
 import threading
 import traceback
@@ -51,31 +74,6 @@ class ErrorRecord:
     traceback_text: str
 
 
-class _InMemoryHandler(logging.Handler):
-    """Turns a stdlib LogRecord into an ErrorRecord and hands it to a
-    plain callback -- kept separate from ErrorLog so ErrorLog doesn't
-    need to know anything about the logging module's own record shape.
-    """
-
-    def __init__(self, on_record: Callable[[ErrorRecord], None]) -> None:
-        super().__init__()
-        self._on_record = on_record
-
-    def emit(self, record: logging.LogRecord) -> None:
-        tb_text = ""
-        if record.exc_info:
-            tb_text = "".join(traceback.format_exception(*record.exc_info))
-        self._on_record(
-            ErrorRecord(
-                timestamp=datetime.fromtimestamp(record.created),
-                level=record.levelname,
-                module=record.name,
-                message=record.getMessage(),
-                traceback_text=tb_text,
-            )
-        )
-
-
 class ErrorLog:
     """Owns the in-memory ring buffer (last ``MAX_IN_MEMORY_ERRORS``)
     and a real day-rotated log file. Construct one directly with
@@ -83,39 +81,22 @@ class ErrorLog:
     directory that way); the real app uses the module-level
     :func:`get_error_log` singleton, since ``sys.excepthook`` is itself
     inherently a single, process-wide hook.
+
+    Thread-safe via one plain ``threading.Lock`` scoped to this
+    instance -- not the stdlib ``logging`` module's shared global lock
+    (see this module's docstring for the real hang that caused this
+    design).
     """
 
     def __init__(self, *, log_dir: Optional[Path] = None) -> None:
         self._log_dir = log_dir if log_dir is not None else logs_dir()
         self.records: List[ErrorRecord] = []
         self._listeners: List[Callable[[ErrorRecord], None]] = []
-        self._logger = logging.getLogger(f"mushtato.errors.{id(self)}")
-        self._logger.setLevel(logging.WARNING)
-        self._logger.propagate = False
-        self._logger.addHandler(_InMemoryHandler(self._add_record))
-        self._file_handler: Optional[logging.FileHandler] = None
-        self._file_handler_day: Optional[str] = None
+        self._lock = threading.Lock()
 
-    def _ensure_file_handler(self) -> None:
-        day = datetime.now().strftime("%Y%m%d")
-        if self._file_handler is not None and self._file_handler_day == day:
-            return
-        if self._file_handler is not None:
-            self._logger.removeHandler(self._file_handler)
-            self._file_handler.close()
+    def _current_log_file(self) -> Path:
         self._log_dir.mkdir(parents=True, exist_ok=True)
-        handler = logging.FileHandler(self._log_dir / f"error_{day}.log", encoding="utf-8")
-        handler.setFormatter(logging.Formatter("[%(asctime)s] [%(levelname)s] %(name)s: %(message)s"))
-        self._logger.addHandler(handler)
-        self._file_handler = handler
-        self._file_handler_day = day
-
-    def _add_record(self, record: ErrorRecord) -> None:
-        self.records.append(record)
-        if len(self.records) > MAX_IN_MEMORY_ERRORS:
-            self.records.pop(0)
-        for listener in list(self._listeners):
-            listener(record)
+        return self._log_dir / f"error_{datetime.now():%Y%m%d}.log"
 
     def add_listener(self, callback: Callable[[ErrorRecord], None]) -> None:
         self._listeners.append(callback)
@@ -125,11 +106,26 @@ class ErrorLog:
             self._listeners.remove(callback)
 
     def log_exception(self, exc_type, exc_value, exc_traceback) -> None:
-        self._ensure_file_handler()
-        self._logger.critical(
-            f"Unhandled exception: {exc_type.__name__}: {exc_value}",
-            exc_info=(exc_type, exc_value, exc_traceback),
+        traceback_text = "".join(traceback.format_exception(exc_type, exc_value, exc_traceback))
+        record = ErrorRecord(
+            timestamp=datetime.now(),
+            level="CRITICAL",
+            module=getattr(exc_type, "__module__", "") or "unknown",
+            message=f"Unhandled exception: {exc_type.__name__}: {exc_value}",
+            traceback_text=traceback_text,
         )
+        with self._lock:
+            line = (
+                f"[{record.timestamp:%Y-%m-%d %H:%M:%S}] [{record.level}] "
+                f"{record.module}: {record.message}\n{traceback_text}\n"
+            )
+            with self._current_log_file().open("a", encoding="utf-8") as handle:
+                handle.write(line)
+            self.records.append(record)
+            if len(self.records) > MAX_IN_MEMORY_ERRORS:
+                self.records.pop(0)
+        for listener in list(self._listeners):
+            listener(record)
 
     def clear(self) -> None:
         """Clears the in-memory list only -- the on-disk file is never

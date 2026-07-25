@@ -6,6 +6,23 @@ of work, per `CLAUDE.md`/`SPEC.md`'s roadmap) rather than by version
 number, reconstructed from `CLAUDE.md`'s phase-by-phase notes and git
 history. All dates below are from the actual commit history.
 
+## Phase 12a — Text Editor (2026-07-25)
+
+- New Text Editor (Tools → Editor, `Ctrl+Shift+E`, or `/editor`):
+  New/Open/Save/Save As with an unsaved-changes prompt, its own
+  independent Edit menu and Find bar, live word/line/character counts,
+  toggleable line numbers and word wrap, and a configurable font
+  (Options → Settings... → Editor Font). Unlike every other satellite
+  window in the app, you can open as many Text Editor windows at once
+  as you want.
+- Files default to a new per-OS `drafts/` data directory; Save/Save As
+  remembers the last directory used.
+- Fixed a real deadlock found while verifying this phase: the new
+  Error Log (Phase 11) briefly used Python's stdlib `logging` module
+  internally, whose process-wide lock could deadlock against other
+  background threads under heavy test load. Rewritten on plain file
+  I/O with an instance-scoped lock instead (same public behavior).
+
 ## Phase 11 — Movable tabs, spawnlog save, error log, find/search (2026-07-24)
 
 - Session tabs can now be dragged to reorder (live-session-only, no

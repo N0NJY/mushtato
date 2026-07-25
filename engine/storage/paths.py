@@ -49,6 +49,13 @@ def logs_dir() -> Path:
     return user_data_dir() / "logs"
 
 
+def drafts_dir() -> Path:
+    # Phase 12's Text Editor default save location -- same correction
+    # as logs_dir() above (a planning doc guessed ~/.mushtato/drafts/
+    # again, the same recurring mistake, without checking this module).
+    return user_data_dir() / "drafts"
+
+
 def safe_filename(name: str) -> str:
     """Sanitize an arbitrary world name for safe use as a filename."""
     cleaned = "".join(c if c.isalnum() or c in "-_ " else "_" for c in name).strip()

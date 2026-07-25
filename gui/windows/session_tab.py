@@ -822,6 +822,7 @@ class SessionTab(QWidget):
             "theme": self._cmd_theme,
             "disconnect": self._cmd_disconnect,
             "reconnect": self._cmd_reconnect,
+            "editor": self._cmd_editor,
         }
         for name, help_text in COMMAND_HELP:
             self._commands.register(name, handlers[name], help_text)
@@ -883,6 +884,13 @@ class SessionTab(QWidget):
             return "Not available in this session (no host window)."
         self.host_window.open_settings()
         return None
+
+    def _cmd_editor(self, args: str) -> Optional[str]:
+        del args
+        if self.host_window is None:
+            return "Not available in this session (no host window)."
+        self.host_window.open_text_editor()
+        return "Opened a new Text Editor window."
 
     def _cmd_version(self, args: str) -> Optional[str]:
         del args

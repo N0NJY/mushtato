@@ -122,6 +122,12 @@ def main() -> int:
         input_font_family=settings.input_font_family,
         input_font_size=settings.input_font_size,
         splitter_sizes=settings.splitter_sizes,
+        editor_font_family=settings.editor_font_family,
+        editor_font_size=settings.editor_font_size,
+        editor_line_numbers=settings.editor_line_numbers,
+        editor_word_wrap=settings.editor_word_wrap,
+        editor_window_geometry=settings.editor_window_geometry,
+        editor_last_dir=settings.editor_last_dir,
     )
     window.resize(900, 700)
     window.show()

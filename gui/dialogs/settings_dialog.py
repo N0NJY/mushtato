@@ -24,7 +24,7 @@ from PySide6.QtWidgets import (
 
 from engine.storage import Settings
 
-from ..fonts import resolve_input_font, resolve_scrollback_font
+from ..fonts import resolve_editor_font, resolve_input_font, resolve_scrollback_font
 
 # Human-readable labels for each configurable action, in display order.
 ACTION_LABELS: Dict[str, str] = {
@@ -33,6 +33,7 @@ ACTION_LABELS: Dict[str, str] = {
     "spawn_log_window": "Spawn Log Window",
     "switch_input_focus": "Switch Input Focus",
     "close_window": "Close Window",
+    "open_text_editor": "Open Text Editor",
 }
 
 # Display label -> stored value, in display order.
@@ -67,8 +68,15 @@ class SettingsDialog(QDialog):
         super().__init__(parent)
         self.setWindowTitle("Settings")
         # Not editable in this dialog -- passed through unchanged in
-        # result_settings() so saving Settings never clobbers it.
+        # result_settings() so saving Settings never clobbers it. Same
+        # reasoning for the Phase 12 editor_* fields below: they're set
+        # by the editor windows themselves (toggles, dragging/resizing),
+        # not through this dialog.
         self._splitter_sizes = settings.splitter_sizes
+        self._editor_line_numbers = settings.editor_line_numbers
+        self._editor_word_wrap = settings.editor_word_wrap
+        self._editor_window_geometry = settings.editor_window_geometry
+        self._editor_last_dir = settings.editor_last_dir
 
         layout = QVBoxLayout(self)
 
@@ -118,6 +126,19 @@ class SettingsDialog(QDialog):
         self._input_font_size_spin.setValue(_effective_point_size(input_default))
         form.addRow("Input Font:", _font_row(self._input_font_combo, self._input_font_size_spin))
 
+        # Phase 12 (Text Editor): a third font category, same pattern as
+        # the two above. Not filtered to monospaced-only like Terminal
+        # Font -- the editor's own use cases include drafting prose, not
+        # just macros/code, so any installed font is offered (matching
+        # Input Font's own unrestricted picker).
+        editor_default = resolve_editor_font(settings.editor_font_family, settings.editor_font_size)
+        self._editor_font_combo = QFontComboBox()
+        self._editor_font_combo.setCurrentFont(editor_default)
+        self._editor_font_size_spin = QSpinBox()
+        self._editor_font_size_spin.setRange(6, 72)
+        self._editor_font_size_spin.setValue(_effective_point_size(editor_default))
+        form.addRow("Editor Font:", _font_row(self._editor_font_combo, self._editor_font_size_spin))
+
         self._editors: Dict[str, QKeySequenceEdit] = {}
         for action, label in ACTION_LABELS.items():
             editor = QKeySequenceEdit(QKeySequence(settings.hotkeys.get(action, "")))
@@ -146,4 +167,10 @@ class SettingsDialog(QDialog):
             input_font_family=self._input_font_combo.currentFont().family(),
             input_font_size=self._input_font_size_spin.value(),
             splitter_sizes=self._splitter_sizes,
+            editor_font_family=self._editor_font_combo.currentFont().family(),
+            editor_font_size=self._editor_font_size_spin.value(),
+            editor_line_numbers=self._editor_line_numbers,
+            editor_word_wrap=self._editor_word_wrap,
+            editor_window_geometry=self._editor_window_geometry,
+            editor_last_dir=self._editor_last_dir,
         )

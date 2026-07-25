@@ -13,7 +13,7 @@ Phase 5/6 notes for why that's an explicit deferral, not an oversight.
 
 from __future__ import annotations
 
-from typing import Dict, Optional
+from typing import Dict, List, Optional
 
 from PySide6.QtCore import QDateTime, QTimer
 from PySide6.QtGui import QAction, QActionGroup, QColor, QKeySequence, QShortcut
@@ -40,12 +40,14 @@ from engine.storage import (
     user_data_dir,
 )
 from engine.storage import logs_dir as default_logs_dir
+from engine.storage import drafts_dir as default_drafts_dir
 from engine.storage.paths import safe_filename
 from engine.errorlog import get_error_log
 
 from ..dialogs.settings_dialog import SettingsDialog
 from ..help.help_window import HelpWindow
 from ..theme import apply_theme
+from .text_editor_window import TextEditor
 from .error_log_window import ErrorLogWindow
 from ..version import mushtato_version
 from .session_tab import SessionTab
@@ -79,11 +81,18 @@ class MainWindow(QMainWindow):
         scripts_dir=None,
         logs_dir=None,
         error_log=None,
+        drafts_dir=None,
         scrollback_font_family: str = "",
         scrollback_font_size: int = 0,
         input_font_family: str = "",
         input_font_size: int = 0,
         splitter_sizes: Optional[list] = None,
+        editor_font_family: str = "",
+        editor_font_size: int = 0,
+        editor_line_numbers: bool = True,
+        editor_word_wrap: bool = True,
+        editor_window_geometry: Optional[list] = None,
+        editor_last_dir: str = "",
     ) -> None:
         super().__init__()
         self.setWindowTitle("MushTato")
@@ -92,8 +101,14 @@ class MainWindow(QMainWindow):
         # constant, never touching disk on its own -- callers that want
         # the user's actually-saved values (gui/app.py) load Settings
         # themselves and pass them through explicitly. Keeps
-        # construction side-effect-free for tests.
-        self._hotkeys = hotkeys if hotkeys is not None else dict(DEFAULT_HOTKEYS)
+        # construction side-effect-free for tests. Merged with
+        # DEFAULT_HOTKEYS (not used as-is) for the same reason
+        # engine/storage/settings.py's load_settings() already merges
+        # rather than trusting a saved file is complete -- a caller
+        # passing a hand-rolled partial dict (real tests already did
+        # this) must never leave a newly-added action unbound; caught
+        # by exactly that happening when open_text_editor was added.
+        self._hotkeys = {**DEFAULT_HOTKEYS, **hotkeys} if hotkeys is not None else dict(DEFAULT_HOTKEYS)
         self._theme = theme if theme is not None else DEFAULT_THEME
         self._scrollback_font_family = scrollback_font_family
         self._scrollback_font_size = scrollback_font_size
@@ -127,9 +142,27 @@ class MainWindow(QMainWindow):
         # disk-isolated instance instead of polluting/reading the real
         # one shared across the whole test process.
         self._error_log = error_log if error_log is not None else get_error_log()
+        # Phase 12: same override pattern as logs_dir above.
+        self._drafts_dir = drafts_dir if drafts_dir is not None else default_drafts_dir()
+        self._editor_font_family = editor_font_family
+        self._editor_font_size = editor_font_size
+        self._editor_line_numbers = editor_line_numbers
+        self._editor_word_wrap = editor_word_wrap
+        # One shared "starting geometry/directory for the next new
+        # editor window" preference -- same non-live-updating-already-
+        # open-windows reasoning as splitter_sizes above, not per-window
+        # state (Text Editor windows can be multiple and simultaneous,
+        # Rick's checkpoint choice).
+        self._editor_window_geometry = list(editor_window_geometry) if editor_window_geometry else []
+        self._editor_last_dir = editor_last_dir
         self._address_book_window = None  # lazily constructed on first use
         self._help_window = None  # lazily constructed on first use
         self._error_log_window = None  # lazily constructed on first use
+        # Multiple simultaneous windows (Rick's checkpoint choice) --
+        # same list-not-singleton pattern SessionTab.spawn_windows
+        # already established for SpawnWindow, not the singleton-
+        # satellite pattern Help/Address Book/Error Log use.
+        self._text_editor_windows: List[TextEditor] = []
 
         self.tab_widget = QTabWidget(self)
         self.tab_widget.setTabsClosable(False)
@@ -328,6 +361,12 @@ class MainWindow(QMainWindow):
             input_font_family=self._input_font_family,
             input_font_size=self._input_font_size,
             splitter_sizes=self._splitter_sizes,
+            editor_font_family=self._editor_font_family,
+            editor_font_size=self._editor_font_size,
+            editor_line_numbers=self._editor_line_numbers,
+            editor_word_wrap=self._editor_word_wrap,
+            editor_window_geometry=self._editor_window_geometry,
+            editor_last_dir=self._editor_last_dir,
         )
 
     def _save_settings_to_disk(self) -> None:
@@ -350,6 +389,61 @@ class MainWindow(QMainWindow):
         """
         self._splitter_sizes = list(sizes)
         self._splitter_save_timer.start()
+
+    # -- Phase 12: Text Editor shared "next new window" preferences ---
+    # Same reasoning as record_splitter_sizes above: each of these is a
+    # starting default for the *next* newly-opened editor window, not a
+    # live-update to every already-open one -- toggling Word Wrap in
+    # one editor shouldn't silently change a different open editor's
+    # display. Reuses the same debounce timer as splitter_sizes (it was
+    # already a generic "debounce a full settings save," not something
+    # splitter-specific) since window resize/move events fire just as
+    # rapidly as splitter dragging does.
+
+    def record_editor_line_numbers(self, enabled: bool) -> None:
+        self._editor_line_numbers = enabled
+        self._splitter_save_timer.start()
+
+    def record_editor_word_wrap(self, enabled: bool) -> None:
+        self._editor_word_wrap = enabled
+        self._splitter_save_timer.start()
+
+    def record_editor_geometry(self, geometry: List[int]) -> None:
+        self._editor_window_geometry = list(geometry)
+        self._splitter_save_timer.start()
+
+    def record_editor_last_dir(self, directory: str) -> None:
+        self._editor_last_dir = directory
+        self._splitter_save_timer.start()
+
+    def open_text_editor(self) -> TextEditor:
+        """Always opens a *new* Text Editor window -- Rick's explicit
+        checkpoint choice over the single-reused-window pattern every
+        other satellite window here uses, matching the existing
+        SpawnWindow precedent (a tracked list, not one slot) instead.
+        """
+        window = TextEditor(
+            self,
+            font_family=self._editor_font_family,
+            font_size=self._editor_font_size,
+            line_numbers=self._editor_line_numbers,
+            word_wrap=self._editor_word_wrap,
+            geometry=self._editor_window_geometry or None,
+            last_dir=self._editor_last_dir,
+            drafts_dir_override=self._drafts_dir,
+        )
+        window.closed.connect(lambda: self._remove_text_editor_window(window))
+        self._text_editor_windows.append(window)
+        window.show()
+        return window
+
+    def _remove_text_editor_window(self, window: TextEditor) -> None:
+        if window in self._text_editor_windows:
+            self._text_editor_windows.remove(window)
+
+    def _refont_open_editors(self) -> None:
+        for window in self._text_editor_windows:
+            window.apply_font(self._editor_font_family, self._editor_font_size)
 
     def _on_current_tab_changed(self, index: int) -> None:
         if index != -1:
@@ -436,6 +530,15 @@ class MainWindow(QMainWindow):
             # for the same reason as every other field here: one save writes
             # the *complete* current settings, never a partial one.
             self._splitter_sizes = result.splitter_sizes
+            self._editor_font_family = result.editor_font_family
+            self._editor_font_size = result.editor_font_size
+            # editor_line_numbers/word_wrap/window_geometry/last_dir
+            # aren't editable in the dialog either -- same pass-through
+            # reasoning as splitter_sizes.
+            self._editor_line_numbers = result.editor_line_numbers
+            self._editor_word_wrap = result.editor_word_wrap
+            self._editor_window_geometry = result.editor_window_geometry
+            self._editor_last_dir = result.editor_last_dir
             self._save_settings_to_disk()
             self._apply_hotkeys()  # only one owner of hotkeys now -- live-reload is cheap
             app = QApplication.instance()
@@ -443,6 +546,7 @@ class MainWindow(QMainWindow):
                 apply_theme(app, self._theme)
             self._retheme_open_tabs()
             self._refont_open_tabs()
+            self._refont_open_editors()
 
     def set_theme(self, theme: str) -> str:
         self._theme = theme
@@ -639,11 +743,12 @@ class MainWindow(QMainWindow):
         self.settings_action = add_action(options_menu, "Settings...", self.open_settings)
         toolbar.addAction(self.settings_action)
 
-        # -- Tools (Editor/Upload/Mail Window/Events are placeholders;
+        # -- Tools (Upload/Mail Window/Events are still placeholders;
         # Potato has these, MushTato doesn't yet -- filled in as later
-        # Phase 12 items land, per PHASE10-12_PLAN.md) --
+        # Phase 12 items land, per PHASE10-12_PLAN.md. Editor is real
+        # as of this phase.) --
         self.tools_menu = tools_menu = menu_bar.addMenu("&Tools")
-        self.editor_action = add_action(tools_menu, "Editor", None, enabled=False)
+        self.editor_action = add_action(tools_menu, "Editor", self.open_text_editor)
         self.upload_action = add_action(tools_menu, "Upload", None, enabled=False)
         self.mail_window_action = add_action(tools_menu, "Mail Window", None, enabled=False)
         self.events_action = add_action(tools_menu, "Events", None, enabled=False)
@@ -795,6 +900,11 @@ class MainWindow(QMainWindow):
             ),
             QShortcut(
                 QKeySequence(self._hotkeys["close_window"]), self, activated=self.close_current_tab
+            ),
+            QShortcut(
+                QKeySequence(self._hotkeys["open_text_editor"]),
+                self,
+                activated=self.open_text_editor,
             ),
         ]
 

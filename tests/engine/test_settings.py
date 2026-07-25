@@ -134,3 +134,65 @@ def test_pre_font_settings_format_json_defaults_the_new_fields(tmp_path: Path):
     assert settings.input_font_family == ""
     assert settings.input_font_size == 0
     assert settings.splitter_sizes == []
+
+
+# -- Text Editor settings (Phase 12) --------------------------------------
+
+
+def test_editor_fields_default_to_sentinels(tmp_path: Path):
+    settings = load_settings(tmp_path / "does_not_exist.json")
+    assert settings.editor_font_family == ""
+    assert settings.editor_font_size == 0
+    assert settings.editor_line_numbers is True
+    assert settings.editor_word_wrap is True
+    assert settings.editor_window_geometry == []
+    assert settings.editor_last_dir == ""
+
+
+def test_editor_fields_round_trip(tmp_path: Path):
+    path = tmp_path / "settings.json"
+    original = Settings(
+        editor_font_family="Courier New",
+        editor_font_size=14,
+        editor_line_numbers=False,
+        editor_word_wrap=False,
+        editor_window_geometry=[100, 200, 800, 600],
+        editor_last_dir="/home/user/drafts",
+    )
+
+    save_settings(path, original)
+    loaded = load_settings(path)
+
+    assert loaded == original
+
+
+def test_pre_editor_settings_format_json_defaults_the_new_fields(tmp_path: Path):
+    """Simulates a settings.json saved before Phase 12's editor fields
+    existed at all -- must load with sensible defaults, not raise.
+    """
+    path = tmp_path / "settings.json"
+    import json
+
+    path.write_text(
+        json.dumps(
+            {
+                "hotkeys": DEFAULT_HOTKEYS,
+                "theme": "dark",
+                "scrollback_font_family": "",
+                "scrollback_font_size": 0,
+                "input_font_family": "",
+                "input_font_size": 0,
+                "splitter_sizes": [],
+            }
+        ),
+        encoding="utf-8",
+    )
+
+    settings = load_settings(path)
+
+    assert settings.editor_font_family == ""
+    assert settings.editor_font_size == 0
+    assert settings.editor_line_numbers is True
+    assert settings.editor_word_wrap is True
+    assert settings.editor_window_geometry == []
+    assert settings.editor_last_dir == ""

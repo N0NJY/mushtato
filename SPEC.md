@@ -232,6 +232,20 @@ Two cleanly separated layers:
   this class of problem too. Not fixed in Phase 9 -- that phase's own
   checkpoint explicitly scoped out changing the sandboxing model.
   Revisit together with the busy-loop item above.
+
+  **Reconfirmed in Phase 12a, with a new symptom:** a `faulthandler`-
+  instrumented full-suite run showed the same underlying pattern (real
+  background threads -- `test_telnet_bridge_integration.py`'s live
+  asyncio loops, a `engine/scripting/sandbox.py` worker thread --
+  still alive) can also manifest as a full *hang* at interpreter
+  shutdown, strictly after every test has already passed, not just as
+  a crash during a dispatch call. A genuinely separate, new deadlock
+  was also found and fixed in the same investigation (Phase 12a's
+  `ErrorLog` briefly used the stdlib `logging` module, whose
+  process-wide lock/registry deadlocked against these same lingering
+  threads) -- that one is fixed (rewritten on plain file I/O + an
+  instance-scoped lock); this pre-existing gap is not, and remains
+  exactly as scoped above.
 - ~~macOS notarization: pursue Apple Developer Program membership, or ship
   unsigned with a documented Gatekeeper workaround?~~ **Decided (Phase 7):
   ship unsigned for now.** Not a technical call — section 3 already

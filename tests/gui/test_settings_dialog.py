@@ -137,3 +137,71 @@ def test_result_settings_preserves_splitter_sizes_unchanged(qapp):
     result = dialog.result_settings()
 
     assert result.splitter_sizes == [300, 150]
+
+
+# -- Editor Font picker (Phase 12) ----------------------------------------
+
+
+def test_dialog_prefills_editor_font_from_saved_settings(qapp):
+    probe = SettingsDialog(settings=Settings())
+    editor_font_name = probe._editor_font_combo.itemText(0)
+
+    dialog = SettingsDialog(
+        settings=Settings(editor_font_family=editor_font_name, editor_font_size=15)
+    )
+
+    assert dialog._editor_font_combo.currentFont().family() == editor_font_name
+    assert dialog._editor_font_size_spin.value() == 15
+
+
+def test_dialog_prefills_editor_font_with_the_real_default_when_nothing_saved(qapp):
+    from PySide6.QtGui import QFontInfo
+
+    from gui.fonts import default_scrollback_font
+
+    dialog = SettingsDialog(settings=Settings())
+
+    expected = QFontInfo(default_scrollback_font()).family()
+    assert dialog._editor_font_combo.currentFont().family() == expected
+
+
+def test_result_settings_reflects_edited_editor_font(qapp):
+    dialog = SettingsDialog(settings=Settings())
+    editor_font_name = dialog._editor_font_combo.itemText(dialog._editor_font_combo.count() - 1)
+    dialog._editor_font_combo.setCurrentText(editor_font_name)
+    dialog._editor_font_size_spin.setValue(18)
+
+    result = dialog.result_settings()
+
+    assert result.editor_font_family == editor_font_name
+    assert result.editor_font_size == 18
+
+
+def test_editor_font_combo_is_not_restricted_to_monospaced_fonts(qapp):
+    # Unlike Terminal Font -- drafting prose in the editor is a real use
+    # case too, so any installed font should be selectable.
+    from PySide6.QtWidgets import QFontComboBox
+
+    dialog = SettingsDialog(settings=Settings())
+
+    assert dialog._editor_font_combo.fontFilters() != QFontComboBox.FontFilter.MonospacedFonts
+
+
+def test_result_settings_preserves_editor_state_not_shown_in_this_dialog(qapp):
+    # line_numbers/word_wrap/window_geometry/last_dir have no UI here --
+    # they're set by the editor windows themselves, not this dialog.
+    dialog = SettingsDialog(
+        settings=Settings(
+            editor_line_numbers=False,
+            editor_word_wrap=False,
+            editor_window_geometry=[10, 20, 640, 480],
+            editor_last_dir="/some/dir",
+        )
+    )
+
+    result = dialog.result_settings()
+
+    assert result.editor_line_numbers is False
+    assert result.editor_word_wrap is False
+    assert result.editor_window_geometry == [10, 20, 640, 480]
+    assert result.editor_last_dir == "/some/dir"

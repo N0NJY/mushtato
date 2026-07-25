@@ -60,7 +60,11 @@ def test_open_settings_live_reloads_hotkeys(qapp, tmp_path: Path, monkeypatch):
     host.open_settings()
 
     assert host._hotkeys["close_window"] == "Ctrl+Shift+W"
-    assert host._hotkey_shortcuts[-1].key() == QKeySequence("Ctrl+Shift+W")
+    # Checked by value, not position -- the shortcut list's order isn't
+    # a contract, and has already changed once as new hotkeys were added.
+    assert any(
+        shortcut.key() == QKeySequence("Ctrl+Shift+W") for shortcut in host._hotkey_shortcuts
+    )
 
 
 # -- Remembered fonts + splitter size (post-8b addition) -----------------

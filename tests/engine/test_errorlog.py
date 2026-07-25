@@ -50,29 +50,37 @@ def test_log_exception_writes_to_a_real_day_rotated_file(tmp_path: Path):
     assert "boom" in content
 
 
-def test_file_handler_rotates_when_the_tracked_day_changes(tmp_path: Path):
+def test_log_file_name_matches_todays_date(tmp_path: Path):
+    # No cached/tracked "current day" state at all (a deliberate design
+    # change -- see this module's docstring on why the earlier
+    # logging.FileHandler-based design was scrapped): every call
+    # recomputes the filename fresh from datetime.now(), so day
+    # rotation is correct by construction rather than needing tracked
+    # state to be invalidated.
+    from datetime import datetime
+
     log = ErrorLog(log_dir=tmp_path)
     try:
         _boom()
     except RuntimeError:
         log.log_exception(*sys.exc_info())
-    first_files = list(tmp_path.glob("error_*.log"))
-    assert len(first_files) == 1
 
-    # Simulate a day having passed without mocking datetime -- directly
-    # invalidate the tracked "last known day" so _ensure_file_handler's
-    # own comparison takes the rotation branch on the next call.
-    log._file_handler_day = "19990101"
-    try:
-        _boom()
-    except RuntimeError:
-        log.log_exception(*sys.exc_info())
+    expected = tmp_path / f"error_{datetime.now():%Y%m%d}.log"
+    assert expected.exists()
 
-    # Still only today's real file -- the stale handler was closed and
-    # replaced, not left open as a second file alongside it.
+
+def test_multiple_exceptions_append_to_the_same_days_file(tmp_path: Path):
+    log = ErrorLog(log_dir=tmp_path)
+    for _ in range(3):
+        try:
+            _boom()
+        except RuntimeError:
+            log.log_exception(*sys.exc_info())
+
     files = list(tmp_path.glob("error_*.log"))
     assert len(files) == 1
-    assert len(log.records) == 2
+    assert files[0].read_text(encoding="utf-8").count("[CRITICAL]") == 3
+    assert len(log.records) == 3
 
 
 def test_in_memory_records_capped_at_max(tmp_path: Path):
