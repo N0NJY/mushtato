@@ -14,12 +14,13 @@ canonical record going forward, same pattern as every prior phase —
 this file can be deleted once Phase 12 is done and its content has been
 absorbed there.
 
-**Phase 10, Phase 11, and Phase 12a (Text Editor) are done** (see
-CLAUDE.md for the full write-up of each). **12b (tray icon) and 12c
-(mail) have not started.** Per CLAUDE.md rule 1 ("one phase at a
-time"), work proceeds in order, each item done and tested before the
-next starts. Q6 (which real mail system Rick's server(s) run) is still
-open and needs an answer before 12c starts.
+**Phase 10, Phase 11, Phase 12a (Text Editor), and Phase 12b (Mail
+Window) are done** (see CLAUDE.md for the full write-up of each).
+**12c (tray icon) has not started.** Per CLAUDE.md rule 1 ("one phase
+at a time"), work proceeds in order, each item done and tested before
+the next starts. Mail (originally 12c) was reordered ahead of the tray
+icon per Rick's explicit request; Q6 was resolved by reading Potato's
+real source rather than asking Rick (see the 12b section below).
 
 ---
 
@@ -184,39 +185,107 @@ Enables the Tools menu's existing disabled `Editor` placeholder (10c).
 Default draft directory: same platformdirs-based fix as 11b/11c —
 `user_data_dir()/drafts/`, added to `engine/storage/paths.py`.
 
-### 12b. Tray icon + logo (doc's Item #6, graphics scope narrowed per Q3)
-
-Technical half: `QSystemTrayIcon` — built into Qt/PySide6, no new
-dependency — context menu, click-to-restore, activity-blink timer
-reusing the exact pattern `MainWindow`'s existing tab-activity flash
-timer already established (shared `QTimer`, tracked-by-object, orange
-color choice documented as a fixed non-theme-aware pick, same as
-`ACTIVITY_COLOR`).
-
-Graphics half, per Q3: **simple programmatically-generated placeholder
-icons** (basic shapes/text via PIL or Qt's own `QPainter`, not real
-brand design) for the resting/activity states, clearly documented as
-placeholders pending real artwork — no multi-resolution asset pipeline
-or animation-frame set beyond what the activity-blink actually needs
-(reusing the tab-flash approach — a color/state toggle — rather than
-true multi-frame animation, unless that turns out insufficient).
-
-### 12c. Programmable mail window (doc's Item #8)
+### 12b. Programmable mail window — Q6 resolved, plan confirmed 2026-07-25
 
 Enables the Tools menu's existing disabled `Mail Window` placeholder
-(10c). Most architecturally novel item in the plan. Per Q6 (still
-open): backend command/regex patterns (BrandyMail, MUSH @mail, custom)
-need verification against Rick's own real server(s) before
-implementation — same standing rule this project has followed all
-session (verify before claiming), same approach Phase 8b took reading
-real Potato source before designing Characters/auto-sends. Revisit Q6
-when this item actually starts.
+(10c). Reordered ahead of the tray icon per Rick's explicit request
+(now 12c). Q6 ("which real mail system does Rick's server run") is
+**resolved, not by asking Rick, but by reading Potato's actual real
+source** (`~/git/potato/potato.vfs/lib/potato.tcl` — `::potato::
+mailWindow`/`mailWindowFormatChange`/`mailWindowSend` — and
+`potato-config.tcl`'s `gameMail` array) rather than the earlier
+external planning doc's guessed "BrandyMail"/"MUSH @mail" backends,
+which don't match Potato's real format list at all.
+
+**Confirmed real format templates** (`potato-config.tcl`'s `gameMail`
+array), replicated verbatim as MushTato's own format list:
+
+| Format | Template |
+|---|---|
+| MUSH @mail | `@mail %to%=%subject%/%body%` |
+| MUX @mail | `@mail %to%=%subject% ;; -%body% ;; --` |
+| Multi-Command +mail | `+mail %to%=%subject% ;; -%body% ;; --` |
+| MUSE +mail | `+mail %to%=%body%` (no subject placeholder at all) |
+| Myrddin's BB | `+bbpost %to%/%subject%=%body%` |
+| Custom | `writeto %to% %cc% %bcc% about %subject% ;; write %body% ;; send` |
+
+**Real mechanics, confirmed from the actual proc bodies, not
+paraphrased from memory:**
+- `;;` in a template (bare or surrounded by spaces) means "send this
+  as separate lines" — the fully-substituted command string is split
+  on `;;` and each piece sent to the server as its own line (this is
+  how the 3-line MUX/Multi-Command sequence works: recipient/subject
+  line, body line, terminator line).
+- Each of To/CC/BCC/Subject is enabled in the UI only if the
+  *currently active* template (the selected built-in one, or the
+  Custom text) actually contains that placeholder — e.g. MUSE grays
+  out CC, BCC, *and* Subject, since its template references none of
+  them.
+- "Convert Returns" (default on) replaces literal newlines in the body
+  with a configurable string (default `%r`) before any placeholder
+  substitution — needed since these are single-line softcode commands
+  over telnet.
+- Mail is sent straight to the raw connection, bypassing alias/
+  slash-command processing entirely — matches the exact reasoning
+  MushTato's existing autosends already established (`_send_to_bridge
+  (..., apply_aliases=False)`), not a new principle.
+- A File-menu "Escape Special Characters" action backslash-escapes
+  softcode-special characters (`% ; [ ] ( ) , ^ $ { } \` plus tab->`%t`)
+  in the body on demand — a real, useful, self-contained feature.
+
+**Real, deliberate deviations from Potato, confirmed via checkpoint
+(2026-07-25), all matching the recommended/Potato-parity option:**
+- **Scope: compose-only**, matching what Potato's real source actually
+  does — there is no list/read/search/auto-refresh anywhere in
+  `potato.tcl`'s mail code; the earlier external planning doc's fuller
+  mail-client mockup (List/Compose/Read/Search views, unread badges)
+  was never real Potato parity to begin with, and is explicitly
+  **out of scope** for this item.
+- **One compose window per tab** (Potato's real `.mailWindow$c`
+  behavior — opening a second re-shows the existing one), not the
+  unlimited-simultaneous-windows pattern Phase 12a's Text Editor just
+  established. Owned by `SessionTab` (a single `Optional[MailWindow]`
+  slot, not a list), the same "per-tab, not global" pattern
+  `find_bar` already uses.
+- **Format/Custom-template/Convert-Returns are edited only in the
+  compose window itself**, matching Potato's real model exactly — no
+  new World Properties page. Persisting a change follows the
+  established `MainWindow.record_world_connected()` pattern (Phase
+  8b): mutate the in-memory `WorldProfile`, reload the address book
+  fresh from disk, find the matching entry by name+host+port, copy the
+  changed fields over, save, and refresh `AddressBookWindow`'s list if
+  open.
+- **"Escape Special Characters" is included in v1.**
+
+**New `WorldProfile` fields** (`engine/storage/address_book.py`,
+matching existing per-world field conventions like `login_format`/
+`nop_keepalive`): `mail_format: str = "MUSH @mail"`,
+`mail_format_custom: str = <the Custom template above>`,
+`mail_convert_returns: bool = True`, `mail_convert_returns_to: str =
+"%r"`.
+
+**Architecture:** the actual template-substitution/`;;`-splitting
+logic is pure string manipulation with no Qt dependency — lives in a
+new, headlessly-testable `engine/mail_format.py` (a `build_mail_
+commands(...)` function returning the list of raw lines to send),
+matching this project's standing preference for Qt-free pure logic
+(CLAUDE.md rule 2) over embedding it directly in the Qt window class.
+`gui/windows/mail_window.py` (`MailWindow`, a `QMainWindow`) owns the
+UI only: field widgets, the format-driven enable/disable behavior,
+and calling `build_mail_commands()` then `bridge.send_line()` per
+resulting line. Own independent Edit menu (Cut/Copy/Paste on the body
+`QPlainTextEdit`) for the identical, already-confirmed reason Phase
+12a's Text Editor needed one (`QApplication.focusWidget()` cannot
+reach a separate top-level window) — using MushTato's own established
+simpler always-enabled-no-op-if-nothing-to-do convention rather than
+Potato's more elaborate dynamic Copy/Cut/Paste enable-state logic.
 
 ---
 
 ### Phase 12 summary
-Items: 12a (editor), 12b (tray icon, placeholder graphics), 12c (mail
-— backend patterns pending Q6).
+Items: 12a (editor, done), 12b (mail — plan confirmed, ready to
+implement), 12c (tray icon, placeholder graphics, reordered after
+mail per Rick's request).
 
 ---
 

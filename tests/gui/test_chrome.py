@@ -314,18 +314,65 @@ def test_edit_actions_are_a_no_op_when_nothing_relevant_has_focus(qapp, tmp_path
 
 
 def test_placeholder_actions_are_disabled(qapp, tmp_path: Path):
-    # find_action (Phase 11) and editor_action (Phase 12) are real now
-    # -- covered separately (test_find_action_toggles_the_active_tab_s_
-    # find_bar below, and test_editor_action_opens_a_new_window_each_
-    # click in test_text_editor_window.py), not permanently disabled
-    # like these genuine remaining Tools placeholders.
+    # find_action (Phase 11), editor_action (Phase 12a), and
+    # mail_window_action (Phase 12b) are real now -- covered separately
+    # (test_find_action_toggles_the_active_tab_s_find_bar below,
+    # test_editor_action_opens_a_new_window_each_click in
+    # test_text_editor_window.py, and the mail_window_action tests
+    # below), not permanently disabled like these genuine remaining
+    # Tools placeholders.
     host = make_host(address_book_storage_path=tmp_path / "ab.json")
     for action in (
         host.upload_action,
-        host.mail_window_action,
         host.events_action,
     ):
         assert action.isEnabled() is False
+
+
+def test_mail_window_action_disabled_with_no_tabs_open(qapp, tmp_path: Path):
+    host = make_host(address_book_storage_path=tmp_path / "ab.json")
+    assert host.mail_window_action.isEnabled() is False
+
+
+def test_mail_window_action_enabled_once_a_tab_is_open(qapp, tmp_path: Path):
+    host = make_host(address_book_storage_path=tmp_path / "ab.json")
+    host.open_tab("example.com", 4201, bridge=FakeBridge())
+    assert host.mail_window_action.isEnabled() is True
+
+
+def test_mail_window_action_opens_the_active_tab_s_mail_window(qapp, tmp_path: Path):
+    host = make_host(address_book_storage_path=tmp_path / "ab.json")
+    tab = host.open_tab("example.com", 4201, bridge=FakeBridge())
+    assert tab.mail_window is None
+
+    host.mail_window_action.trigger()
+
+    assert tab.mail_window is not None
+
+
+def test_mail_window_end_to_end_send_persists_format_to_disk(qapp, tmp_path: Path):
+    # The full chain: Tools > Mail Window -> compose -> Send -> reaches
+    # the bridge -> persists the chosen format back to the real address
+    # book on disk -- not just each piece tested in isolation.
+    from engine.storage import WorldProfile, load_address_book, save_address_book
+
+    ab_path = tmp_path / "ab.json"
+    save_address_book(ab_path, [WorldProfile(name="Estrellita", host="example.com", port=4201)])
+    host = make_host(address_book_storage_path=ab_path, scripts_dir=tmp_path / "scripts")
+    world = load_address_book(ab_path)[0]
+    bridge = FakeBridge()
+    tab = host.open_tab("example.com", 4201, bridge=bridge, world=world)
+
+    host.mail_window_action.trigger()
+    window = tab.mail_window
+    window.format_combo.setCurrentText("MUX @mail")
+    window.to_edit.setText("Bob")
+    window.subject_edit.setText("Hi")
+    window.body_edit.setPlainText("Hello there")
+    window.send_button.click()
+
+    assert bridge.sent == ["@mail Bob=Hi", "-Hello there", "--"]
+    assert load_address_book(ab_path)[0].mail_format == "MUX @mail"
 
 
 def test_editor_action_is_always_enabled(qapp, tmp_path: Path):

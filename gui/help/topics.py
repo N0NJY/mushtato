@@ -51,6 +51,7 @@ COMMAND_HELP: List[Tuple[str, str]] = [
     ("disconnect", "Disconnect from the server"),
     ("reconnect", "Reconnect to the server"),
     ("editor", "Open a new Text Editor window"),
+    ("mail", "Open this tab's Mail Window (compose/send)"),
 ]
 
 
@@ -314,20 +315,22 @@ buttons, plus a status bar at the bottom.
   active tab).
 - **Options** -- Settings... (hotkeys and theme).
 - **Tools** -- Editor (opens a new Text Editor window; see below),
-  Error Log (unhandled-exception history; see below).
+  Mail Window (compose/send mail for the active tab's world; see
+  below), Error Log (unhandled-exception history; see below).
 - **Help** -- Help (this window) and About.
 
 **Not implemented yet -- shown disabled/grayed out on purpose, not
-missing by accident:** the Tools menu's Upload and Mail Window. These
-are modeled on real features from Potato that MushTato doesn't have
-working equivalents for yet. A grayed-out item means "planned, not yet
-built," not "broken."
+missing by accident:** the Tools menu's Upload. Modeled on a real
+feature from Potato that MushTato doesn't have a working equivalent
+for yet. A grayed-out item means "planned, not yet built," not
+"broken."
 
-Reconnect, Disconnect, Close, Spawn Log Window, and the Edit menu's
-six focus-dispatched actions plus Find are disabled whenever there's no
-tab open at all, since there's nothing for them to act on. Editor,
-Error Log, Address Book, Settings, Help, and About stay available with
-zero tabs open, since none of them are tied to any one connection.
+Reconnect, Disconnect, Close, Spawn Log Window, Mail Window, and the
+Edit menu's six focus-dispatched actions plus Find are disabled
+whenever there's no tab open at all, since there's nothing for them to
+act on. Editor, Error Log, Address Book, Settings, Help, and About stay
+available with zero tabs open, since none of them are tied to any one
+connection.
 
 ## Text Editor
 
@@ -352,6 +355,40 @@ retroactively change a *different* already-open editor window.
 Files default to save under MushTato's own per-OS data directory (see
 `INSTALL.md`'s "Removing your data" section for the exact path) --
 Save/Save As remembers whatever directory you last used.
+
+## Mail Window
+
+Tools -> Mail Window (or `/mail`) opens a compose/send window for the
+active tab's world -- modeled closely on Potato's own real Mail
+Window. Unlike the Text Editor, only **one** Mail Window is open per
+tab at a time -- using the action again while one's already open just
+brings the existing one to the front instead of opening a second.
+
+Fields: Recipient, CC, BCC, Subject, a Format dropdown, and (only when
+Format is set to Custom) a Custom command template. Which of
+Recipient/CC/BCC/Subject are actually enabled depends on the selected
+format -- a format that doesn't reference a given field (e.g. MUSE
++mail has no Subject at all) grays that field out, since it wouldn't
+be sent anyway. The six formats (MUSH @mail, MUX @mail, Multi-Command
++mail, MUSE +mail, Myrddin's BB, and Custom) match Potato's own real
+built-in mail systems exactly.
+
+"Convert returns?" (on by default) replaces line breaks in the message
+body with the "Convert To:" text (`%r` by default) before sending --
+necessary because the underlying command is a single line sent to the
+server. File -> Escape Special Characters backslash-escapes softcode-
+special characters in the body on demand (not automatic -- only when
+you click it).
+
+Format/Custom template/Convert Returns are saved per-world the moment
+you click Send -- there's no separate settings page for these, matching
+Potato's own real design; just open the Mail Window again to see (or
+change) what's currently saved for a world.
+
+Send goes straight to the server, bypassing alias/slash-command
+processing entirely -- the same reasoning the Pose/says... box and
+auto-sends already use. Cancel (or the window's close button) discards
+without sending, and without any "unsaved changes?" prompt.
 
 ## Error Log
 
@@ -657,9 +694,8 @@ build already bundles the libraries it needs; on an unusually minimal
 system, install `libxcb-cursor0` and its usual companions yourself (see
 `INSTALL.md` for the exact package list).
 
-**A toolbar/menu item does nothing when clicked** -- some items (Upload,
-Mail Window) are shown disabled on purpose; see the Menus & Toolbar
-topic.
+**A toolbar/menu item does nothing when clicked** -- Upload is shown
+disabled on purpose; see the Menus & Toolbar topic.
 
 **I checked "auto-login" on a world but nothing happens at startup** --
 auto-login also needs that world to have a default Character set (a

@@ -6,6 +6,22 @@ of work, per `CLAUDE.md`/`SPEC.md`'s roadmap) rather than by version
 number, reconstructed from `CLAUDE.md`'s phase-by-phase notes and git
 history. All dates below are from the actual commit history.
 
+## Phase 12b — Mail Window (2026-07-25)
+
+- New compose/send Mail Window (Tools → Mail Window, or `/mail`),
+  modeled closely on Potato's own real Mail Window: Recipient/CC/BCC/
+  Subject fields (enabled or disabled depending on the selected
+  format), a Format dropdown with all six of Potato's real built-in
+  mail systems (MUSH @mail, MUX @mail, Multi-Command +mail, MUSE
+  +mail, Myrddin's BB) plus a Custom command template, "Convert
+  Returns" for embedding line breaks in a single-line command, and a
+  File → Escape Special Characters action.
+- Unlike the Text Editor, only one Mail Window is open per tab at a
+  time, matching Potato's real behavior — opening it again just
+  brings the existing one to the front.
+- Format/Custom template/Convert Returns are saved per world the
+  moment you click Send.
+
 ## Phase 12a — Text Editor (2026-07-25)
 
 - New Text Editor (Tools → Editor, `Ctrl+Shift+E`, or `/editor`):

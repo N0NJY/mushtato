@@ -197,3 +197,24 @@ def test_record_world_connected_persists_across_a_fresh_load(qapp, tmp_path: Pat
     host.record_world_connected(world)
 
     assert load_address_book(ab_path)[0].connect_count == 1
+
+
+def test_save_mail_settings_for_world_persists_across_a_fresh_load(qapp, tmp_path: Path):
+    from engine.storage import save_address_book
+
+    ab_path = tmp_path / "ab.json"
+    save_address_book(ab_path, [make_world(name="Persisted")])
+    host = MainWindow(address_book_storage_path=ab_path, scripts_dir=tmp_path / "scripts")
+    world = load_address_book(ab_path)[0]
+    world.mail_format = "MUX @mail"
+    world.mail_format_custom = "custom template"
+    world.mail_convert_returns = False
+    world.mail_convert_returns_to = "\\n"
+
+    host.save_mail_settings_for_world(world)
+
+    reloaded = load_address_book(ab_path)[0]
+    assert reloaded.mail_format == "MUX @mail"
+    assert reloaded.mail_format_custom == "custom template"
+    assert reloaded.mail_convert_returns is False
+    assert reloaded.mail_convert_returns_to == "\\n"

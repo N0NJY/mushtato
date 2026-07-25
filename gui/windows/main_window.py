@@ -329,6 +329,36 @@ class MainWindow(QMainWindow):
             self._address_book_window.worlds = worlds
             self._address_book_window._refresh_list()
 
+    def save_mail_settings_for_world(self, world: WorldProfile) -> None:
+        """Persist ``world``'s mail_format/mail_format_custom/
+        mail_convert_returns/mail_convert_returns_to (Phase 12b) --
+        same reload-find-copy-save pattern as record_world_connected
+        above, since ``world`` (already mutated in place by MailWindow
+        itself before this is called) may not be the same object
+        AddressBookWindow's in-memory list holds.
+        """
+        worlds = load_address_book(self._address_book_path)
+        for candidate in worlds:
+            if (
+                candidate.name.lower() == world.name.lower()
+                and candidate.host == world.host
+                and candidate.port == world.port
+            ):
+                candidate.mail_format = world.mail_format
+                candidate.mail_format_custom = world.mail_format_custom
+                candidate.mail_convert_returns = world.mail_convert_returns
+                candidate.mail_convert_returns_to = world.mail_convert_returns_to
+                break
+        save_address_book(self._address_book_path, worlds)
+        if self._address_book_window is not None:
+            self._address_book_window.worlds = worlds
+            self._address_book_window._refresh_list()
+
+    def _open_mail_window_for_current_tab(self) -> None:
+        tab = self.tab_widget.currentWidget()
+        if tab is not None:
+            tab.open_mail_window()
+
     # -- Phase 9: live script reload for an open tab -------------------
 
     def tabs_for_world(self, world_name: str) -> list:
@@ -743,14 +773,12 @@ class MainWindow(QMainWindow):
         self.settings_action = add_action(options_menu, "Settings...", self.open_settings)
         toolbar.addAction(self.settings_action)
 
-        # -- Tools (Upload/Mail Window/Events are still placeholders;
-        # Potato has these, MushTato doesn't yet -- filled in as later
-        # Phase 12 items land, per PHASE10-12_PLAN.md. Editor is real
-        # as of this phase.) --
+        # -- Tools (Upload/Events are still placeholders; Potato has
+        # these, MushTato doesn't yet. Editor and Mail Window are real.) --
         self.tools_menu = tools_menu = menu_bar.addMenu("&Tools")
         self.editor_action = add_action(tools_menu, "Editor", self.open_text_editor)
         self.upload_action = add_action(tools_menu, "Upload", None, enabled=False)
-        self.mail_window_action = add_action(tools_menu, "Mail Window", None, enabled=False)
+        self.mail_window_action = add_action(tools_menu, "Mail Window", self._open_mail_window_for_current_tab)
         self.events_action = add_action(tools_menu, "Events", None, enabled=False)
         tools_menu.addSeparator()
         self.error_log_action = add_action(tools_menu, "Error Log", self.show_error_log)
@@ -812,6 +840,7 @@ class MainWindow(QMainWindow):
             self.redo_action,
             self.select_all_action,
             self.find_action,
+            self.mail_window_action,
         ):
             action.setEnabled(has_tab)
 

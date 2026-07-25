@@ -56,6 +56,7 @@ from ..theme import apply_scrollback_theme
 from ..version import mushtato_version
 from .find_bar import FindBar
 from .history_line_edit import HistoryLineEdit
+from .mail_window import MailWindow
 from .spawn_window import SpawnWindow
 from .styled_text_qt import append_styled_segments, replace_tail
 from .telnet_bridge import TelnetBridge
@@ -131,6 +132,11 @@ class SessionTab(QWidget):
         self.connected_at: Optional[QDateTime] = None
         self.connection_state = "Connecting"
         self.spawn_windows: List[SpawnWindow] = []
+        # One per tab, not a list like spawn_windows -- matches Potato's
+        # real .mailWindow$c behavior (opening a second re-shows the
+        # existing one), a deliberate difference from the Text Editor's
+        # unlimited-simultaneous-windows precedent (Phase 12b checkpoint).
+        self.mail_window: Optional[MailWindow] = None
         # The "preview" of the still-incomplete trailing line (Phase 9,
         # see engine/scripting/line_dispatch.py's module docstring) --
         # tracked as a document position so a later feed() result can
@@ -763,6 +769,35 @@ class SessionTab(QWidget):
         if window in self.spawn_windows:
             self.spawn_windows.remove(window)
 
+    def open_mail_window(self) -> MailWindow:
+        """Open this tab's compose/send mail window -- one per tab
+        (Potato's real ``.mailWindow$c`` behavior), not a new window
+        every call: re-shows the existing one if already open, rather
+        than opening a second.
+        """
+        if self.mail_window is not None:
+            self.mail_window.show()
+            self.mail_window.raise_()
+            self.mail_window.activateWindow()
+            return self.mail_window
+
+        window = MailWindow(
+            self.world,
+            lambda text: self._send_to_bridge(text, apply_aliases=False),
+            persist_world=self._persist_mail_settings,
+        )
+        window.closed.connect(self._on_mail_window_closed)
+        self.mail_window = window
+        window.show()
+        return window
+
+    def _on_mail_window_closed(self) -> None:
+        self.mail_window = None
+
+    def _persist_mail_settings(self, world: WorldProfile) -> None:
+        if self.host_window is not None:
+            self.host_window.save_mail_settings_for_world(world)
+
     def disconnect_bridge(self) -> None:
         # Explicitly cancels any pending auto-reconnect -- Disconnect
         # is the user's deliberate "stop trying" action, matching real
@@ -823,6 +858,7 @@ class SessionTab(QWidget):
             "disconnect": self._cmd_disconnect,
             "reconnect": self._cmd_reconnect,
             "editor": self._cmd_editor,
+            "mail": self._cmd_mail,
         }
         for name, help_text in COMMAND_HELP:
             self._commands.register(name, handlers[name], help_text)
@@ -891,6 +927,13 @@ class SessionTab(QWidget):
             return "Not available in this session (no host window)."
         self.host_window.open_text_editor()
         return "Opened a new Text Editor window."
+
+    def _cmd_mail(self, args: str) -> Optional[str]:
+        # Tab-scoped, like /spawnlog -- doesn't need host_window at all
+        # (Mail Window is owned by this tab directly, one per tab).
+        del args
+        self.open_mail_window()
+        return "Opened the Mail Window."
 
     def _cmd_version(self, args: str) -> Optional[str]:
         del args

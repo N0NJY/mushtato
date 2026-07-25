@@ -102,10 +102,10 @@ see below. Phase 9 (GUI-scripting integration: engine/scripting wired
 into the tabbed session GUI for real) — done, see below. Phase 10
 (quick-win polish: About credits, Edit menu) — done, see below. Phase
 11 (movable tabs, spawnlog save, error log, find/search) — done, see
-below. Phase 12a (Text Editor) — done, see below.** See
-`PHASE10-12_PLAN.md` (repo root) for the full Phase 10-12 plan and the
-checkpoint that renumbered script-sharing from Phase 10 to Phase 13.
-Telnet IAC negotiation is
+below. Phase 12a (Text Editor) — done, see below. Phase 12b (Mail
+Window) — done, see below.** See `PHASE10-12_PLAN.md` (repo root) for
+the full Phase 10-12 plan and the checkpoint that renumbered script-
+sharing from Phase 10 to Phase 13. Telnet IAC negotiation is
 hand-rolled on raw asyncio streams (not telnetlib3)
 — see the Phase 3 discussion for reasoning. `scripts/console_client.py`
 is a throwaway dev tool for manually testing against a real server
@@ -2294,12 +2294,151 @@ Phase 10/11's GUI work, now including the Text Editor's line-number
 gutter rendering and multi-window behavior specifically. Rick can
 confirm when convenient.
 
-Still open: **Q6 (mail backend reference)** -- which real mail
-system(s) Rick's own server(s) actually run -- needed before Phase
-12c (mail window) starts. **12b (tray icon)** is also still pending.
+**Phase 12b (Mail Window) — done.** New `engine/mail_format.py`,
+`gui/windows/mail_window.py`; extended `engine/storage/address_book.py`
+(four `mail_*` fields), `gui/windows/session_tab.py`, `gui/windows/
+main_window.py`, `gui/help/topics.py`.
 
-Next: Phase 12b (tray icon, placeholder graphics) or 12c (mail,
-pending Q6) -- see `PHASE10-12_PLAN.md` for the full plan.
+Reordered ahead of the tray icon per Rick's explicit request (tray icon
+is now 12c). **Q6 (which real mail system Rick's server runs) is
+resolved by reading Potato's actual real source
+(`~/git/potato/potato.vfs/lib/potato.tcl`'s `::potato::mailWindow`/
+`mailWindowFormatChange`/`mailWindowSend`, `potato-config.tcl`'s
+`gameMail` array) rather than by asking Rick** -- confirmed real,
+concrete format templates (MUSH @mail, MUX @mail, Multi-Command +mail,
+MUSE +mail, Myrddin's BB, Custom), replicated verbatim, superseding the
+much-earlier external planning doc's guessed "BrandyMail"/"MUSH @mail"
+backends, which don't match Potato's real format list at all. Hit the
+exact same `grep` silently-treats-`potato.tcl`-as-binary gotcha already
+documented from Phase 8b's own research -- `grep -a` again, not
+re-discovered as if new.
+
+**Real mechanics extracted directly from the actual proc bodies, not
+paraphrased from memory, each independently checkpointed against
+implementation:** `;;` in a template (bare or space-surrounded) means
+"send as separate lines"; each of To/CC/BCC/Subject is enabled in the
+UI only if the *currently active* template actually references that
+placeholder (verified against `mailWindowFormatChange`'s own `string
+first "%$field%" $format` check -- MUSE grays out CC, BCC, *and*
+Subject, since its template references none of them); "Convert
+Returns" (default on) replaces literal newlines in the body with a
+configurable string (default `%r`) *before* placeholder substitution;
+mail is sent straight to the raw connection, bypassing alias/slash-
+command processing entirely (matching the exact reasoning MushTato's
+autosends already established); a File-menu "Escape Special
+Characters" action backslash-escapes softcode-special characters on
+demand.
+
+**A real, load-bearing correctness finding, caught during design
+before any code was written, not discovered as a bug afterward:**
+tracing through `mailWindowSend`'s actual statement order (not
+assumed from the general shape of the algorithm) showed ``;;``-to-
+sentinel conversion happens on the *template*, before any user-
+supplied placeholder text is substituted in -- doing it the other way
+around (substitute first, split on `;;` second, the more "obvious"
+implementation order) would let a literal `;;` typed by a user in
+their own subject/body text get misread as an extra split point,
+fragmenting their message. `engine/mail_format.py`'s
+`build_mail_commands()` replicates Potato's real order exactly (using
+the identical `\b` sentinel character Potato's own source uses, not
+an arbitrary choice), verified with two dedicated regression tests
+proving a literal `;;` in body text survives intact in both a
+non-splitting (MUSH) and a splitting (MUX) template.
+
+**Four real forks, all resolved via checkpoint (2026-07-25) before
+implementation, every one matching the Potato-parity/recommended
+option:** (1) **compose-only**, no list/read/search/auto-refresh --
+Potato's real source has none of that either, directly contradicting
+the much-earlier external planning doc's fuller mail-client mockup,
+which was never real Potato parity to begin with and is explicitly
+out of scope. (2) **one compose window per tab**, not the unlimited-
+simultaneous-windows pattern Phase 12a's Text Editor just established
+-- matches Potato's real `.mailWindow$c` behavior (a second attempt
+re-shows the existing one) -- implemented by reusing `SessionTab`'s
+already-established per-tab-not-global pattern (`find_bar`'s own
+precedent) rather than `SpawnWindow`'s tracked-list pattern, since
+"one, not many" is the opposite constraint. (3) **Format/Custom-
+template/Convert-Returns edited only in the compose window**, no new
+World Properties page -- matches Potato's real model exactly, where
+the compose window is the only place these are ever edited. (4)
+**"Escape Special Characters" included in v1.**
+
+**New `WorldProfile` fields** (`mail_format`, `mail_format_custom`,
+`mail_convert_returns`, `mail_convert_returns_to`), matching existing
+per-world field conventions and Potato's own real defaults exactly.
+Persisting a change on Send reuses the exact established
+`record_world_connected()` pattern (Phase 8b) via a new
+`MainWindow.save_mail_settings_for_world()` -- reload the address book
+fresh from disk, match by name+host+port (not object identity, since a
+tab opened via `/connect` gets a freshly-loaded `WorldProfile`), copy
+the changed fields over, save, refresh `AddressBookWindow` if open --
+not a new persistence mechanism invented for this feature.
+
+**Architecture, following CLAUDE.md rule 2:** the actual template-
+substitution/`;;`-splitting/character-escaping logic is pure string
+manipulation with no Qt dependency, living in a new, headlessly-
+testable `engine/mail_format.py` -- `gui/windows/mail_window.py`
+(`MailWindow`) owns the UI only (field widgets, format-driven enable/
+disable, calling `build_mail_commands()` then the injected `send_line`
+callback per resulting line). Deliberately decoupled from
+`SessionTab`/`TelnetBridge` specifics via plain callables
+(`send_line`, `persist_world`) rather than holding a direct reference
+to either, so `MailWindow` is independently constructible and testable
+with fakes -- confirmed useful in practice, not just a theoretical
+nicety: all 21 of its own dedicated tests construct it this way, with
+no `SessionTab` or `QApplication`-heavy fixture required beyond `qapp`.
+Own independent Edit menu (Cut/Copy/Paste/Undo/Redo/Select All on the
+body `QPlainTextEdit`), for the identical, already-confirmed-in-Phase-
+12a reason (`QApplication.focusWidget()` cannot reach a separate
+top-level window) -- using MushTato's own established simpler always-
+enabled-no-op-if-nothing-to-do convention rather than Potato's more
+elaborate dynamic Copy/Cut/Paste enable-state logic (`editMenuCXV`),
+a deliberate, noted simplification, not an oversight. No unsaved-
+changes-on-close prompt -- confirmed from Potato's own real source
+(`<Destroy>` just cleans up variables, `<Escape>` invokes Cancel
+directly, no confirmation dialog anywhere) -- a deliberate difference
+from the Text Editor's own prompting behavior, not an inconsistency.
+
+`/mail` added as a new client command (`SessionTab._cmd_mail`),
+tab-scoped like `/spawnlog` (works with no `host_window` at all,
+unlike `/editor`/`/settings`/`/connect` which need the host shell) --
+`Tools -> Mail Window` gated on `has_tab`, same pattern as Spawn Log
+Window and every other tab-scoped chrome action.
+
+A real, one-off leak observation during verification, investigated
+rather than dismissed: the real per-user `drafts/` directory appeared
+once after a full-suite run. Traced every test file constructing a
+`MainWindow`/`TextEditor` for a missing `drafts_dir`/
+`drafts_dir_override` (all correctly overridden, confirmed by direct
+grep) and re-ran the full suite four more times, isolated per-file and
+combined, with no recurrence -- concluded to be a stray artifact from
+this session's own earlier ad hoc diagnostic commands rather than a
+real test-hygiene bug, but recorded here rather than silently
+disregarded, per this file's own honesty standard.
+
+Verified per this file's standing rule 7 throughout: 49 new tests (16
+in `test_mail_format.py` covering every one of the six real format
+templates plus the `;;`-ordering correctness claim specifically; 2 in
+`test_address_book.py` for the new field round-trip/migration; 21 in
+`test_mail_window.py` covering format-driven field enable/disable for
+every format, Send/Cancel behavior, persistence rules -- including the
+"only touch the saved custom template when Custom was actually
+selected" claim -- Escape Special Characters, and the independent Edit
+menu; 5 in `test_main_window_smoke.py` for `SessionTab`'s one-per-tab
+open/reuse/reopen-after-close behavior; 1 in `test_autosends.py` for
+`save_mail_settings_for_world`'s disk round-trip; 4 in `test_chrome.py`
+including one genuine end-to-end test driving `Tools -> Mail Window`
+through a real compose-and-send to a `FakeBridge`, confirming the
+chosen format lands back on disk). 579 tests passing (up from 530 at
+the end of Phase 12a), confirmed with multiple full clean runs.
+
+Not verified against a real desktop or a real mail-capable MU* server
+this round -- same honest gap as every GUI phase this session. Rick
+can confirm when convenient, ideally against a real MUSH/MUX/MUSE
+server that actually has mail/bboard commands to exercise.
+
+Next: Phase 12c (tray icon, placeholder graphics) -- see
+`PHASE10-12_PLAN.md` for the full plan.
 
 ## Standing rules: verification and assumptions
 

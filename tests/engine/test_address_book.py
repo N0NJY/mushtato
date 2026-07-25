@@ -227,3 +227,38 @@ def test_pre_nop_keepalive_format_json_defaults_to_false(tmp_path: Path):
     path.write_text(json.dumps(old_format_json), encoding="utf-8")
 
     assert load_address_book(path)[0].nop_keepalive is False
+
+
+# -- Mail Window settings (Phase 12b) -------------------------------------
+
+
+def test_mail_fields_round_trip(tmp_path: Path):
+    path = tmp_path / "address_book.json"
+    world = WorldProfile(
+        name="X",
+        host="h",
+        port=1,
+        mail_format="MUX @mail",
+        mail_format_custom="custom template %to% %body%",
+        mail_convert_returns=False,
+        mail_convert_returns_to="\\n",
+    )
+    save_address_book(path, [world])
+
+    loaded = load_address_book(path)[0]
+    assert loaded.mail_format == "MUX @mail"
+    assert loaded.mail_format_custom == "custom template %to% %body%"
+    assert loaded.mail_convert_returns is False
+    assert loaded.mail_convert_returns_to == "\\n"
+
+
+def test_pre_mail_settings_format_json_defaults_match_potato(tmp_path: Path):
+    path = tmp_path / "address_book.json"
+    old_format_json = {"worlds": [{"name": "Old", "host": "old.example.com", "port": 1}]}
+    path.write_text(json.dumps(old_format_json), encoding="utf-8")
+
+    world = load_address_book(path)[0]
+    assert world.mail_format == "MUSH @mail"
+    assert world.mail_format_custom == "writeto %to% %cc% %bcc% about %subject% ;; write %body% ;; send"
+    assert world.mail_convert_returns is True
+    assert world.mail_convert_returns_to == "%r"

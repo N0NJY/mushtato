@@ -77,6 +77,15 @@ class WorldProfile:
     # default -- most connections don't need it; this is a targeted
     # opt-in for a world known to idle-kick quiet connections.
     nop_keepalive: bool = False
+    # Phase 12b (Mail Window): verified against Potato's real source
+    # (potato.tcl's mailWindow/mailWindowSend, potato-config.tcl's
+    # gameMail array) -- Format/Custom-template/Convert-Returns are
+    # per-world settings there too, edited only from the compose
+    # window itself (no separate settings page), matched here exactly.
+    mail_format: str = "MUSH @mail"
+    mail_format_custom: str = "writeto %to% %cc% %bcc% about %subject% ;; write %body% ;; send"
+    mail_convert_returns: bool = True
+    mail_convert_returns_to: str = "%r"
 
 
 def load_address_book(path: Path) -> List[WorldProfile]:
@@ -113,6 +122,13 @@ def load_address_book(path: Path) -> List[WorldProfile]:
                 connect_count=entry.get("connect_count", 0),
                 auto_login=entry.get("auto_login", False),
                 nop_keepalive=entry.get("nop_keepalive", False),
+                mail_format=entry.get("mail_format", "MUSH @mail"),
+                mail_format_custom=entry.get(
+                    "mail_format_custom",
+                    "writeto %to% %cc% %bcc% about %subject% ;; write %body% ;; send",
+                ),
+                mail_convert_returns=entry.get("mail_convert_returns", True),
+                mail_convert_returns_to=entry.get("mail_convert_returns_to", "%r"),
             )
         )
     return worlds
@@ -139,6 +155,10 @@ def save_address_book(path: Path, worlds: List[WorldProfile]) -> None:
                 "connect_count": w.connect_count,
                 "auto_login": w.auto_login,
                 "nop_keepalive": w.nop_keepalive,
+                "mail_format": w.mail_format,
+                "mail_format_custom": w.mail_format_custom,
+                "mail_convert_returns": w.mail_convert_returns,
+                "mail_convert_returns_to": w.mail_convert_returns_to,
             }
             for w in worlds
         ]

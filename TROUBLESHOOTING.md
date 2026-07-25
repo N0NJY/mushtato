@@ -91,16 +91,21 @@ immediately in the same session. Check there for the current binding —
 see the in-app Help's Hotkeys topic for the full current list.
 
 **A toolbar/menu item does nothing when I click it**
-Some items (Upload, Mail Window) are shown disabled (grayed out) on
-purpose — they're modeled on real Potato features MushTato doesn't
-have working equivalents for yet, not broken buttons. See the in-app
-Help's Menus & Toolbar topic.
+Upload is shown disabled (grayed out) on purpose — modeled on a real
+Potato feature MushTato doesn't have a working equivalent for yet, not
+a broken button. See the in-app Help's Menus & Toolbar topic.
 
 **Can I have more than one Text Editor window open at once?**
 Yes — unlike the Address Book, Help, and Error Log windows (one
 reused window each), Tools → Editor always opens a brand-new,
 independent window every time, so you can draft several things at
 once.
+
+**Can I have more than one Mail Window open at once, per tab?**
+No — unlike the Text Editor, only one Mail Window is open per tab at a
+time, matching Potato's own real behavior. Using Tools → Mail Window
+again while one's already open for that tab just brings the existing
+one to the front instead of opening a second.
 
 **Where did the Error Log come from, and what does it show?**
 Tools → Error Log shows genuinely *unhandled* exceptions only — not a

@@ -103,6 +103,67 @@ def test_find_bar_can_search_the_tab_s_own_scrollback(qapp):
     assert len(tab.find_bar._matches) == 1
 
 
+# -- Mail Window (Phase 12b) ------------------------------------------------
+
+
+def test_open_mail_window_creates_one(qapp):
+    tab = SessionTab("example.com", 4201, bridge=FakeBridge())
+    assert tab.mail_window is None
+
+    window = tab.open_mail_window()
+
+    assert tab.mail_window is window
+
+
+def test_open_mail_window_twice_reuses_the_same_window(qapp):
+    # Potato's real one-per-tab behavior -- a second attempt re-shows
+    # the existing window rather than opening another.
+    tab = SessionTab("example.com", 4201, bridge=FakeBridge())
+    first = tab.open_mail_window()
+
+    second = tab.open_mail_window()
+
+    assert second is first
+
+
+def test_closing_the_mail_window_allows_a_new_one_to_be_opened(qapp):
+    tab = SessionTab("example.com", 4201, bridge=FakeBridge())
+    first = tab.open_mail_window()
+
+    first.close()
+    assert tab.mail_window is None
+
+    second = tab.open_mail_window()
+    assert second is not first
+
+
+def test_mail_window_send_reaches_the_bridge_bypassing_aliases(qapp):
+    bridge = FakeBridge()
+    tab = SessionTab("example.com", 4201, bridge=bridge)
+    window = tab.open_mail_window()
+    window.to_edit.setText("Bob")
+    window.subject_edit.setText("Hi")
+    window.body_edit.setPlainText("Hello")
+
+    window._on_send()
+
+    assert bridge.sent == ["@mail Bob=Hi/Hello"]
+
+
+def test_mail_window_without_a_host_window_never_persists(qapp):
+    # host_window=None (standalone test / direct-connect tab) --
+    # _persist_mail_settings must degrade gracefully, matching every
+    # other host_window-optional command in this module.
+    tab = SessionTab("example.com", 4201, bridge=FakeBridge())
+    assert tab.host_window is None
+    window = tab.open_mail_window()
+    window.to_edit.setText("Bob")
+    window.subject_edit.setText("Hi")
+    window.body_edit.setPlainText("Hello")
+
+    window._on_send()  # must not raise
+
+
 def test_typing_and_pressing_enter_echoes_locally_and_sends(qapp):
     bridge = FakeBridge()
     tab = SessionTab("example.com", 4201, bridge=bridge)
