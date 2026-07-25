@@ -2437,6 +2437,76 @@ this round -- same honest gap as every GUI phase this session. Rick
 can confirm when convenient, ideally against a real MUSH/MUX/MUSE
 server that actually has mail/bboard commands to exercise.
 
+**Post-Phase-12b addition: active-tab highlight — done.** Extended
+`gui/windows/main_window.py` (`ACTIVE_TAB_COLOR`, `_active_tab`,
+`_update_active_tab_highlight`).
+
+Rick's own real usability report, not from any Potato research this
+time: in dark mode, the currently active tab wasn't obviously
+distinguishable from background tabs "at a glance" (Fusion's own
+selected-vs-unselected tab shading being too subtle) -- his own words,
+"if you look closely" it shows, "but a glance isn't sufficient."
+Confirmed directly rather than assumed: grabbed a real screenshot of
+two tabs in dark mode and compared it pixel-by-pixel before proposing
+anything, matching this project's own established discipline.
+
+**A real, concrete finding from prototyping, not just picking an
+approach from a list:** the first prototype used a small stylesheet
+scoped to just the tab bar (`QTabBar::tab:selected { border-top: ...;
+font-weight: bold; }`), reasoning that a narrowly-targeted rule
+couldn't cause the app-wide problems Phase 7b's original QPalette-
+over-QSS decision was written to avoid. A real screenshot comparison
+proved that reasoning wrong: applying the stylesheet visibly altered
+the *toolbar's* rendering too (a "Disconnect" button gained an
+unrelated underline/bold effect), confirming -- not just theoretically
+recalling -- the exact cross-widget side-effect risk that originally
+justified avoiding QSS app-wide. Abandoned in favor of a second
+prototype using `QTabBar.setTabTextColor()`, the same plain, native,
+already-proven API `ACTIVITY_COLOR` (post-8b tab-activity flashing)
+already uses successfully with no such side effect -- confirmed clean
+with the same before/after screenshot method.
+
+Color choice was also verified visually, not guessed: tried cyan,
+white, and green against both a real dark-theme and light-theme
+screenshot before picking cyan (`#4ec9f5`) -- deliberately a different
+color from `ACTIVITY_COLOR`'s orange, not reused, since a steady "this
+is the active tab" cue and a blinking "unseen activity elsewhere" cue
+need to stay visually distinguishable from each other, not just "some
+tab has a color." One fixed value for both themes, same simplification
+`ACTIVITY_COLOR` already makes.
+
+Implementation follows the exact established pattern from tab-activity
+flashing: tracked by tab *object* (`_active_tab`), not index, since
+indices shift as tabs open/close (the same reasoning `_tabs_with_
+activity` already documents) -- looked up fresh via `indexOf()` each
+time rather than trusting a stashed index. `_on_current_tab_changed`
+now resets the previously-active tab's color and applies
+`ACTIVE_TAB_COLOR` to the new one, running *after* `_clear_tab_
+activity()` so the active color correctly wins over the activity-flash
+reset when switching to a previously-flashing tab (proven by a
+dedicated test, not just asserted).
+
+A real pre-existing test needed updating, not just new tests added:
+`test_switching_to_a_flashing_tab_clears_it` asserted a switched-to
+tab's color resets to the invalid/default `QColor()` -- true before
+this change, no longer true now that switching to a tab also makes it
+the active tab (colored cyan, not reset). Fixed to assert the new,
+correct expectation rather than leaving a stale assumption in place.
+
+Verified per this file's standing rule 7: 6 new tests in `test_tab_
+activity.py` (first-tab-opened gets highlighted, opening a second tab
+moves the highlight, switching back moves it again, the two colors are
+provably distinct, the active highlight survives switching to a
+previously-flashing tab, closing the active tab clears the tracked
+state) plus the one existing test corrected. 585 tests passing (up
+from 579).
+
+Not verified against a real desktop this round -- same honest gap as
+every GUI phase this session; the offscreen-platform screenshots used
+for verification are a real check on rendering, but not the same as a
+real window manager/compositor. Rick can confirm on a real desktop
+when convenient.
+
 Next: Phase 12c (tray icon, placeholder graphics) -- see
 `PHASE10-12_PLAN.md` for the full plan.
 

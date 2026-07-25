@@ -65,6 +65,17 @@ class MainWindow(QMainWindow):
     # same way here).
     ACTIVITY_COLOR = QColor(255, 140, 0)  # orange
     ACTIVITY_BLINK_INTERVAL_MS = 500
+    # Active-tab highlight (Rick's real report: in dark mode, Fusion's
+    # own selected-vs-unselected tab shading is too subtle to tell which
+    # tab you're on "at a glance" -- confirmed by pixel-checking a real
+    # screenshot before picking a fix, not assumed). A distinct color
+    # from ACTIVITY_COLOR on purpose -- a steady cyan tab (this one) vs.
+    # a blinking orange tab (unseen activity elsewhere) must stay
+    # visually distinguishable at a glance, not just "some tab is
+    # colored." Verified against both themes with real screenshots
+    # (light and dark) before picking one fixed value for both, same
+    # simplification ACTIVITY_COLOR already makes.
+    ACTIVE_TAB_COLOR = QColor(78, 201, 245)  # cyan
     # Phase 9: how often the shared script-variable autosave timer
     # checks for dirty tabs. Rick's exact spec -- 5 minutes, dirty-flag
     # gated, not "save on every set_var()" (which risks a synchronous
@@ -184,6 +195,9 @@ class MainWindow(QMainWindow):
         # one tab actually has unseen activity.
         self._tabs_with_activity: set = set()
         self._activity_flash_on = False
+        # Tracked by tab object, not index, same reasoning as
+        # _tabs_with_activity above -- indices shift as tabs open/close.
+        self._active_tab: Optional[SessionTab] = None
         self._activity_timer = QTimer(self)
         self._activity_timer.setInterval(self.ACTIVITY_BLINK_INTERVAL_MS)
         self._activity_timer.timeout.connect(self._tick_activity_flash)
@@ -476,10 +490,29 @@ class MainWindow(QMainWindow):
             window.apply_font(self._editor_font_family, self._editor_font_size)
 
     def _on_current_tab_changed(self, index: int) -> None:
-        if index != -1:
-            self._clear_tab_activity(self.tab_widget.widget(index))
+        new_tab = self.tab_widget.widget(index) if index != -1 else None
+        if new_tab is not None:
+            self._clear_tab_activity(new_tab)
+        self._update_active_tab_highlight(new_tab)
         self._refresh_status_bar()
         self._refresh_action_enabled_state()
+
+    def _update_active_tab_highlight(self, new_tab: Optional[SessionTab]) -> None:
+        """Colors the currently active tab's label distinctly (cyan) so
+        which tab you're on is obvious at a glance -- see
+        ACTIVE_TAB_COLOR's own comment for why this exists and why it's
+        a plain QTabBar.setTabTextColor() call, not a stylesheet.
+        """
+        bar = self.tab_widget.tabBar()
+        if self._active_tab is not None and self._active_tab is not new_tab:
+            old_index = self.tab_widget.indexOf(self._active_tab)
+            if old_index != -1:
+                bar.setTabTextColor(old_index, QColor())
+        if new_tab is not None:
+            new_index = self.tab_widget.indexOf(new_tab)
+            if new_index != -1:
+                bar.setTabTextColor(new_index, self.ACTIVE_TAB_COLOR)
+        self._active_tab = new_tab
 
     def _on_tab_state_changed(self, tab: SessionTab, state: str) -> None:
         if self.tab_widget.currentWidget() is tab:

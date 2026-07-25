@@ -67,8 +67,12 @@ def test_switching_to_a_flashing_tab_clears_it(qapp, tmp_path):
     host.tab_widget.setCurrentWidget(tab_a)
 
     assert tab_a not in host._tabs_with_activity
+    # Its color is now the *active-tab* highlight, not literally reset
+    # to default -- switching to it made it the active tab too (see
+    # test_active_tab_highlight_survives_switching_to_a_previously_
+    # flashing_tab below for the dedicated claim).
     index_a = host.tab_widget.indexOf(tab_a)
-    assert host.tab_widget.tabBar().tabTextColor(index_a) == QColor()
+    assert host.tab_widget.tabBar().tabTextColor(index_a) == MainWindow.ACTIVE_TAB_COLOR
 
 
 def test_timer_stops_once_the_last_flashing_tab_is_cleared(qapp, tmp_path):
@@ -133,3 +137,70 @@ def test_closing_a_flashing_tab_removes_it_from_tracking(qapp, tmp_path):
 
     assert tab_a not in host._tabs_with_activity
     assert host._activity_timer.isActive() is False
+
+
+# -- Active-tab highlight (Rick's real report: not obvious at a glance
+# in dark mode which tab is selected) --------------------------------
+
+
+def test_the_first_tab_opened_is_highlighted(qapp, tmp_path):
+    host = MainWindow(address_book_storage_path=tmp_path / "ab.json")
+    tab = host.open_tab("a.example.com", 4000, bridge=FakeBridge())
+
+    index = host.tab_widget.indexOf(tab)
+    assert host.tab_widget.tabBar().tabTextColor(index) == MainWindow.ACTIVE_TAB_COLOR
+
+
+def test_opening_a_second_tab_moves_the_highlight_and_resets_the_first(qapp, tmp_path):
+    host = MainWindow(address_book_storage_path=tmp_path / "ab.json")
+    tab_a = host.open_tab("a.example.com", 4000, bridge=FakeBridge())
+    tab_b = host.open_tab("b.example.com", 5000, bridge=FakeBridge())
+
+    bar = host.tab_widget.tabBar()
+    assert bar.tabTextColor(host.tab_widget.indexOf(tab_a)) == QColor()
+    assert bar.tabTextColor(host.tab_widget.indexOf(tab_b)) == MainWindow.ACTIVE_TAB_COLOR
+
+
+def test_switching_tabs_moves_the_highlight_back(qapp, tmp_path):
+    host = MainWindow(address_book_storage_path=tmp_path / "ab.json")
+    tab_a = host.open_tab("a.example.com", 4000, bridge=FakeBridge())
+    tab_b = host.open_tab("b.example.com", 5000, bridge=FakeBridge())
+
+    host.tab_widget.setCurrentWidget(tab_a)
+
+    bar = host.tab_widget.tabBar()
+    assert bar.tabTextColor(host.tab_widget.indexOf(tab_a)) == MainWindow.ACTIVE_TAB_COLOR
+    assert bar.tabTextColor(host.tab_widget.indexOf(tab_b)) == QColor()
+
+
+def test_active_tab_highlight_is_distinct_from_activity_color(qapp, tmp_path):
+    # The whole point of picking cyan, not the same orange as unseen-
+    # activity flashing: a steady "this is where you are" cue must not
+    # be confusable with a blinking "something happened elsewhere" cue.
+    assert MainWindow.ACTIVE_TAB_COLOR != MainWindow.ACTIVITY_COLOR
+
+
+def test_active_tab_highlight_survives_switching_to_a_previously_flashing_tab(qapp, tmp_path):
+    host = MainWindow(address_book_storage_path=tmp_path / "ab.json")
+    bridge_a = FakeBridge()
+    tab_a = host.open_tab("a.example.com", 4000, bridge=bridge_a)
+    tab_b = host.open_tab("b.example.com", 5000, bridge=FakeBridge())
+    bridge_a.simulate_incoming("ping\r\n")  # tab_a starts flashing orange
+
+    host.tab_widget.setCurrentWidget(tab_a)
+
+    bar = host.tab_widget.tabBar()
+    # Switching to it clears the activity flash *and* applies the
+    # active highlight -- the active color must win, not stay reset.
+    assert bar.tabTextColor(host.tab_widget.indexOf(tab_a)) == MainWindow.ACTIVE_TAB_COLOR
+    assert bar.tabTextColor(host.tab_widget.indexOf(tab_b)) == QColor()
+
+
+def test_closing_the_active_tab_clears_the_highlight_state(qapp, tmp_path):
+    host = MainWindow(address_book_storage_path=tmp_path / "ab.json")
+    tab = host.open_tab("a.example.com", 4000, bridge=FakeBridge())
+
+    host.close_tab(tab)
+
+    assert host._active_tab is None
+    assert host.tab_widget.count() == 0

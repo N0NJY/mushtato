@@ -235,6 +235,15 @@ This replaced an earlier design (one separate top-level window per
 connection) -- if you're used to an older MushTato build, this is the
 intentional current model, not a bug.
 
+## Which tab am I on?
+
+The currently active tab's label is shown in a distinct cyan color, so
+it's obvious at a glance which connection you're looking at -- this is
+deliberately a different color from the orange used for unseen
+activity on a background tab (see below), since a steady "you are
+here" cue and a blinking "something happened elsewhere" cue need to
+stay visually distinguishable from each other.
+
 ## Reordering tabs
 
 Drag a tab to a different position in the tab bar to reorder it. This

@@ -6,6 +6,15 @@ of work, per `CLAUDE.md`/`SPEC.md`'s roadmap) rather than by version
 number, reconstructed from `CLAUDE.md`'s phase-by-phase notes and git
 history. All dates below are from the actual commit history.
 
+## Post-Phase-12b — Active-tab highlight (2026-07-25)
+
+- The currently active tab's label is now shown in a distinct cyan
+  color, so it's obvious at a glance which connection you're looking
+  at — especially in dark mode, where this wasn't obvious before
+  without looking closely. Deliberately a different color from the
+  orange used for unseen-activity flashing on background tabs, so the
+  two aren't confusable.
+
 ## Phase 12b — Mail Window (2026-07-25)
 
 - New compose/send Mail Window (Tools → Mail Window, or `/mail`),
