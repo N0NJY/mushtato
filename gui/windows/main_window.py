@@ -15,13 +15,14 @@ from __future__ import annotations
 
 from typing import Dict, List, Optional
 
-from PySide6.QtCore import QDateTime, QTimer
+from PySide6.QtCore import QDateTime, QEvent, QTimer
 from PySide6.QtGui import QAction, QActionGroup, QColor, QKeySequence, QShortcut
 from PySide6.QtWidgets import (
     QApplication,
     QLabel,
     QMainWindow,
     QMessageBox,
+    QSystemTrayIcon,
     QTabWidget,
     QToolBar,
 )
@@ -47,6 +48,7 @@ from engine.errorlog import get_error_log
 from ..dialogs.settings_dialog import SettingsDialog
 from ..help.help_window import HelpWindow
 from ..theme import apply_theme
+from ..tray_icon import TrayIcon
 from .text_editor_window import TextEditor
 from .error_log_window import ErrorLogWindow
 from ..version import mushtato_version
@@ -201,6 +203,20 @@ class MainWindow(QMainWindow):
         self._activity_timer = QTimer(self)
         self._activity_timer.setInterval(self.ACTIVITY_BLINK_INTERVAL_MS)
         self._activity_timer.timeout.connect(self._tick_activity_flash)
+
+        # Phase 12c: system tray icon. Always shown whenever the
+        # platform supports one at all -- no separate show/hide setting
+        # (Phase 12 checkpoint) -- guarded by isSystemTrayAvailable()
+        # so this degrades to simply not existing rather than crashing
+        # on a platform/environment without tray support (this dev
+        # sandbox's offscreen platform included).
+        self._tray_icon: Optional[TrayIcon] = None
+        self._tray_activity_pending = False
+        if QSystemTrayIcon.isSystemTrayAvailable():
+            self._tray_icon = TrayIcon(self)
+            self._tray_icon.restore_requested.connect(self._restore_from_tray)
+            self._tray_icon.exit_requested.connect(self._exit_application)
+            self._tray_icon.show()
 
         # Debounced splitter-size persistence: splitterMoved fires on
         # every pixel of a drag, so writing settings.json synchronously
@@ -494,6 +510,10 @@ class MainWindow(QMainWindow):
         if new_tab is not None:
             self._clear_tab_activity(new_tab)
         self._update_active_tab_highlight(new_tab)
+        # Switching tabs at all counts as "you looked at something" for
+        # the tray icon -- even switching to a tab that wasn't itself
+        # flashing still means you're paying attention to the app now.
+        self._set_tray_activity_pending(False)
         self._refresh_status_bar()
         self._refresh_action_enabled_state()
 
@@ -521,9 +541,23 @@ class MainWindow(QMainWindow):
     # -- tab-activity flashing ------------------------------------------
 
     def _on_tab_activity(self, tab: SessionTab) -> None:
-        # Only *other* tabs get flashed -- text arriving in the tab
-        # you're already looking at isn't "activity you missed".
-        if self.tab_widget.currentWidget() is tab:
+        is_active_tab = self.tab_widget.currentWidget() is tab
+        # Broader than the tab-label-flash condition below (Phase 12c
+        # checkpoint, Rick's explicit choice over just reusing
+        # _tabs_with_activity as-is): the tray icon should also notice
+        # activity on the tab you were already looking at, if the whole
+        # app itself wasn't focused (e.g. minimized or alt-tabbed away)
+        # when it arrived -- closer to Potato's own real condition
+        # (verified against potato.tcl: new activity AND (app isn't
+        # focused at all OR it's a different connection)).
+        if not is_active_tab or QApplication.activeWindow() is None:
+            self._set_tray_activity_pending(True)
+
+        # Only *other* tabs get flashed in the tab bar itself -- text
+        # arriving in the tab you're already looking at isn't "activity
+        # you missed" in that narrower sense, regardless of the tray
+        # condition above.
+        if is_active_tab:
             return
         if tab not in self._tabs_with_activity:
             self._tabs_with_activity.add(tab)
@@ -531,6 +565,15 @@ class MainWindow(QMainWindow):
             self._activity_flash_on = True
             self._apply_activity_colors()
             self._activity_timer.start()
+
+    def _set_tray_activity_pending(self, pending: bool) -> None:
+        self._tray_activity_pending = pending
+        if self._tray_icon is None:
+            return
+        if pending:
+            self._tray_icon.start_blinking()
+        else:
+            self._tray_icon.stop_blinking()
 
     def _tick_activity_flash(self) -> None:
         self._activity_flash_on = not self._activity_flash_on
@@ -940,6 +983,14 @@ class MainWindow(QMainWindow):
     def _exit_application(self) -> None:
         self.close()
 
+    def _restore_from_tray(self) -> None:
+        # Matches Potato's real winicoRestore (deiconify + raise +
+        # focus) -- MushTato has just the one persistent root window,
+        # so "restore" always means this one.
+        self.showNormal()
+        self.raise_()
+        self.activateWindow()
+
     # -- hotkeys (host-level: Ctrl+W closes the active tab, etc.) -----
 
     def _apply_hotkeys(self) -> None:
@@ -981,3 +1032,12 @@ class MainWindow(QMainWindow):
         app = QApplication.instance()
         if app is not None:
             app.quit()
+
+    def changeEvent(self, event) -> None:  # noqa: N802 -- Qt override signature
+        super().changeEvent(event)
+        # The app regaining OS focus counts as "you noticed" for the
+        # tray icon (Phase 12c checkpoint) -- even if you never
+        # switched tabs, e.g. you were already sitting on the one tab
+        # that got new text and just alt-tabbed back.
+        if event.type() == QEvent.Type.ActivationChange and self.isActiveWindow():
+            self._set_tray_activity_pending(False)

@@ -6,6 +6,16 @@ of work, per `CLAUDE.md`/`SPEC.md`'s roadmap) rather than by version
 number, reconstructed from `CLAUDE.md`'s phase-by-phase notes and git
 history. All dates below are from the actual commit history.
 
+## Phase 12c — System tray icon (2026-07-25)
+
+- MushTato now shows a system tray icon (where the OS supports one):
+  left/double-click restores the main window, right-click opens a
+  Restore/Exit menu. Blinks whenever new text arrives on a background
+  tab, or on any tab while the whole MushTato window itself isn't
+  focused — clears on switching tabs or refocusing the app. Icon
+  graphics are simple placeholders pending real branding.
+- This completes the Phase 10-12 plan.
+
 ## Post-Phase-12b — Active-tab highlight (2026-07-25)
 
 - The currently active tab's label is now shown in a distinct cyan

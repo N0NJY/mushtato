@@ -271,6 +271,19 @@ while your attention was elsewhere. It keeps blinking indefinitely
 point it clears immediately. The tab you're currently viewing never
 flashes for its own incoming text -- only tabs in the background do.
 
+## System tray icon
+
+If your OS supports one, MushTato shows a system tray icon -- always
+shown, no separate setting to turn it off. Left-click (or double-
+click) it to bring the main window to the front; right-click for a
+small menu (Restore, Exit). It blinks the same way a background tab
+does: whenever new text arrives on a tab you're not looking at, *or*
+on any tab at all while the whole MushTato window itself isn't
+focused (e.g. you've alt-tabbed away or minimized it) -- switching
+tabs, or just bringing MushTato back into focus, clears it. The icon
+itself is a simple placeholder (not final artwork) until real branding
+exists.
+
 ## Clickable links
 
 Any `http://` or `https://` URL appearing in a tab's scrollback

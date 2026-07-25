@@ -103,9 +103,10 @@ into the tabbed session GUI for real) — done, see below. Phase 10
 (quick-win polish: About credits, Edit menu) — done, see below. Phase
 11 (movable tabs, spawnlog save, error log, find/search) — done, see
 below. Phase 12a (Text Editor) — done, see below. Phase 12b (Mail
-Window) — done, see below.** See `PHASE10-12_PLAN.md` (repo root) for
-the full Phase 10-12 plan and the checkpoint that renumbered script-
-sharing from Phase 10 to Phase 13. Telnet IAC negotiation is
+Window) — done, see below. Phase 12c (system tray icon) — done, see
+below. This completes the Phase 10-12 plan.** See `PHASE10-12_PLAN.md`
+(repo root) for the full plan and the checkpoint that renumbered
+script-sharing from Phase 10 to Phase 13. Telnet IAC negotiation is
 hand-rolled on raw asyncio streams (not telnetlib3)
 — see the Phase 3 discussion for reasoning. `scripts/console_client.py`
 is a throwaway dev tool for manually testing against a real server
@@ -2507,8 +2508,123 @@ for verification are a real check on rendering, but not the same as a
 real window manager/compositor. Rick can confirm on a real desktop
 when convenient.
 
-Next: Phase 12c (tray icon, placeholder graphics) -- see
-`PHASE10-12_PLAN.md` for the full plan.
+**Phase 12c (system tray icon) — done.** New `gui/tray_icon.py`
+(`TrayIcon`, `generate_resting_icon`/`generate_activity_icon`);
+extended `gui/windows/main_window.py`.
+
+Real precedent researched first, not assumed: Potato's own systray
+code doesn't live in `potato.tcl` itself but in platform-specific
+extension packages under `potato.vfs/lib/app-potato/{windows,macosx,
+linux}/` -- read the most complete one (`windows/winico/potato-
+systray.tcl`) plus `potato.tcl`'s own `::potato::flash`/`setupSystray`
+glue. Confirmed real, concrete values rather than guessing: the blink
+is a plain two-icon-position swap every 750ms (`flashSystrayIcon`'s
+own `after 750 ...`), not a multi-frame animation; the real trigger
+condition (`potato.tcl` line ~3854) is "new activity AND (the app
+isn't OS-focused at all OR it's a different connection)" -- both
+`;;`-precision findings and this one came from reading the actual proc
+bodies, not paraphrasing from memory.
+
+**Three real forks, all resolved via checkpoint before implementation:**
+(1) **no minimize-to-tray** -- the icon exists alongside the normal
+window/taskbar entry always, never the only way back to the app,
+unlike Potato's real `minimizeToSystray`. (2) **always shown, no
+toggle** -- no Settings option and no "Hide Icon" menu item (Potato's
+own menu has one; deliberately dropped), gated only on
+`QSystemTrayIcon.isSystemTrayAvailable()`. (3) **blink trigger
+includes app-focus-loss, not just background-tab activity** -- Rick's
+explicit choice, the non-recommended option, matching Potato's real
+condition more closely than just reusing the existing tab-activity-
+flash tracking (`_tabs_with_activity`) as-is would have.
+
+**Confirmed empirically before designing around it, not assumed
+either way, mirroring the exact discipline Phase 12a's `QApplication.
+focusWidget()` finding already established this session:** does
+constructing/showing a `QSystemTrayIcon` crash under this sandbox's
+offscreen QPA platform? No -- confirmed directly with a real script
+(construct, set icon, `show()`, all succeed; only a harmless platform-
+signal warning printed) before writing any tests around it. Also
+confirmed directly (not assumed) that `QSystemTrayIcon.
+isSystemTrayAvailable()` is `False` under this offscreen platform,
+meaning `MainWindow`'s own tray icon is `None` in every headless test
+unless a test explicitly monkeypatches that check to `True` --
+established as the real testing pattern for this feature rather than
+adding a test-only bypass constructor parameter to `MainWindow` (which
+would imply a production code path that doesn't actually exist).
+
+**Architecture:** `TrayIcon` (a `QObject`, not owned by `MainWindow`
+via direct method calls but via plain signals -- `restore_requested`/
+`exit_requested` -- the identical decoupling reasoning Phase 12b's
+`MailWindow` already established, independently constructible and
+testable with fakes) wraps the real `QSystemTrayIcon` + its context
+menu + the blink `QTimer`. `MainWindow` connects `restore_requested`
+to a new `_restore_from_tray()` (`showNormal`/`raise_`/
+`activateWindow` -- matches Potato's real `winicoRestore` exactly) and
+`exit_requested` straight to the *existing* `_exit_application` --
+not a parallel shutdown path. A new `_tray_activity_pending` flag is
+tracked separately from `_tabs_with_activity` (which only ever tracks
+*background* tabs, by original design) -- set whenever `_on_tab_
+activity` fires and *either* the tab isn't the active one *or*
+`QApplication.activeWindow() is None`; cleared on any tab switch
+(`_on_current_tab_changed`) *or* the app regaining OS focus (a new
+`changeEvent` override checking `QEvent.Type.ActivationChange` +
+`self.isActiveWindow()`) -- whichever happens first. The narrower,
+original tab-label-flash condition is completely untouched by this,
+confirmed by a dedicated test that the active tab is still never added
+to `_tabs_with_activity` even when the broader tray condition fires
+for it.
+
+Icon graphics are simple, explicitly-labeled-as-placeholder shapes
+(`QPainter`/`QPixmap` -- a solid circle + a bold "M", two colors for
+resting/activity, `ACTIVITY_COLOR` matching `MainWindow.
+ACTIVITY_COLOR` exactly so the tray's "something happened" reads as
+the same visual language as the tab-activity flash) -- no new
+dependency (Pillow isn't part of this project's tech stack, confirmed
+by checking `pyproject.toml` before choosing `QPainter` over it, not
+assumed available or unavailable).
+
+**A real test-isolation bug found and fixed while writing the test
+suite, not shipped unnoticed:** two new tests asserting the "app
+isn't OS-focused" branch initially relied on ambient state (a freshly
+constructed, never-shown `MainWindow` being implicitly un-focused) --
+this reliably failed when run as part of the full file, not in
+isolation, because an *earlier* test in the same file had called real
+`show()`/`activateWindow()` on a different window and Qt's global
+"active window" bookkeeping doesn't automatically clear just because
+that window goes out of scope. Root-caused by actually running the
+failing tests together and reading the assertion diff, not guessed at.
+Fixed by explicitly monkeypatching `QApplication.activeWindow` to a
+controlled return value for those two tests, rather than depending on
+incidental global state -- the correct, deterministic fix, not a
+band-aid reordering of tests.
+
+Verified per this file's standing rule 7: 22 new tests (12 in
+`test_tray_icon.py` covering the `TrayIcon` class standalone -- icon
+generation, Restore/Exit actions, left/double-click vs. right-click
+activation, blink start/stop/no-double-start/tick-toggle; 10 in
+`test_tray_wiring.py` covering `MainWindow`'s wiring -- gated
+construction, Restore really restoring, Exit really calling the
+existing exit path, all three real trigger conditions -- background
+tab, active tab while focused (correctly *not* triggering), active tab
+while unfocused (correctly triggering) -- clearing on tab-switch and
+on regaining focus, and that everything still works with no crash when
+`_tray_icon` is `None`). 607 tests passing (up from 585 at the end of
+the active-tab-highlight addition).
+
+Not verified against a real desktop or a real system tray this round
+-- same honest gap as every GUI phase this session, now specifically
+including whether a real tray icon actually appears/blinks correctly
+in a real desktop environment's tray (GNOME/KDE/Windows/macOS all
+handle `QSystemTrayIcon` somewhat differently in practice). Rick can
+confirm when convenient.
+
+**This completes the Phase 10-12 plan** (`PHASE10-12_PLAN.md`) --
+Phase 10 (quick-win polish), Phase 11 (movable tabs/spawnlog save/
+error log/find-search), Phase 12a (Text Editor), Phase 12b (Mail
+Window), Phase 12c (tray icon), plus the post-12b active-tab-highlight
+addition, are all done. Only Phase 13 (post-1.0 script-sharing
+ecosystem, the last item on SPEC.md's roadmap) remains; Rick will
+decide when/whether to start it.
 
 ## Standing rules: verification and assumptions
 
