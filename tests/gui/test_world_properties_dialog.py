@@ -404,3 +404,30 @@ def test_result_profile_reflects_edited_protocol_and_username(qapp):
 
     assert result.protocol == "ssh"
     assert result.ssh_username == "rickn0njy"
+
+
+# -- Mail Window settings preservation (bug found during SSH work) -------
+
+
+def test_result_profile_preserves_mail_settings_unchanged(qapp):
+    # Real bug found while adding SSH support: this dialog has no UI for
+    # any mail_* field (those are set from the Mail Window itself, on
+    # Send) -- result_profile() never threaded them through at all,
+    # meaning saving *any* Properties change (even something unrelated,
+    # like renaming the world) silently reset a world's Mail Window
+    # settings back to defaults.
+    world = make_world(
+        mail_format="MUX @mail",
+        mail_format_custom="custom template %to% %body%",
+        mail_convert_returns=False,
+        mail_convert_returns_to="\\n",
+    )
+    dialog = WorldPropertiesDialog(None, world=world)
+    dialog.name_edit.setText("Renamed World")  # an unrelated change
+
+    result = dialog.result_profile()
+
+    assert result.mail_format == "MUX @mail"
+    assert result.mail_format_custom == "custom template %to% %body%"
+    assert result.mail_convert_returns is False
+    assert result.mail_convert_returns_to == "\\n"

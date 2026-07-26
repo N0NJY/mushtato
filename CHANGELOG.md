@@ -1,10 +1,28 @@
 # Changelog
 
-MushTato is still pre-1.0 and has not yet had a tagged release — this
-changelog is organized by development phase (this project's actual unit
-of work, per `CLAUDE.md`/`SPEC.md`'s roadmap) rather than by version
-number, reconstructed from `CLAUDE.md`'s phase-by-phase notes and git
-history. All dates below are from the actual commit history.
+Entries before 2026-07-26 predate real version tracking and are
+organized by development phase (this project's actual unit of work,
+per `CLAUDE.md`/`SPEC.md`'s roadmap), reconstructed from `CLAUDE.md`'s
+phase-by-phase notes and git history. All dates below are from the
+actual commit history.
+
+Starting 2026-07-26, MushTato tracks real version numbers (starting at
+1.0.0, in `pyproject.toml`'s `version` field, which feeds `/version`
+and the About box) — bumped after each completed item on the working
+todo/bugs list, not per-commit: a patch bump (1.0.x) for a bug fix, a
+minor bump (1.x.0) for a new feature/behavior change.
+
+## 1.0.1 — Fix: World Properties silently reset Mail Window settings (2026-07-26)
+
+- Saving World Properties for *any* reason (even something unrelated,
+  like a Character edit or renaming the world) silently reset a
+  world's Mail Window settings (Format, Custom template, Convert
+  Returns, Convert-To string) back to their defaults — this dialog has
+  no UI for those fields (they're only ever set from the Mail Window
+  itself, on Send), and never threaded them through when rebuilding
+  the saved profile, unlike `auto_login`/`connect_count`, which
+  already were. Found while adding SSH support; fixed by preserving
+  them from the original profile the same way.
 
 ## Post-Phase-13 fix — stray terminal escape sequences over SSH (2026-07-26)
 

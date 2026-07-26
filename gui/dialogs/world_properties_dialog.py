@@ -598,6 +598,18 @@ class WorldPropertiesDialog(QDialog):
             nop_keepalive=self.keepalive_checkbox.isChecked(),
             protocol=self._selected_protocol(),
             ssh_username=self.ssh_username_edit.text().strip(),
+            # mail_* isn't editable on this dialog either (it's set from
+            # the Mail Window itself, on Send) -- carried over unchanged,
+            # same treatment as auto_login/connect_count above. A real
+            # bug found while adding SSH support: this dialog was never
+            # threading these through at all, meaning saving *any*
+            # Properties change (even something unrelated, like a
+            # Character edit) silently reset a world's Mail Window
+            # settings back to defaults.
+            mail_format=self._world.mail_format,
+            mail_format_custom=self._world.mail_format_custom,
+            mail_convert_returns=self._world.mail_convert_returns,
+            mail_convert_returns_to=self._world.mail_convert_returns_to,
         )
 
     def result_scripts(self) -> List[ScriptRecord]:

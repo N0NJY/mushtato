@@ -2965,18 +2965,39 @@ dialog or in `WorldProfile` itself, by design.
 
 **A real, pre-existing, unrelated bug noticed while reading
 `WorldPropertiesDialog.result_profile()` to add the new fields
-correctly, not introduced by this work and not fixed here (out of
-scope, flagged for Rick to decide on):** this method never threads
-`mail_format`/`mail_format_custom`/`mail_convert_returns`/
+correctly, not introduced by this work** (originally flagged here as
+out of scope, since fixed -- see "1.0.1" below): this method never
+threaded `mail_format`/`mail_format_custom`/`mail_convert_returns`/
 `mail_convert_returns_to` through to the `WorldProfile` it builds --
 unlike `auto_login`/`connect_count`, which are explicitly preserved
-from `self._world`. Saving World Properties for any reason would
-silently reset a world's Mail Window settings back to defaults. This
-was checked carefully to make sure the *new* `protocol`/`ssh_username`
+from `self._world`. Saving World Properties for any reason silently
+reset a world's Mail Window settings back to defaults. This was
+checked carefully to make sure the *new* `protocol`/`ssh_username`
 fields don't share the same gap (they don't -- both are read from this
 dialog's own live form widgets, which is correct since they're meant to
 be editable here, unlike the mail fields which have no UI on this
 dialog at all).
+
+**Fixed as version 1.0.1 (2026-07-26), the first item on the post-SSH
+working todo/bugs list.** `result_profile()` now preserves all four
+`mail_*` fields from `self._world`, the exact same treatment
+`auto_login`/`connect_count` already got. Proven with a real
+regression test, not just described: `test_result_profile_preserves_
+mail_settings_unchanged` sets a non-default mail format/template/
+convert-returns state, saves an unrelated field (the world's name),
+and asserts every mail_* field survived unchanged -- confirmed this
+test actually fails without the fix by temporarily reverting the
+dialog change and re-running it (got the exact predicted failure,
+`mail_format` silently reset to `"MUSH @mail"`), then restored the fix
+and confirmed the full test file passes clean. This is also the first
+change tracked under the new version-numbering scheme agreed with Rick
+after the SSH work shipped: starting point 1.0.0, bumped after each
+completed item on the working list (not per-commit), wired into
+`pyproject.toml`'s `version` field (which already feeds `/version` and
+About) rather than a separate padded display string -- Rick's own
+"1.00.00" suggestion was checked directly against Python's packaging
+rules and found to get silently normalized to "1.0.0" by any tool that
+reads it, so plain semver was used instead.
 
 **Deliberately out of scope, stated plainly rather than glossed over:**
 true character-mode/raw terminal input (tab-completion, Ctrl+C, `vim`/
