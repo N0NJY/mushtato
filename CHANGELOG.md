@@ -6,6 +6,29 @@ of work, per `CLAUDE.md`/`SPEC.md`'s roadmap) rather than by version
 number, reconstructed from `CLAUDE.md`'s phase-by-phase notes and git
 history. All dates below are from the actual commit history.
 
+## Post-Phase-13 — SSH connections (2026-07-26)
+
+- MushTato can now open a real SSH session -- a genuine login shell on
+  a remote Unix-like machine, not a MU* connection. Two ways to start
+  one: File → New Tab (`Ctrl+T`) opens a blank tab where you can type
+  `/ssh [-p port] user@host`, or save a world in the Address Book with
+  Protocol set to SSH. The password is always prompted fresh at
+  connect time and is never saved to disk.
+- Host-key verification is trust-on-first-use, like real `ssh`: the
+  first connection to a host:port is trusted and remembered; a later
+  connection with a *different* key is refused, not silently allowed.
+  `/ssh-forget host[:port]` clears a saved key if a change is expected
+  (e.g. the server was reinstalled).
+- Blank tabs also support a raw `/connect <host> <port>` (no saved
+  world needed) alongside the existing `/connect <world-name>` form.
+- Input is sent line-by-line, like MU* commands -- ordinary shell
+  commands work, but tab-completion, Ctrl+C, and full-screen programs
+  (vim, top, less) don't yet; a known, documented limitation, not a bug.
+- New dependency: `asyncssh`.
+- Phase 13 (originally planned as a script-sharing ecosystem) was
+  deprecated in a separate discussion the day before this shipped —
+  see `SPEC.md` section 7 and `CLAUDE.md`'s Phase 13 note for why.
+
 ## Post-Phase-12c — Upload (2026-07-25)
 
 - New Upload feature (Tools → Upload, or `/upload`): send a file from

@@ -107,6 +107,22 @@ time, matching Potato's own real behavior. Using Tools → Mail Window
 again while one's already open for that tab just brings the existing
 one to the front instead of opening a second.
 
+**An SSH connection says the host key doesn't match / has changed**
+This is intentional, not a bug: MushTato refuses to silently trust a
+different key than the one it saved on your first connection to that
+host:port. If the change is expected (e.g. the server was reinstalled),
+run `/ssh-forget host:port` then reconnect. See the in-app Help's SSH
+Connections topic — saved host keys live in their own file (separate
+from your real `~/.ssh/known_hosts`), documented there with the exact
+path.
+
+**Tab-completion / Ctrl+C / vim don't work over SSH**
+Known, accepted limitation of the current SSH support — input is sent
+one full line at a time (like MU* commands), not character-by-character
+like a real terminal. Ordinary commands work fine; anything needing a
+live keystroke-by-keystroke terminal doesn't yet. See the in-app Help's
+SSH Connections topic.
+
 **Where did the Error Log come from, and what does it show?**
 Tools → Error Log shows genuinely *unhandled* exceptions only — not a
 duplicate of errors already shown directly in a tab's scrollback

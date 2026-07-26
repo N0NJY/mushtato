@@ -42,7 +42,9 @@ from PySide6.QtGui import QKeySequence, QShortcut
 from PySide6.QtWidgets import (
     QAbstractItemView,
     QHBoxLayout,
+    QInputDialog,
     QLabel,
+    QLineEdit,
     QListWidget,
     QListWidgetItem,
     QMainWindow,
@@ -63,6 +65,7 @@ from engine.storage import (
 )
 from engine.storage.paths import safe_filename
 
+from .ssh_bridge import SshBridge
 from ..dialogs.world_edit_dialog import WorldEditDialog
 from ..dialogs.world_properties_dialog import WorldPropertiesDialog
 
@@ -290,8 +293,42 @@ class AddressBookWindow(QMainWindow):
         world -- the host owns tab creation, not this window. Passes
         the full profile through (Phase 8b) so the tab can fire
         auto-sends/character login, not just host/port/name.
+
+        An SSH-protocol world needs its password prompted here, fresh,
+        every time (never persisted -- Rick's explicit call) before a
+        bridge can even be constructed; a plain Telnet world reaches
+        SessionTab's own default TelnetBridge construction exactly as
+        before, unchanged.
         """
+        if world.protocol == "ssh":
+            return self._connect_ssh_world(world)
         return self.host_window.open_tab(world.host, world.port, name=world.name, world=world)
+
+    def _connect_ssh_world(self, world: WorldProfile):
+        # Mirrors open_tab()'s own existing-tab dedup check -- checked
+        # here, before prompting, so reconnecting to an already-open
+        # SSH world:port switches to it instead of pointlessly asking
+        # for (and then discarding) a password.
+        for index in range(self.host_window.tab_widget.count()):
+            existing = self.host_window.tab_widget.widget(index)
+            if existing.host == world.host and existing.port == world.port:
+                self.host_window.tab_widget.setCurrentIndex(index)
+                return existing
+
+        password, ok = QInputDialog.getText(
+            self,
+            "SSH Password",
+            f"Password for {world.ssh_username}@{world.host}:{world.port}:",
+            QLineEdit.EchoMode.Password,
+        )
+        if not ok:
+            return None
+        bridge = SshBridge(
+            world.host, world.port, world.ssh_username, password, self.host_window._host_key_store
+        )
+        return self.host_window.open_tab(
+            world.host, world.port, name=world.name, world=world, bridge=bridge
+        )
 
     def _open_properties(self) -> None:
         index = self._selected_index()

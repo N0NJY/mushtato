@@ -2822,8 +2822,209 @@ feature planned -- that's a sound sandboxing default on its own merits,
 not conditional on this deprecated phase, so it wasn't touched.
 
 No code changes -- this was a planning-only conversation, and the only
-artifacts are these updated docs (`SPEC.md`, `CLAUDE.md`). Nothing else
-remains open on the roadmap as of this note.
+artifacts were updated docs (`SPEC.md`, `CLAUDE.md`) at the time. See
+the Post-Phase-13 SSH entry immediately below for what came next in
+the very same discussion.
+
+**Post-Phase-13: SSH connections — done.** New `engine/net/ssh_client.py`
+(`SshClient`, `HostKeyStore`, `HostKeyMismatch`), new `gui/windows/
+ssh_bridge.py` (`SshBridge`), extended `engine/storage/address_book.py`
+(`WorldProfile.protocol`/`ssh_username`, `PROTOCOLS`/`DEFAULT_PROTOCOL`),
+extended `engine/storage/paths.py` (`ssh_known_hosts_path`), extended
+`gui/windows/session_tab.py` (blank-tab support, `/connect [host]
+[port]`, `/ssh`, `/ssh-forget`), extended `gui/windows/main_window.py`
+(`open_blank_tab`, New Tab action/hotkey), extended `gui/dialogs/
+world_edit_dialog.py`/`world_properties_dialog.py` (Protocol/SSH
+Username fields), extended `gui/windows/address_book_window.py`
+(SSH password prompt on Connect). New dependency: `asyncssh`.
+
+Raised by Rick directly, in the same conversation as the Phase 13
+deprecation immediately above -- when checkpointed on "SSL / second
+port" (an already-visible disabled placeholder in World Properties'
+Connection page), Rick's actual notes revealed something categorically
+different from what that checkbox represents: not encrypting a Telnet
+connection to a MU*, but a genuine SSH terminal session to a real Unix
+shell account ("I should be able to SSH into my remote server... and
+drop into a terminal"). Flagged immediately, per this file's own
+standing rules, that this is SSH (its own protocol, own encryption/
+auth/host-key handshake) and not SSL-wrapped Telnet at all, and that it
+reaches beyond MU*-client scope into general-purpose terminal territory
+-- a real, explicit scope expansion, not assumed silently.
+
+**Four real forks checkpointed via `AskUserQuestion` before any code,
+all resolved to the recommended option:** (1) library -- `asyncssh`
+(asyncio-native, fits `engine/net`'s existing per-connection background-
+thread/asyncio-loop architecture directly) over `paramiko` (thread/
+blocking-based, would fight that architecture). (2) host-key
+verification -- trust-on-first-use, matching real `ssh`'s own
+`known_hosts` behavior, over no verification at all. (3) authentication
+-- password only for v1 (matches Rick's own example), key-based auth
+deferred. (4) connect UX -- Rick's own clarifying answer expanded this
+beyond the original options: **both** a typed command in a new blank
+tab *and* a saved Address Book entry with a password prompt at connect
+time, not either/or.
+
+**A second, later checkpoint on the biggest remaining architecture
+fork, again resolved to the recommended option:** MushTato's dual
+input boxes are line-buffered (type a full line, press Enter, send it)
+-- exactly right for MU* commands, but not how a real terminal works
+(character-at-a-time, so tab-completion/Ctrl+C/full-screen programs
+like `vim` function at all). Rick chose shipping line-buffered input
+first -- reusing 100% of existing `SessionTab` input/scrollback
+machinery, zero new UI code -- with true raw/character-mode terminal
+input explicitly deferred as its own future follow-up rather than
+built into v1. A third small checkpoint (SSH password storage: same
+plaintext-in-`address_book.json` treatment as `CharacterProfile`
+passwords, or never persisted) went the *non*-recommended-for-
+consistency way: Rick chose **never persist it, prompt every time** --
+a real shell account's password is a higher-stakes secret than a MU*
+character's, so consistency with the existing (already plaintext)
+`CharacterProfile.password` precedent was correctly judged not to be
+the deciding factor here.
+
+**A real, load-bearing finding from testing asyncssh directly before
+designing around it, not assumed from its docs:** passing
+`known_hosts=None` to `asyncssh.connect()` disables host-key checking
+*entirely* -- tracing `SSHClientConnection._validate_host_key` in
+asyncssh's own source showed this skips the custom-callback path
+completely, rather than falling back to it as initially assumed. Genuine
+TOFU needs `known_hosts=b''` (an empty static list, which still
+populates the internal trusted-keys set and so still consults the
+callback) *plus* overriding `SSHClient.validate_host_public_key()` on a
+custom subclass. Verified end-to-end against a real, local, throwaway
+asyncssh test server (no real network, no real credentials) before
+writing `engine/net/ssh_client.py` around this: first connect trusts +
+saves the key; a repeat connect with the same key succeeds silently; a
+connect where the key has changed is rejected with
+`HostKeyNotVerifiable`.
+
+**Architecture, following CLAUDE.md rule 6 (check for existing machinery
+before building new machinery):** `SshBridge` implements the *exact
+same* `start()`/`send_line()`/`stop()`/`set_on_text()` +
+`connected`/`connectionClosed`/`connectionFailed` contract
+`TelnetBridge` already established (Phase 5) -- so `SessionTab` needed
+no changes at all to host either kind of connection; it was never
+written to depend on `TelnetBridge` by name, only on that contract.
+Host-key mismatches surface through the *same* `connectionFailed`
+signal as any other connection failure (not a new signal) -- the
+message text itself carries the old/new fingerprints and names the
+exact `/ssh-forget` command to run.
+
+**The one genuine structural change, flagged before touching it:**
+`SessionTab.__init__` previously always built and started a bridge
+immediately -- there was no "open, but not yet connected" state. Added
+one: `host=""` (now optional, default) constructs a blank tab with
+`self.bridge = None`, printing a short instructional hint instead of
+"Connecting...". `_start_bridge()` (extracted from what used to be
+inline `__init__` code) is the one shared path both the normal
+non-blank construction *and* a later `/connect`/`/ssh` command funnel
+through -- not a parallel implementation. Every method that touches
+`self.bridge` (`_send_to_bridge`, `disconnect_bridge`, `reconnect_bridge`,
+`shutdown`) gained a `None`-guard with a clear scrollback message rather
+than crashing. The pre-existing, previously-unused `titleChanged` signal
+(declared since Phase 7e, never once emitted or connected) turned out to
+be exactly what a blank tab's "New Tab" placeholder name becoming a real
+one needed -- wired up rather than inventing a new signal.
+
+**`/connect` gained a second form, kept backward-compatible:** the
+existing `/connect <world-name>` lookup is unchanged; a new
+`/connect <host> <port>` form (detected by shape -- exactly two tokens,
+the second numeric -- not by connection state) lets a blank tab connect
+to a raw address with no saved world at all, the Telnet counterpart to
+`/ssh`. `/ssh [-p port] user@host` parsing (`parse_ssh_command`, a
+small standalone regex-based function, directly unit-tested without
+needing a `SessionTab` at all) accepts both `-p 505` and squished
+`-p505`, matching real `ssh`'s own CLI conventions; port defaults to 22
+when omitted.
+
+**A real correctness gap found and fixed while wiring SSH into the
+existing per-world Auto-Sends/Character-login machinery, not left as a
+latent bug:** `_fire_autosends()` fires unconditionally from
+`_on_connected()` regardless of bridge type -- for an SSH-protocol
+world with a saved Character or Auto-Sends configured (the Address Book
+UI doesn't stop you from setting these on an SSH world), this would
+have sent raw MU*-softcode-shaped lines (`connect name ●●●●`-style)
+into a real shell prompt, which is meaningless and confusing, not just
+unnecessary. Fixed by skipping the actual send logic for any
+`world.protocol != "telnet"`, while still tracking `connect_count`
+(a protocol-agnostic connection tally) exactly as before -- covered by
+a dedicated test proving zero sends occur while `connect_count` still
+increments.
+
+**Address Book wiring, following the "prompt only when actually
+needed" principle:** `AddressBookWindow.connect_to()` checks
+`world.protocol` and delegates SSH worlds to `_connect_ssh_world()`,
+which checks for an already-open tab for that host:port *before*
+prompting for a password -- mirrors `MainWindow.open_tab()`'s own
+existing dedup check exactly, so reconnecting to an already-open SSH
+world switches tabs instead of pointlessly asking for (and discarding)
+a password. `WorldEditDialog` and `WorldPropertiesDialog` both gained a
+Protocol combo (Telnet/SSH) and an SSH Username field, enabled only
+when Protocol is SSH -- no `ssh_password` field anywhere in either
+dialog or in `WorldProfile` itself, by design.
+
+**A real, pre-existing, unrelated bug noticed while reading
+`WorldPropertiesDialog.result_profile()` to add the new fields
+correctly, not introduced by this work and not fixed here (out of
+scope, flagged for Rick to decide on):** this method never threads
+`mail_format`/`mail_format_custom`/`mail_convert_returns`/
+`mail_convert_returns_to` through to the `WorldProfile` it builds --
+unlike `auto_login`/`connect_count`, which are explicitly preserved
+from `self._world`. Saving World Properties for any reason would
+silently reset a world's Mail Window settings back to defaults. This
+was checked carefully to make sure the *new* `protocol`/`ssh_username`
+fields don't share the same gap (they don't -- both are read from this
+dialog's own live form widgets, which is correct since they're meant to
+be editable here, unlike the mail fields which have no UI on this
+dialog at all).
+
+**Deliberately out of scope, stated plainly rather than glossed over:**
+true character-mode/raw terminal input (tab-completion, Ctrl+C, `vim`/
+`top`/`less`) -- checkpointed and explicitly deferred, not an oversight.
+Key-based authentication -- checkpointed as password-only for v1.
+Real SSL-wrapped Telnet, a second/fallback address for a MU* world, and
+proxy/NAWS/TERM-negotiation support -- the actual disabled placeholders
+already visible in World Properties' Connection page, which this work
+never touched; those remain honest, unbuilt placeholders exactly as
+before, now with an explicit Help-topic note distinguishing them from
+the new (real, functional) SSH feature so the two aren't confused.
+
+Verified per this file's standing rule 7 throughout: 8 new engine tests
+(`test_ssh_client.py`, against a real local throwaway asyncssh server --
+connect/send/receive, wrong-password, first-connect-trusts, same-key-
+reused, changed-key-rejected, forget-then-reconnect, forget-with-
+nothing-saved, and a structural guarantee that `HostKeyStore` only ever
+touches the exact path it's given); 3 new bridge integration tests
+(`test_ssh_bridge_integration.py`, a real background thread + real
+asyncio loop + real local server, mirroring `test_telnet_bridge_
+integration.py`'s own established pattern exactly, including the
+`connectionFailed` message naming `/ssh-forget` correctly); 22 new
+blank-tab/command tests (`test_blank_tab.py` -- `parse_ssh_command`'s
+parsing rules directly, the blank-tab `None`-guards on every bridge-
+touching method, `/connect host port`, `/ssh` including the cancelled-
+password-prompt path, `/ssh-forget` including the invalid-port and
+default-port-22 cases); 4 new `MainWindow`-level tests (New Tab action/
+hotkey, and the blank tab's title actually updating the visible
+`QTabWidget` label once connected); new World Edit/Properties dialog
+tests for the Protocol/SSH Username fields; 3 new Address Book tests
+(password prompt then `open_tab` with the real bridge passed through,
+cancelled prompt opens nothing, reconnecting to an already-open SSH
+world switches tabs without re-prompting); and 1 new autosend test
+proving the MU*-autosend-skip-for-SSH fix. Full suite: 624 passing (up
+from 579 at the end of the Upload work), confirmed with a complete
+clean run; the three files known to reproduce the pre-existing Phase 9
+segfault gap (`test_scripting_integration.py`, `test_world_properties_
+dialog.py`, `test_address_book_window.py`) verified passing both
+individually and run together, unaffected by any of this work.
+
+Not verified against a real remote SSH server (e.g. Rick's own
+`silvren.com`) or a real desktop this round -- same honest gap as every
+GUI-facing addition this session; the local-server tests prove the
+real `asyncssh` wire protocol, real TOFU host-key persistence, and real
+Qt signal delivery across a real background thread, but not a real
+remote network round-trip, real terminal rendering of shell output, or
+the in-app password-prompt dialogs' real on-screen behavior. Rick can
+confirm against `silvren.com:505` and a packaged build when convenient.
 
 ## Standing rules: verification and assumptions
 

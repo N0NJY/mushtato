@@ -372,3 +372,35 @@ def test_result_profile_preserves_auto_login_unchanged(qapp):
     result = dialog.result_profile()
 
     assert result.auto_login is True
+
+
+# -- SSH support (post-Phase-13 addition) --------------------------------
+
+
+def test_dialog_defaults_to_telnet_with_ssh_username_disabled(qapp):
+    world = make_world()
+    dialog = WorldPropertiesDialog(None, world=world)
+
+    assert dialog._selected_protocol() == "telnet"
+    assert dialog.ssh_username_edit.isEnabled() is False
+
+
+def test_dialog_loads_ssh_protocol_and_username_from_the_world(qapp):
+    world = make_world(protocol="ssh", ssh_username="rickn0njy")
+    dialog = WorldPropertiesDialog(None, world=world)
+
+    assert dialog._selected_protocol() == "ssh"
+    assert dialog.ssh_username_edit.text() == "rickn0njy"
+    assert dialog.ssh_username_edit.isEnabled() is True
+
+
+def test_result_profile_reflects_edited_protocol_and_username(qapp):
+    world = make_world()
+    dialog = WorldPropertiesDialog(None, world=world)
+    dialog.protocol_combo.setCurrentIndex(dialog.protocol_combo.findData("ssh"))
+    dialog.ssh_username_edit.setText("rickn0njy")
+
+    result = dialog.result_profile()
+
+    assert result.protocol == "ssh"
+    assert result.ssh_username == "rickn0njy"

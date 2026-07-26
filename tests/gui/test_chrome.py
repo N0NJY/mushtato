@@ -397,6 +397,47 @@ def test_mail_window_end_to_end_send_persists_format_to_disk(qapp, tmp_path: Pat
     assert load_address_book(ab_path)[0].mail_format == "MUX @mail"
 
 
+def test_new_tab_action_is_always_enabled(qapp, tmp_path: Path):
+    host = make_host(address_book_storage_path=tmp_path / "ab.json")
+    assert host.new_tab_action.isEnabled() is True
+
+
+def test_new_tab_action_opens_a_blank_tab(qapp, tmp_path: Path):
+    host = make_host(address_book_storage_path=tmp_path / "ab.json")
+    assert host.tab_widget.count() == 0
+
+    host.new_tab_action.trigger()
+
+    assert host.tab_widget.count() == 1
+    tab = host.tab_widget.widget(0)
+    assert tab.bridge is None
+    assert host.tab_widget.tabText(0) == "New Tab"
+
+
+def test_new_tab_hotkey_opens_a_blank_tab(qapp, tmp_path: Path):
+    from PySide6.QtCore import Qt
+    from PySide6.QtTest import QTest
+
+    host = make_host(address_book_storage_path=tmp_path / "ab.json")
+    host.show()
+    host.activateWindow()
+    QApplication.processEvents()
+    QTest.keyClick(host, Qt.Key.Key_T, Qt.KeyboardModifier.ControlModifier)
+    assert host.tab_widget.count() == 1
+
+
+def test_blank_tab_title_updates_the_visible_tab_label_once_connected(qapp, tmp_path: Path):
+    host = make_host(address_book_storage_path=tmp_path / "ab.json")
+    host.open_blank_tab()
+    tab = host.tab_widget.widget(0)
+    assert host.tab_widget.tabText(0) == "New Tab"
+
+    tab.name = "example.com:4201"
+    tab.titleChanged.emit(tab.name)
+
+    assert host.tab_widget.tabText(0) == "example.com:4201"
+
+
 def test_editor_action_is_always_enabled(qapp, tmp_path: Path):
     host = make_host(address_book_storage_path=tmp_path / "ab.json")
     assert host.editor_action.isEnabled() is True

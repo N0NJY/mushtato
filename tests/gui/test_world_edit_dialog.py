@@ -52,3 +52,43 @@ def test_editing_blank_host_still_returns_none(qapp):
     dialog = WorldEditDialog(None, world=original)
     dialog.host_edit.setText("")
     assert dialog.result_profile() is None
+
+
+# -- SSH support (post-Phase-13 addition) --------------------------------
+
+
+def test_defaults_to_telnet_protocol_with_ssh_username_disabled(qapp):
+    dialog = WorldEditDialog(None)
+    assert dialog._selected_protocol() == "telnet"
+    assert dialog.ssh_username_edit.isEnabled() is False
+
+
+def test_switching_to_ssh_enables_the_username_field(qapp):
+    dialog = WorldEditDialog(None)
+    dialog.protocol_combo.setCurrentIndex(dialog.protocol_combo.findData("ssh"))
+    assert dialog._selected_protocol() == "ssh"
+    assert dialog.ssh_username_edit.isEnabled() is True
+
+
+def test_new_ssh_world_round_trips_protocol_and_username(qapp):
+    dialog = WorldEditDialog(None)
+    dialog.name_edit.setText("My Server")
+    dialog.host_edit.setText("silvren.com")
+    dialog.port_spin.setValue(505)
+    dialog.protocol_combo.setCurrentIndex(dialog.protocol_combo.findData("ssh"))
+    dialog.ssh_username_edit.setText("rickn0njy")
+
+    result = dialog.result_profile()
+
+    assert result.protocol == "ssh"
+    assert result.ssh_username == "rickn0njy"
+
+
+def test_editing_an_existing_world_loads_its_saved_protocol(qapp):
+    original = WorldProfile(
+        name="X", host="h", port=505, protocol="ssh", ssh_username="rickn0njy"
+    )
+    dialog = WorldEditDialog(None, world=original)
+    assert dialog._selected_protocol() == "ssh"
+    assert dialog.ssh_username_edit.text() == "rickn0njy"
+    assert dialog.ssh_username_edit.isEnabled() is True

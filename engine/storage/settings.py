@@ -26,6 +26,7 @@ DEFAULT_HOTKEYS: Dict[str, str] = {
     "switch_input_focus": "Ctrl+Tab",
     "close_window": "Ctrl+W",
     "open_text_editor": "Ctrl+Shift+E",
+    "new_tab": "Ctrl+T",
 }
 
 # "dark" is the default (Phase 7b checkpoint): matches engine/ansi's

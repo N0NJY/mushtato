@@ -29,6 +29,12 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import List
 
+# A saved world is a Telnet MU* connection unless explicitly marked
+# otherwise -- "telnet" stays the default so every pre-SSH-feature
+# saved world keeps behaving exactly as before with no migration step.
+PROTOCOLS = ("telnet", "ssh")
+DEFAULT_PROTOCOL = "telnet"
+
 
 @dataclass
 class CharacterProfile:
@@ -86,6 +92,15 @@ class WorldProfile:
     mail_format_custom: str = "writeto %to% %cc% %bcc% about %subject% ;; write %body% ;; send"
     mail_convert_returns: bool = True
     mail_convert_returns_to: str = "%r"
+    # SSH support (post-13 addition): "telnet" (default, every existing
+    # world) or "ssh". ssh_username is saved like any other field, but
+    # the SSH *password* is deliberately never persisted here -- Rick's
+    # explicit call, since a real shell account's password is a higher-
+    # stakes secret than a MU* character's; it's prompted fresh at
+    # every connect instead (see gui/dialogs -- the Connect flow for an
+    # ssh-protocol world always asks).
+    protocol: str = DEFAULT_PROTOCOL
+    ssh_username: str = ""
 
 
 def load_address_book(path: Path) -> List[WorldProfile]:
@@ -129,6 +144,8 @@ def load_address_book(path: Path) -> List[WorldProfile]:
                 ),
                 mail_convert_returns=entry.get("mail_convert_returns", True),
                 mail_convert_returns_to=entry.get("mail_convert_returns_to", "%r"),
+                protocol=entry.get("protocol", DEFAULT_PROTOCOL),
+                ssh_username=entry.get("ssh_username", ""),
             )
         )
     return worlds
@@ -159,6 +176,8 @@ def save_address_book(path: Path, worlds: List[WorldProfile]) -> None:
                 "mail_format_custom": w.mail_format_custom,
                 "mail_convert_returns": w.mail_convert_returns,
                 "mail_convert_returns_to": w.mail_convert_returns_to,
+                "protocol": w.protocol,
+                "ssh_username": w.ssh_username,
             }
             for w in worlds
         ]

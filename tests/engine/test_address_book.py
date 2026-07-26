@@ -262,3 +262,35 @@ def test_pre_mail_settings_format_json_defaults_match_potato(tmp_path: Path):
     assert world.mail_format_custom == "writeto %to% %cc% %bcc% about %subject% ;; write %body% ;; send"
     assert world.mail_convert_returns is True
     assert world.mail_convert_returns_to == "%r"
+
+
+# -- SSH support (post-Phase-13 addition) --------------------------------
+
+
+def test_protocol_and_ssh_username_round_trip(tmp_path: Path):
+    path = tmp_path / "address_book.json"
+    world = WorldProfile(name="X", host="h", port=22, protocol="ssh", ssh_username="rickn0njy")
+    save_address_book(path, [world])
+
+    loaded = load_address_book(path)[0]
+    assert loaded.protocol == "ssh"
+    assert loaded.ssh_username == "rickn0njy"
+
+
+def test_pre_ssh_format_json_defaults_to_telnet_with_no_username(tmp_path: Path):
+    path = tmp_path / "address_book.json"
+    old_format_json = {"worlds": [{"name": "Old", "host": "old.example.com", "port": 1}]}
+    path.write_text(json.dumps(old_format_json), encoding="utf-8")
+
+    world = load_address_book(path)[0]
+    assert world.protocol == "telnet"
+    assert world.ssh_username == ""
+
+
+def test_ssh_password_is_never_part_of_the_saved_shape(tmp_path: Path):
+    # WorldProfile deliberately has no ssh_password field at all -- a
+    # real shell account's password must never be written to disk,
+    # unlike a MU* Character's password. This test would fail loudly
+    # (AttributeError) if such a field were ever added back.
+    world = WorldProfile(name="X", host="h", port=22, protocol="ssh")
+    assert not hasattr(world, "ssh_password")

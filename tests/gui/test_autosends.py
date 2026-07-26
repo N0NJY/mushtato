@@ -32,6 +32,32 @@ def test_no_world_means_no_autosends(qapp, tmp_path: Path):
     assert bridge.sent == []
 
 
+def test_ssh_protocol_world_skips_autosends_and_login_but_still_tracks_connect_count(
+    qapp, tmp_path: Path
+):
+    # Auto-sends/character login are raw MU* softcode lines -- sending
+    # them into a real SSH shell session would be meaningless and
+    # confusing, so they're skipped entirely for a non-Telnet world.
+    # connect_count is still tracked, since that's just a connection
+    # tally, not MU*-specific.
+    world = make_world(
+        protocol="ssh",
+        ssh_username="rickn0njy",
+        autosend_connect="look",
+        characters=[CharacterProfile(name="Guest", password="x")],
+        default_character="Guest",
+    )
+    host = MainWindow(address_book_storage_path=tmp_path / "ab.json", scripts_dir=tmp_path / "scripts")
+    bridge = FakeBridge()
+    host.open_tab("example.com", 4201, bridge=bridge, world=world)
+
+    bridge.connected.emit()
+    QTest.qWait(50)
+
+    assert bridge.sent == []
+    assert world.connect_count == 1
+
+
 def test_connect_autosend_fires_every_connect(qapp, tmp_path: Path):
     world = make_world(autosend_connect="look\nwho")
     host = MainWindow(address_book_storage_path=tmp_path / "ab.json", scripts_dir=tmp_path / "scripts")

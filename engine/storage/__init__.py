@@ -1,9 +1,17 @@
-from .address_book import CharacterProfile, WorldProfile, load_address_book, save_address_book
+from .address_book import (
+    DEFAULT_PROTOCOL,
+    PROTOCOLS,
+    CharacterProfile,
+    WorldProfile,
+    load_address_book,
+    save_address_book,
+)
 from .paths import (
     address_book_path,
     drafts_dir,
     logs_dir,
     settings_path,
+    ssh_known_hosts_path,
     user_data_dir,
     world_script_path,
 )
@@ -31,4 +39,7 @@ __all__ = [
     "settings_path",
     "logs_dir",
     "drafts_dir",
+    "ssh_known_hosts_path",
+    "PROTOCOLS",
+    "DEFAULT_PROTOCOL",
 ]

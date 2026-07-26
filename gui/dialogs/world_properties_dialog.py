@@ -44,7 +44,9 @@ from PySide6.QtWidgets import (
     QWidget,
 )
 
-from engine.storage import CharacterProfile, ScriptRecord, WorldProfile
+from engine.storage import PROTOCOLS, CharacterProfile, ScriptRecord, WorldProfile
+
+_PROTOCOL_LABELS = {"telnet": "Telnet", "ssh": "SSH"}
 
 
 class _CharactersPage(QWidget):
@@ -391,17 +393,34 @@ class WorldPropertiesDialog(QDialog):
     def _build_basic_page(self) -> None:
         page = QWidget(self)
         self.name_edit = QLineEdit(page)
+        # SSH support: Telnet (a MU*) unless explicitly switched to SSH
+        # (a real Unix shell account) -- ssh_username only meaningful/
+        # enabled for the latter. The SSH password is deliberately never
+        # a field here or anywhere persisted; always prompted at connect.
+        self.protocol_combo = QComboBox(page)
+        for value in PROTOCOLS:
+            self.protocol_combo.addItem(_PROTOCOL_LABELS[value], userData=value)
+        self.protocol_combo.currentIndexChanged.connect(self._update_protocol_field_states)
         self.host_edit = QLineEdit(page)
         self.port_spin = QSpinBox(page)
         self.port_spin.setRange(1, 65535)
+        self.ssh_username_edit = QLineEdit(page)
         self.default_character_combo = QComboBox(page)
 
         form = QFormLayout(page)
         form.addRow("World Name:", self.name_edit)
+        form.addRow("Protocol:", self.protocol_combo)
         form.addRow("Host:", self.host_edit)
         form.addRow("Port:", self.port_spin)
+        form.addRow("SSH Username:", self.ssh_username_edit)
         form.addRow("Default Character:", self.default_character_combo)
         self._add_page("Basic", page)
+
+    def _update_protocol_field_states(self) -> None:
+        self.ssh_username_edit.setEnabled(self._selected_protocol() == "ssh")
+
+    def _selected_protocol(self) -> str:
+        return self.protocol_combo.currentData()
 
     def _refresh_default_character_combo(self) -> None:
         current = self.default_character_combo.currentText()
@@ -520,8 +539,11 @@ class WorldPropertiesDialog(QDialog):
 
     def _load_from_world(self, world: WorldProfile) -> None:
         self.name_edit.setText(world.name)
+        self.protocol_combo.setCurrentIndex(PROTOCOLS.index(world.protocol))
         self.host_edit.setText(world.host)
         self.port_spin.setValue(world.port)
+        self.ssh_username_edit.setText(world.ssh_username)
+        self._update_protocol_field_states()
         self._refresh_default_character_combo()
         index = self.default_character_combo.findText(world.default_character)
         self.default_character_combo.setCurrentIndex(index if index >= 0 else 0)
@@ -574,6 +596,8 @@ class WorldPropertiesDialog(QDialog):
             # change used to silently reset auto_login back to False.
             auto_login=self._world.auto_login,
             nop_keepalive=self.keepalive_checkbox.isChecked(),
+            protocol=self._selected_protocol(),
+            ssh_username=self.ssh_username_edit.text().strip(),
         )
 
     def result_scripts(self) -> List[ScriptRecord]:

@@ -44,7 +44,7 @@ COMMAND_HELP: List[Tuple[str, str]] = [
     ("help", "List available commands/topics, or show help for one: /help [topic|command|topics]"),
     ("quit", "Close this tab"),
     ("spawnlog", "Open a log-mirror spawn window"),
-    ("connect", "Connect to a saved world by name: /connect [name]"),
+    ("connect", "Connect to a saved world by name, or a blank tab to a raw host/port: /connect [name] | [host] [port]"),
     ("settings", "Open the settings dialog"),
     ("version", "Show the MushTato version"),
     ("theme", "Switch theme: /theme [dark|light]"),
@@ -53,6 +53,8 @@ COMMAND_HELP: List[Tuple[str, str]] = [
     ("editor", "Open a new Text Editor window"),
     ("mail", "Open this tab's Mail Window (compose/send)"),
     ("upload", "Upload a file to this tab, line by line"),
+    ("ssh", "Connect this (blank) tab via SSH: /ssh [-p port] user@host"),
+    ("ssh-forget", "Forget a saved SSH host key: /ssh-forget [host[:port]]"),
 ]
 
 
@@ -151,8 +153,12 @@ same MUD at once), not a duplicate of an existing connection.
 Properties... opens a separate window with six sections (a category
 list on the left, that section's fields on the right):
 
-- **Basic** -- world name, host, port, and which saved Character (if
-  any) connects automatically by default.
+- **Basic** -- world name, Protocol (Telnet for a MU*, or SSH for a
+  real shell account -- see the SSH Connections topic; SSH Username
+  only applies when Protocol is SSH, and the SSH password is never
+  saved here or anywhere else, always prompted fresh at connect), host,
+  port, and which saved Character (if any) connects automatically by
+  default.
 - **Characters** -- a world can have multiple saved Characters, each
   just a name and password. Two different worlds can each have a
   Character with the same name and a different password -- Characters
@@ -168,7 +174,12 @@ list on the left, that section's fields on the right):
   proxy, and several other Telnet-specific options) mirrors real
   settings from Potato but is shown **disabled** -- MushTato's
   connection engine doesn't support them yet. Visible on purpose, so
-  it's clear what's planned versus what's broken.
+  it's clear what's planned versus what's broken. (Note: this "SSL"
+  checkbox is about *encrypting a Telnet/MU* connection* specifically,
+  a different, still-unbuilt feature -- if you want to connect to a
+  real Unix shell account, that's the Protocol: SSH option on the
+  Basic page instead, which is real and functional; see the SSH
+  Connections topic.)
 - **Auto-Sends** -- three optional blocks of text (one line each) sent
   automatically on connect, in this order: *first connect ever*
   (tracked per world -- only ever fires once, the very first time you
@@ -222,6 +233,11 @@ separate window per connection.
 
 - Opening a new world (via the Address Book, or `/connect [name]`)
   adds a new tab and switches to it.
+- File -> New Tab (or `Ctrl+T` by default) opens a **blank** tab with
+  no connection at all -- type `/connect [host] [port]` or
+  `/ssh [-p port] user@host` into it to connect (see the SSH
+  Connections topic for the latter). Useful for a one-off connection
+  you don't want to save to the Address Book.
 - Closing a tab (File menu -> Close, the Close toolbar button, `Ctrl+W`
   by default, or typing `/quit`) closes *only that tab* -- the main
   window itself stays open, even with zero tabs left, ready for a new
@@ -327,8 +343,9 @@ Tools, Help) and a toolbar underneath it with the same actions as
 buttons, plus a status bar at the bottom.
 
 **Functional today:**
-- **File** -- Address Book..., Reconnect, Disconnect, Close (closes
-  the active tab), Exit (quits MushTato).
+- **File** -- New Tab (opens a blank, unconnected tab; see the Sessions
+  & Tabs and SSH Connections topics), Address Book..., Reconnect,
+  Disconnect, Close (closes the active tab), Exit (quits MushTato).
 - **Edit** -- Cut, Copy, Paste, Undo, Redo, Select All (all act on
   whichever widget currently has keyboard focus -- an input box, or
   the active tab's scrollback for Copy/Select All), and Find...
@@ -715,6 +732,88 @@ doesn't replicate that (see SPEC.md section 8).
 """
 
 
+def _render_ssh(ctx: HelpContext) -> str:
+    del ctx
+    return """# SSH Connections
+
+Alongside MU*/MUSH connections (Telnet), MushTato can open a real SSH
+session -- a genuine login shell on a remote Unix-like machine, not a
+MUD connection. This is a different protocol from everything else in
+this app: it's encrypted, it authenticates you to the remote machine
+itself, and once connected you're typing real shell commands, not MU*
+commands.
+
+## Connecting
+
+Two ways, both available:
+
+- **Type it**: File -> New Tab (or `Ctrl+T`) opens a blank tab, then
+  type `/ssh [-p port] user@host` into it -- for example
+  `/ssh -p 505 rickn0njy@silvren.com`. Port defaults to 22 (the
+  standard SSH port) if you leave off `-p`.
+- **Save it**: in the Address Book, set a saved world's Protocol to
+  SSH (World Properties or the quick Add/Edit dialog) and fill in the
+  SSH Username field, then Connect as usual.
+
+Either way, you're prompted for the password every time you connect --
+**it is never saved to disk**, unlike a MU* Character's password. This
+is a deliberate choice: a real shell account's password is a higher-
+stakes secret than a game character's.
+
+Only password authentication is supported currently (no private-key
+files yet).
+
+## What actually works
+
+Typed input is sent line-by-line (type a command, press Enter, it's
+sent) -- exactly like MU* commands. This means ordinary commands
+(`ls`, `cat somefile`, a one-off admin script) work fine. It does
+**not** yet behave like a full interactive terminal: tab-completion,
+Ctrl+C to interrupt, and full-screen programs (`vim`, `top`, `less`)
+won't work correctly, since those need every keystroke sent immediately
+rather than a whole line at a time. This is a known, accepted limit of
+the current implementation, not a bug -- revisit if it turns out to
+matter enough in practice.
+
+## Host key verification (trust-on-first-use)
+
+The first time you connect to a given host:port, MushTato remembers
+the server's host key. Every later connection to that same host:port
+checks the key still matches -- if a server's key ever changes, the
+connection is **refused**, not silently allowed, exactly like a real
+`ssh` client's own "REMOTE HOST IDENTIFICATION HAS CHANGED" warning.
+The rejection message tells you the old and new key fingerprints and
+names the exact command to run if the change is actually expected
+(e.g. the server was reinstalled):
+
+```
+/ssh-forget host:port
+```
+
+This forgets the saved key for that one host:port so the *next*
+connection attempt is treated as first-use again (trusting whatever
+key the server offers, and saving it). If you connected on the default
+port 22, `/ssh-forget host` alone works too.
+
+Saved host keys live in their own file, separate from anything on your
+real system: `ssh_known_hosts.json` in the same per-OS MushTato data
+directory as your address book and settings (see `INSTALL.md`'s
+"Removing your data" section for the exact path). MushTato never
+reads or writes your actual `~/.ssh/known_hosts`. You can also delete
+that JSON file directly (or a single entry inside it) if you'd rather
+edit it by hand than use `/ssh-forget`.
+
+## What auto-sends/Character login don't do here
+
+A saved world's Auto-Sends and Character/login settings are MU*-
+specific (raw softcode "connect name password"-style lines) --
+they're skipped entirely for an SSH-protocol world, since sending them
+into a real shell prompt would be meaningless. `/mail` and `/upload`
+still work the same way they do on a Telnet tab (sending file/mail
+content is protocol-agnostic).
+"""
+
+
 def _render_faq(ctx: HelpContext) -> str:
     del ctx
     return """# FAQ / Troubleshooting
@@ -763,6 +862,13 @@ topic.
 
 **Where are my saved worlds/settings stored?** -- see `INSTALL.md`'s
 "Removing your data" section for the exact per-OS path.
+
+**An SSH connection says the host key doesn't match / has changed** --
+this is intentional, not a bug: MushTato refuses to silently trust a
+different key than the one it saw on your first connection to that
+host:port. If you're sure the change is expected (server reinstalled,
+etc.), run `/ssh-forget host:port` then reconnect. See the SSH
+Connections topic.
 """
 
 
@@ -770,6 +876,7 @@ TOPICS: List[HelpTopic] = [
     HelpTopic("about", "About MushTato", _render_about),
     HelpTopic("address-book", "Address Book", _render_address_book),
     HelpTopic("tabs", "Sessions & Tabs", _render_tabs),
+    HelpTopic("ssh-connections", "SSH Connections", _render_ssh),
     HelpTopic("chrome", "Menus & Toolbar", _render_chrome),
     HelpTopic("dual-input", "Dual Input", _render_dual_input),
     HelpTopic("spawn-windows", "Spawn Windows", _render_spawn_windows),

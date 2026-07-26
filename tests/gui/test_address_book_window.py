@@ -12,18 +12,43 @@ from gui.dialogs.world_edit_dialog import WorldEditDialog
 from gui.windows.address_book_window import AddressBookWindow
 
 
+class _FakeTabWidget:
+    """Just enough of QTabWidget's shape for AddressBookWindow's
+    existing-tab dedup check (used by _connect_ssh_world) -- starts
+    with zero tabs, since no test needs a pre-existing one unless it
+    explicitly pokes ``.fake_tabs`` itself.
+    """
+
+    def __init__(self) -> None:
+        self.fake_tabs: list = []
+        self.current_index = None
+
+    def count(self) -> int:
+        return len(self.fake_tabs)
+
+    def widget(self, index: int):
+        return self.fake_tabs[index]
+
+    def setCurrentIndex(self, index: int) -> None:  # noqa: N802 -- Qt-style name
+        self.current_index = index
+
+
 class FakeHostWindow:
     """Stands in for MainWindow -- records open_tab() calls instead of
     actually creating a SessionTab/TelnetBridge.
     """
 
-    def __init__(self, hotkeys=None) -> None:
+    def __init__(self, hotkeys=None, host_key_store=None) -> None:
         self._hotkeys = hotkeys if hotkeys is not None else dict(DEFAULT_HOTKEYS)
         self.open_tab_calls = []
+        self.open_tab_bridges = []
         self.reload_scripts_for_world_calls = []
+        self.tab_widget = _FakeTabWidget()
+        self._host_key_store = host_key_store
 
     def open_tab(self, host, port, *, name=None, bridge=None, world=None, character=None):
         self.open_tab_calls.append((host, port, name, world, character))
+        self.open_tab_bridges.append(bridge)
         return (host, port, name)
 
     def tabs_for_world(self, world_name):
@@ -107,6 +132,100 @@ def test_connect_asks_the_host_to_open_a_tab(qapp, tmp_path: Path):
     window._connect_selected()
 
     assert host.open_tab_calls == [("silvren.com", 4444, "Estrellita", worlds[0], None)]
+
+
+# -- SSH support (post-Phase-13 addition) --------------------------------
+
+
+def test_connect_to_an_ssh_world_prompts_for_password_then_opens_a_tab(qapp, tmp_path: Path, monkeypatch):
+    from PySide6.QtWidgets import QInputDialog
+
+    from engine.net import HostKeyStore
+
+    monkeypatch.setattr(QInputDialog, "getText", staticmethod(lambda *a, **k: ("secret", True)))
+
+    captured = {}
+
+    def fake_ssh_bridge(host, port, username, password, store):
+        captured.update(host=host, port=port, username=username, password=password, store=store)
+        return "the-fake-bridge"
+
+    monkeypatch.setattr("gui.windows.address_book_window.SshBridge", fake_ssh_bridge)
+
+    store = HostKeyStore(tmp_path / "known_hosts.json")
+    worlds = [
+        WorldProfile(
+            name="MyServer", host="silvren.com", port=505, protocol="ssh", ssh_username="rickn0njy"
+        )
+    ]
+    host = FakeHostWindow(host_key_store=store)
+    window = make_address_book(tmp_path, worlds, host_window=host)
+
+    window.list_widget.setCurrentRow(0)
+    window._connect_selected()
+
+    assert captured == {
+        "host": "silvren.com",
+        "port": 505,
+        "username": "rickn0njy",
+        "password": "secret",
+        "store": store,
+    }
+    assert host.open_tab_calls == [("silvren.com", 505, "MyServer", worlds[0], None)]
+    assert host.open_tab_bridges == ["the-fake-bridge"]
+
+
+def test_connect_to_an_ssh_world_cancelled_password_prompt_does_not_open_a_tab(
+    qapp, tmp_path: Path, monkeypatch
+):
+    from PySide6.QtWidgets import QInputDialog
+
+    monkeypatch.setattr(QInputDialog, "getText", staticmethod(lambda *a, **k: ("", False)))
+
+    worlds = [
+        WorldProfile(
+            name="MyServer", host="silvren.com", port=505, protocol="ssh", ssh_username="rickn0njy"
+        )
+    ]
+    host = FakeHostWindow()
+    window = make_address_book(tmp_path, worlds, host_window=host)
+
+    window.list_widget.setCurrentRow(0)
+    window._connect_selected()
+
+    assert host.open_tab_calls == []
+
+
+def test_reconnecting_to_an_already_open_ssh_world_switches_tabs_without_re_prompting(
+    qapp, tmp_path: Path, monkeypatch
+):
+    from PySide6.QtWidgets import QInputDialog
+
+    prompts = []
+    monkeypatch.setattr(
+        QInputDialog, "getText", staticmethod(lambda *a, **k: (prompts.append(1), ("secret", True))[1])
+    )
+
+    worlds = [
+        WorldProfile(
+            name="MyServer", host="silvren.com", port=505, protocol="ssh", ssh_username="rickn0njy"
+        )
+    ]
+    host = FakeHostWindow()
+    window = make_address_book(tmp_path, worlds, host_window=host)
+
+    class FakeExistingTab:
+        host = "silvren.com"
+        port = 505
+
+    host.tab_widget.fake_tabs.append(FakeExistingTab())
+
+    window.list_widget.setCurrentRow(0)
+    window._connect_selected()
+
+    assert prompts == []  # never prompted -- switched to the existing tab instead
+    assert host.open_tab_calls == []
+    assert host.tab_widget.current_index == 0
 
 
 def test_connecting_to_two_worlds_asks_the_host_twice(qapp, tmp_path: Path):

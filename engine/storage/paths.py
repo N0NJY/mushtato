@@ -56,6 +56,14 @@ def drafts_dir() -> Path:
     return user_data_dir() / "drafts"
 
 
+def ssh_known_hosts_path() -> Path:
+    # MushTato's own trust-on-first-use host-key store -- deliberately
+    # separate from the user's real ~/.ssh/known_hosts, never read or
+    # written by anything in this app. Plain JSON (host:port -> the
+    # server's public key), matching every other storage format here.
+    return user_data_dir() / "ssh_known_hosts.json"
+
+
 def safe_filename(name: str) -> str:
     """Sanitize an arbitrary world name for safe use as a filename."""
     cleaned = "".join(c if c.isalnum() or c in "-_ " else "_" for c in name).strip()

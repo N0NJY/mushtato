@@ -42,8 +42,10 @@ from engine.storage import (
 )
 from engine.storage import logs_dir as default_logs_dir
 from engine.storage import drafts_dir as default_drafts_dir
+from engine.storage import ssh_known_hosts_path
 from engine.storage.paths import safe_filename
 from engine.errorlog import get_error_log
+from engine.net import HostKeyStore
 
 from ..dialogs.settings_dialog import SettingsDialog
 from ..help.help_window import HelpWindow
@@ -107,6 +109,7 @@ class MainWindow(QMainWindow):
         editor_window_geometry: Optional[list] = None,
         editor_last_dir: str = "",
         upload_last_dir: str = "",
+        host_key_store=None,
     ) -> None:
         super().__init__()
         self.setWindowTitle("MushTato")
@@ -158,6 +161,14 @@ class MainWindow(QMainWindow):
         self._error_log = error_log if error_log is not None else get_error_log()
         # Phase 12: same override pattern as logs_dir above.
         self._drafts_dir = drafts_dir if drafts_dir is not None else default_drafts_dir()
+        # SSH support: same override pattern -- defaults to the real
+        # per-user known-hosts store, overridable so tests never touch
+        # it. One shared instance for every tab (blank tabs opened via
+        # open_blank_tab(), and eventually SSH-protocol address book
+        # worlds), since it's backed by one shared on-disk file.
+        self._host_key_store = (
+            host_key_store if host_key_store is not None else HostKeyStore(ssh_known_hosts_path())
+        )
         self._editor_font_family = editor_font_family
         self._editor_font_size = editor_font_size
         self._editor_line_numbers = editor_line_numbers
@@ -304,13 +315,48 @@ class MainWindow(QMainWindow):
             ),
             logs_dir_override=self._logs_dir,
             upload_last_dir=self._upload_last_dir,
+            host_key_store=self._host_key_store,
         )
+        self._wire_new_tab(tab)
+        return tab
+
+    def open_blank_tab(self) -> SessionTab:
+        """Opens a new tab with no connection yet -- the user
+        establishes it themselves by typing ``/connect <host> <port>``
+        or ``/ssh [-p port] user@host``. No existing-tab dedup check
+        applies here (there's no host:port yet to dedup against).
+        """
+        tab = SessionTab(
+            host_window=self,
+            theme=self._theme,
+            scrollback_font_family=self._scrollback_font_family,
+            scrollback_font_size=self._scrollback_font_size,
+            input_font_family=self._input_font_family,
+            input_font_size=self._input_font_size,
+            splitter_sizes=self._splitter_sizes or None,
+            upload_last_dir=self._upload_last_dir,
+            host_key_store=self._host_key_store,
+        )
+        self._wire_new_tab(tab)
+        return tab
+
+    def _wire_new_tab(self, tab: SessionTab) -> int:
         tab.connectionStateChanged.connect(lambda state, t=tab: self._on_tab_state_changed(t, state))
         tab.activity.connect(lambda t=tab: self._on_tab_activity(t))
+        # A blank tab's placeholder "New Tab" name becomes a real one
+        # once /connect or /ssh establishes its first connection --
+        # this is what keeps the QTabWidget's own label in sync with it.
+        tab.titleChanged.connect(lambda title, t=tab: self._on_tab_title_changed(t, title))
         index = self.tab_widget.addTab(tab, tab.name)
         self.tab_widget.setCurrentIndex(index)
         self._refresh_action_enabled_state()
-        return tab
+        return index
+
+    def _on_tab_title_changed(self, tab: SessionTab, title: str) -> None:
+        index = self.tab_widget.indexOf(tab)
+        if index != -1:
+            self.tab_widget.setTabText(index, title)
+        self._refresh_status_bar()
 
     def close_tab(self, tab: SessionTab) -> None:
         index = self.tab_widget.indexOf(tab)
@@ -774,6 +820,7 @@ class MainWindow(QMainWindow):
 
         # -- File ------------------------------------------------------
         self.file_menu = file_menu = menu_bar.addMenu("&File")
+        self.new_tab_action = add_action(file_menu, "New Tab", lambda: self.open_blank_tab())
         self.address_book_action = add_action(file_menu, "Address Book...", self._show_address_book)
         self.reconnect_action = add_action(file_menu, "Reconnect", self._reconnect_current_tab)
         self.disconnect_action = add_action(file_menu, "Disconnect", self._disconnect_current_tab)
@@ -782,6 +829,7 @@ class MainWindow(QMainWindow):
         file_menu.addSeparator()
         self.exit_action = add_action(file_menu, "Exit", self._exit_application)
 
+        toolbar.addAction(self.new_tab_action)
         toolbar.addAction(self.reconnect_action)
         toolbar.addAction(self.disconnect_action)
         toolbar.addAction(self.close_action)
@@ -1038,6 +1086,11 @@ class MainWindow(QMainWindow):
                 QKeySequence(self._hotkeys["open_text_editor"]),
                 self,
                 activated=self.open_text_editor,
+            ),
+            QShortcut(
+                QKeySequence(self._hotkeys["new_tab"]),
+                self,
+                activated=lambda: self.open_blank_tab(),
             ),
         ]
 

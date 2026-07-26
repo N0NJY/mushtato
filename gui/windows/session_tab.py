@@ -22,15 +22,25 @@ treatment via ``TelnetBridge.run_in_background``.
 
 from __future__ import annotations
 
+import re
 from pathlib import Path
-from typing import List, Optional
+from typing import List, Optional, Tuple
 
 from PySide6.QtCore import QDateTime, QTimer, Qt, Signal
 from PySide6.QtGui import QTextCursor
-from PySide6.QtWidgets import QSizePolicy, QSplitter, QTextBrowser, QVBoxLayout, QWidget
+from PySide6.QtWidgets import (
+    QInputDialog,
+    QLineEdit,
+    QSizePolicy,
+    QSplitter,
+    QTextBrowser,
+    QVBoxLayout,
+    QWidget,
+)
 
 from engine.ansi import DEFAULT_STYLE, Style, StyledSegment
 from engine.commands import CommandTable
+from engine.net import HostKeyStore
 from engine.scripting import (
     MAX_CONSECUTIVE_TRIGGER_FAILURES,
     DispatchOutcome,
@@ -47,6 +57,7 @@ from engine.storage import (
     WorldScriptProfile,
     load_world_scripts,
     save_world_scripts,
+    ssh_known_hosts_path,
     world_script_path,
 )
 
@@ -59,10 +70,31 @@ from .find_bar import FindBar
 from .history_line_edit import HistoryLineEdit
 from .mail_window import MailWindow
 from .spawn_window import SpawnWindow
+from .ssh_bridge import SshBridge
 from .styled_text_qt import append_styled_segments, replace_tail
 from .telnet_bridge import TelnetBridge
 from .upload_dialog import UploadDialog
 from .upload_session import UploadSession
+
+# "/ssh [-p PORT] user@host" -- both "-p 505" and squished "-p505" are
+# accepted, matching common CLI ssh usage (real OpenSSH's own getopt
+# parsing accepts both forms too). Port defaults to 22 (the standard
+# SSH port) when omitted, exactly like real ssh.
+_SSH_COMMAND_RE = re.compile(r"^\s*(?:-p\s*(?P<port>\d+)\s+)?(?P<user>[^@\s]+)@(?P<host>\S+)\s*$")
+
+
+def parse_ssh_command(args: str) -> Optional[Tuple[str, int, str]]:
+    """Parse a typed ``/ssh`` command's argument text into
+    ``(host, port, username)``, or ``None`` if it doesn't match the
+    expected ``[-p PORT] user@host`` shape at all. A standalone, pure
+    function (no Qt, no SessionTab instance needed) specifically so it
+    can be unit-tested directly against its exact parsing rules.
+    """
+    match = _SSH_COMMAND_RE.match(args)
+    if not match:
+        return None
+    port = int(match.group("port")) if match.group("port") else 22
+    return match.group("host"), port, match.group("user")
 
 
 class SessionTab(QWidget):
@@ -104,8 +136,8 @@ class SessionTab(QWidget):
 
     def __init__(
         self,
-        host: str,
-        port: int,
+        host: str = "",
+        port: int = 0,
         *,
         name: Optional[str] = None,
         bridge: Optional[TelnetBridge] = None,
@@ -122,19 +154,27 @@ class SessionTab(QWidget):
         script_store_path=None,  # test-only override for world_script_path(world.name); see _script_store_path()
         logs_dir_override=None,  # Phase 11: passed straight through to each spawn window; see spawn_log_window()
         upload_last_dir: str = "",  # shared "next Upload dialog's starting directory" preference
+        host_key_store: Optional[HostKeyStore] = None,  # for /ssh and /ssh-forget; see _host_key_store()
     ) -> None:
         super().__init__()
+        # host=="" is a "blank tab" -- no bridge yet, established later by
+        # a typed /connect <host> <port> or /ssh command (see
+        # _connect_telnet/_connect_ssh below). Every pre-existing caller
+        # (MainWindow.open_tab, every test) always passes a real host, so
+        # this default only ever activates via the new open_blank_tab().
         self.host = host
         self.port = port
-        self.name = name or f"{host}:{port}"
+        self.name = name or (f"{host}:{port}" if host else "New Tab")
         self.host_window = host_window
         self.world = world
         self._script_store_path_override = script_store_path
         self._logs_dir_override = logs_dir_override
+        self._host_key_store_override = host_key_store
         self._explicit_character = character
         self._theme = theme if theme is not None else DEFAULT_THEME
         self.connected_at: Optional[QDateTime] = None
-        self.connection_state = "Connecting"
+        self.bridge = None  # set below (blank tab) or by _start_bridge (connected)
+        self.connection_state = "Connecting" if host else "Disconnected"
         self.spawn_windows: List[SpawnWindow] = []
         # One per tab, not a list like spawn_windows -- matches Potato's
         # real .mailWindow$c behavior (opening a second re-shows the
@@ -243,10 +283,11 @@ class SessionTab(QWidget):
         # -- Phase 9: scripting --------------------------------------
         # Unconditional, even for a world with zero saved scripts --
         # one uniform pipeline for every tab, no "scripting active or
-        # not" branch. send() is a lazy closure (self.bridge doesn't
-        # exist yet at this point) rather than a direct reference.
+        # not" branch. send() is a lazy closure (self.bridge may not
+        # exist yet -- either this hasn't reached bridge construction
+        # below, or this is a still-blank tab with no bridge at all).
         self.script_world = ScriptWorld(
-            send=lambda text: self.bridge.send_line(text),
+            send=lambda text: self.bridge.send_line(text) if self.bridge is not None else None,
             echo=self._script_echo,
         )
         self._line_dispatcher = LineDispatcher(self.script_world.triggers)
@@ -259,20 +300,47 @@ class SessionTab(QWidget):
 
         # Dependency-injectable so tests can supply a fake bridge that
         # never touches the network (see tests/gui) -- the real
-        # runtime path just omits this argument. set_on_text() is
-        # called uniformly on whichever bridge we end up with (fresh or
-        # injected), rather than only passed at TelnetBridge's own
-        # construction, so a test's FakeBridge participates in the same
-        # on_text-then-textReceived contract a real TelnetBridge does.
-        self.bridge = bridge if bridge is not None else TelnetBridge(
-            host, port, nop_keepalive=world.nop_keepalive if world is not None else False
-        )
+        # runtime path just omits this argument.
+        if host:
+            default_bridge = bridge if bridge is not None else TelnetBridge(
+                host, port, nop_keepalive=world.nop_keepalive if world is not None else False
+            )
+            self._start_bridge(default_bridge, host, port, f"Connecting to {host}:{port} ...\n")
+        else:
+            self._append_plain(
+                "[Blank tab. Type /connect <host> <port>, or "
+                "/ssh [-p port] user@host, to begin.]\n"
+            )
+
+    def _host_key_store(self) -> HostKeyStore:
+        """Resolves to the real per-user known-hosts file (engine/
+        storage/paths.ssh_known_hosts_path) unless a test explicitly
+        overrode it at construction -- the same dependency-injection
+        pattern _script_store_path() already uses, so tests never touch
+        the real user data directory just by exercising /ssh.
+        """
+        if self._host_key_store_override is not None:
+            return self._host_key_store_override
+        return HostKeyStore(ssh_known_hosts_path())
+
+    def _start_bridge(self, bridge, host: str, port: int, connecting_message: str) -> None:
+        """Wire up and start ``bridge`` (a TelnetBridge or SshBridge --
+        anything implementing the same start/send_line/stop/
+        set_on_text + connected/connectionClosed/connectionFailed
+        contract) as this tab's active connection. Called from
+        __init__ for the normal (non-blank) construction path, and
+        from _connect_telnet/_connect_ssh when a previously-blank tab
+        establishes its first connection.
+        """
+        self.bridge = bridge
+        self.host = host
+        self.port = port
         self.bridge.set_on_text(self._on_raw_incoming_text)
         self.bridge.connected.connect(self._on_connected)
         self.bridge.connectionClosed.connect(self._on_connection_closed)
         self.bridge.connectionFailed.connect(self._on_connection_failed)
 
-        self._append_plain(f"Connecting to {host}:{port} ...\n")
+        self._append_plain(connecting_message)
         self._drain_and_schedule_pending_timers()
         self.bridge.start()
 
@@ -628,6 +696,14 @@ class SessionTab(QWidget):
         is_first_connect = self.world.connect_count == 0
         if self.host_window is not None:
             self.host_window.record_world_connected(self.world)
+        if self.world.protocol != "telnet":
+            # Auto-sends/character-login are MU*-specific raw softcode
+            # login lines -- meaningless (and actively confusing) typed
+            # into a real SSH shell session, so they're skipped entirely
+            # for a non-Telnet world. connect_count is still tracked
+            # above regardless of protocol -- that's just a connection
+            # tally, not MU*-specific.
+            return
         delay_ms = max(0, int(self.world.login_delay * 1000))
         QTimer.singleShot(delay_ms, lambda: self._send_autosends(is_first_connect))
 
@@ -721,6 +797,11 @@ class SessionTab(QWidget):
         self._start_auto_reconnect()
 
     def _send_to_bridge(self, text: str, *, apply_aliases: bool) -> None:
+        if self.bridge is None:
+            self._append_plain(
+                "[Not connected. Use /connect <host> <port> or /ssh [-p port] user@host.]\n"
+            )
+            return
         self._append_plain(text + "\n")
         if apply_aliases:
             # Off the GUI thread -- AliasEngine.expand() can call
@@ -877,6 +958,9 @@ class SessionTab(QWidget):
         # Potato's own behavior (verified against potato-skin.tcl,
         # where the Disconnect button is reused as "cancel reconnect"
         # while a retry is scheduled).
+        if self.bridge is None:
+            self._append_plain("[Not connected.]\n")
+            return
         self._stop_auto_reconnect()
         self._cancel_upload_if_running()
         self.bridge.stop()
@@ -892,6 +976,12 @@ class SessionTab(QWidget):
         # TelnetBridge.start() spins up a fresh background thread/loop/
         # client each call, so the signal connections made once above
         # never need redoing.
+        if self.bridge is None:
+            self._append_plain(
+                "[Nothing to reconnect -- use /connect <host> <port> or "
+                "/ssh [-p port] user@host first.]\n"
+            )
+            return
         self.bridge.stop()
         self.input_line.setEnabled(True)
         self.secondary_input.setEnabled(True)
@@ -906,7 +996,8 @@ class SessionTab(QWidget):
         """
         self._stop_auto_reconnect()
         self._cancel_upload_if_running()
-        self.bridge.stop()
+        if self.bridge is not None:
+            self.bridge.stop()
         for spawn in list(self.spawn_windows):
             spawn.close()
         self.save_script_state()
@@ -935,6 +1026,8 @@ class SessionTab(QWidget):
             "editor": self._cmd_editor,
             "mail": self._cmd_mail,
             "upload": self._cmd_upload,
+            "ssh": self._cmd_ssh,
+            "ssh-forget": self._cmd_ssh_forget,
         }
         for name, help_text in COMMAND_HELP:
             self._commands.register(name, handlers[name], help_text)
@@ -983,12 +1076,76 @@ class SessionTab(QWidget):
         return "Spawned a log window."
 
     def _cmd_connect(self, args: str) -> Optional[str]:
+        tokens = args.split()
+        # A blank tab's raw "host port" form -- distinguished from a
+        # saved-world-name lookup by shape (exactly two tokens, the
+        # second numeric), not by connection state, so it also works
+        # to open a genuinely new connection on an already-blank tab
+        # regardless of whether a host_window exists.
+        if len(tokens) == 2 and tokens[1].isdigit():
+            if self.bridge is not None:
+                return "This tab is already connected."
+            self._connect_telnet(tokens[0], int(tokens[1]))
+            return None
         if self.host_window is None:
             return "Not available in this session (no host window)."
         name = args.strip()
         if not name:
-            return "Usage: /connect [world-name]"
+            return "Usage: /connect <world-name>  or  /connect <host> <port>"
         return self.host_window.connect_by_name(name)
+
+    def _connect_telnet(self, host: str, port: int) -> None:
+        """Establishes this (previously blank) tab's Telnet connection
+        -- the raw "/connect host port" counterpart to the address
+        book's Connect button, for a tab with no saved world at all.
+        """
+        self.name = f"{host}:{port}"
+        self.titleChanged.emit(self.name)
+        self._start_bridge(TelnetBridge(host, port), host, port, f"Connecting to {host}:{port} ...\n")
+
+    def _cmd_ssh(self, args: str) -> Optional[str]:
+        if self.bridge is not None:
+            return "This tab is already connected."
+        parsed = parse_ssh_command(args)
+        if parsed is None:
+            return "Usage: /ssh [-p port] user@host"
+        host, port, username = parsed
+        password, ok = QInputDialog.getText(
+            self,
+            "SSH Password",
+            f"Password for {username}@{host}:{port}:",
+            QLineEdit.EchoMode.Password,
+        )
+        if not ok:
+            return "SSH connect cancelled."
+        self._connect_ssh(host, port, username, password)
+        return None
+
+    def _connect_ssh(self, host: str, port: int, username: str, password: str) -> None:
+        self.name = f"{username}@{host}"
+        self.titleChanged.emit(self.name)
+        bridge = SshBridge(host, port, username, password, self._host_key_store())
+        self._start_bridge(
+            bridge, host, port, f"Connecting via SSH to {username}@{host}:{port} ...\n"
+        )
+
+    def _cmd_ssh_forget(self, args: str) -> Optional[str]:
+        target = args.strip()
+        if not target:
+            return "Usage: /ssh-forget <host>[:port]"
+        if ":" in target:
+            host, _, port_text = target.rpartition(":")
+            if not port_text.isdigit():
+                return f"Invalid port in {target!r}."
+            port = int(port_text)
+        else:
+            host, port = target, 22
+        if self._host_key_store().forget(host, port):
+            return (
+                f"Forgot the saved host key for {host}:{port}. "
+                "The next connect will trust whatever key the server offers."
+            )
+        return f"No saved host key found for {host}:{port}."
 
     def _cmd_settings(self, args: str) -> Optional[str]:
         del args

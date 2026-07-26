@@ -34,6 +34,7 @@ ACTION_LABELS: Dict[str, str] = {
     "switch_input_focus": "Switch Input Focus",
     "close_window": "Close Window",
     "open_text_editor": "Open Text Editor",
+    "new_tab": "New Tab",
 }
 
 # Display label -> stored value, in display order.
