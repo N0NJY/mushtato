@@ -97,6 +97,17 @@ def parse_ssh_command(args: str) -> Optional[Tuple[str, int, str]]:
     return match.group("host"), port, match.group("user")
 
 
+def _is_authentication_failure(message: str) -> bool:
+    """True if ``message`` (as built by SshBridge's generic-exception
+    handler, ``f"{type(exc).__name__}: {exc}"``) names asyncssh's real
+    ``PermissionDenied`` exception -- i.e. bad credentials, not a
+    network-level problem. A standalone function (like
+    parse_ssh_command above) specifically so it's directly unit-
+    testable without constructing a whole SessionTab.
+    """
+    return message.startswith("PermissionDenied")
+
+
 class SessionTab(QWidget):
     """A single connection's scrollback/input/bridge, embeddable as one
     page of MainWindow's QTabWidget. Constructible with
@@ -794,6 +805,21 @@ class SessionTab(QWidget):
         self._set_connection_state("Disconnected")
         self._cancel_upload_if_running()
         self.save_script_state()
+        if _is_authentication_failure(message):
+            # Retrying with the exact same (bad) credentials every 30s,
+            # forever, can never succeed -- unlike a genuine dropped
+            # network connection, which auto-reconnect exists for.
+            # Confirmed as real, real-world behavior (not hypothetical)
+            # by deliberately testing a wrong SSH password: it looped
+            # indefinitely until manually disconnected. Rick's explicit
+            # checkpoint choice: don't auto-reconnect in this one case.
+            self._append_plain(
+                "[Not retrying automatically -- this looks like a login/"
+                "authentication failure, and the same credentials would "
+                "only fail again. Reconnect manually (or /ssh again with "
+                "the right password) once that's sorted.]\n"
+            )
+            return
         self._start_auto_reconnect()
 
     def _send_to_bridge(self, text: str, *, apply_aliases: bool) -> None:

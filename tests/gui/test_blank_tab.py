@@ -14,7 +14,7 @@ from pathlib import Path
 
 import gui.windows.session_tab as session_tab_module
 from engine.net import HostKeyStore
-from gui.windows.session_tab import SessionTab, parse_ssh_command
+from gui.windows.session_tab import SessionTab, _is_authentication_failure, parse_ssh_command
 from tests.gui.test_main_window_smoke import FakeBridge
 
 
@@ -49,6 +49,21 @@ def test_parse_ssh_command_rejects_malformed_input():
     assert parse_ssh_command("not-a-valid-command") is None
     assert parse_ssh_command("") is None
     assert parse_ssh_command("-p 505") is None  # no user@host at all
+
+
+# -- _is_authentication_failure (pure, no Qt needed) ---------------------
+
+
+def test_is_authentication_failure_recognizes_permission_denied():
+    assert _is_authentication_failure(
+        "PermissionDenied: Permission denied for user x on host y"
+    ) is True
+
+
+def test_is_authentication_failure_rejects_other_messages():
+    assert _is_authentication_failure("OSError: Connection refused") is False
+    assert _is_authentication_failure("network unreachable") is False
+    assert _is_authentication_failure("") is False
 
 
 # -- blank tab construction ------------------------------------------------

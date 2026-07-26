@@ -324,13 +324,20 @@ Properties -> Connection (see the Address Book topic).
 
 ## Automatic reconnection
 
-Once a tab's connection drops -- however it drops -- that tab
-automatically retries connecting again every 30 seconds, on its own,
-with no confirmation prompt, and keeps retrying indefinitely until
-either a retry succeeds or you click Disconnect (File menu, toolbar,
-or `/disconnect`) to give up on it. Each retry is the exact same action
-as manually clicking Reconnect. This runs independently per tab -- one
-tab retrying doesn't affect any other tab's connection.
+Once a tab's connection drops, that tab automatically retries
+connecting again every 30 seconds, on its own, with no confirmation
+prompt, and keeps retrying indefinitely until either a retry succeeds
+or you click Disconnect (File menu, toolbar, or `/disconnect`) to give
+up on it. Each retry is the exact same action as manually clicking
+Reconnect. This runs independently per tab -- one tab retrying doesn't
+affect any other tab's connection.
+
+One exception: an SSH tab that fails to connect because of a login/
+authentication problem (wrong username or password) does **not**
+auto-reconnect -- retrying with the same bad credentials could never
+succeed, unlike a genuine dropped network connection. Reconnect
+manually (or `/ssh` again with the right password) once that's sorted.
+See the SSH Connections topic.
 """
 
 

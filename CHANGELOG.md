@@ -12,6 +12,19 @@ and the About box) — bumped after each completed item on the working
 todo/bugs list, not per-commit: a patch bump (1.0.x) for a bug fix, a
 minor bump (1.x.0) for a new feature/behavior change.
 
+## 1.0.2 — Fix: SSH no longer auto-reconnects after a bad password (2026-07-26)
+
+- After an SSH login/authentication failure, MushTato used to still
+  auto-reconnect and retry every 30 seconds with the identical (wrong)
+  password, indefinitely -- correct behavior for a genuinely dropped
+  network connection, but retrying can never fix a bad password.
+  Confirmed as real, reproducible behavior (not hypothetical) by
+  deliberately testing a wrong password against a real local `sshd`.
+  Fixed: an authentication failure specifically is no longer
+  auto-retried -- reconnect manually (or `/ssh` again with the right
+  password) instead. Real network-level failures still auto-reconnect
+  exactly as before.
+
 ## 1.0.1 — Fix: World Properties silently reset Mail Window settings (2026-07-26)
 
 - Saving World Properties for *any* reason (even something unrelated,

@@ -35,6 +35,34 @@ def test_connection_failed_starts_auto_reconnect(qapp):
     assert tab._auto_reconnect_timer.isActive() is True
 
 
+# -- SSH authentication failures don't auto-reconnect (post-1.0.1 fix) --
+# Real, reproduced behavior: retrying every 30s with the same wrong SSH
+# password loops forever, since the same credentials will only ever
+# fail again -- unlike a genuine dropped network connection, which
+# auto-reconnect exists for.
+
+
+def test_ssh_authentication_failure_does_not_start_auto_reconnect(qapp):
+    tab, bridge = make_tab()
+
+    bridge.connectionFailed.emit(
+        "PermissionDenied: Permission denied for user someone on host example.com"
+    )
+
+    assert tab._auto_reconnect_timer.isActive() is False
+    assert "Not retrying automatically" in tab.scrollback.toPlainText()
+
+
+def test_non_auth_connection_failure_still_auto_reconnects(qapp):
+    # A real network-level failure (not shaped like SshBridge's
+    # PermissionDenied message) must still retry as before.
+    tab, bridge = make_tab()
+
+    bridge.connectionFailed.emit("OSError: Connection refused")
+
+    assert tab._auto_reconnect_timer.isActive() is True
+
+
 def test_successful_connect_stops_auto_reconnect(qapp):
     tab, bridge = make_tab()
     bridge.connectionClosed.emit()

@@ -2999,6 +2999,64 @@ About) rather than a separate padded display string -- Rick's own
 rules and found to get silently normalized to "1.0.0" by any tool that
 reads it, so plain semver was used instead.
 
+**Fixed as version 1.0.2 (2026-07-26): SSH auto-reconnect no longer
+retries after an authentication failure specifically.** This was
+originally just a *finding* from testing (see the "SSH connections"
+entry above -- deliberately testing a wrong password against a real
+local `sshd` showed auto-reconnect kicking in and retrying every 30s
+with the same bad password, forever). Rick asked to test it himself
+first ("I haven't had an auto connect yet"), then confirmed real
+auto-reconnect DOES work correctly for a legitimate case (typing `exit`
+in a real shell session, connection closes, reconnects successfully
+with the same, correct, cached credentials) -- a materially different
+scenario from the bad-password case, both confirmed for real before
+deciding anything. Checkpointed via `AskUserQuestion`: stop
+auto-reconnecting specifically on an authentication failure, keep it
+for real network drops (the recommended option, chosen).
+
+Implementation: a new standalone `_is_authentication_failure(message)`
+function in `session_tab.py` (checks whether the message -- built by
+`SshBridge`'s existing `f"{type(exc).__name__}: {exc}"` generic-
+exception handler, unchanged -- names asyncssh's real `PermissionDenied`
+exception), consulted only in `_on_connection_failed()`, not
+`_on_connection_closed()` -- a clean close (e.g. the shell exiting)
+isn't an auth problem and must keep auto-reconnecting exactly as
+before, which is exactly what Rick's own successful real-world test
+already demonstrated. Deliberately a message-content check rather than
+a new signal/richer bridge contract change (which would have touched
+`TelnetBridge`/`FakeBridge`/every test constructing one) -- proportionate
+to a small, well-contained fix; the message format it depends on is
+already deterministic and solely produced by `SshBridge`'s own existing
+code, not something this fix needed to invent.
+
+Verified per standing rule 7: new tests proving the message-detection
+function directly (`test_is_authentication_failure_recognizes_
+permission_denied`/`_rejects_other_messages`), a `SessionTab`-level test
+confirming a `PermissionDenied`-shaped `connectionFailed` does NOT start
+the auto-reconnect timer (and prints the explanatory message), and a
+regression test confirming a differently-shaped failure message
+("OSError: Connection refused") still auto-reconnects as before, using
+the exact same `FakeBridge.connectionFailed.emit(...)` pattern
+`test_auto_reconnect.py` already established. Also re-verified against
+the real local `sshd` one more time (not just the fake-bridge unit
+tests): deliberately connected with a wrong password, confirmed the
+exact same "[Not retrying automatically...]" message and
+`_auto_reconnect_timer.isActive() is False` this time, matching the
+predicted fix precisely.
+
+**A new segfault trigger combination found while confirming the fix's
+test suite, bisected rather than assumed, recorded in SPEC.md section
+8 (same pre-existing gap, not a new one, and not caused by this fix's
+own logic):** running `test_ssh_client.py` (plain `asyncio.run()`, no
+Qt) together with the Qt-heavy SSH/GUI test files segfaults reliably.
+Confirmed via bisection that no smaller subset reproduces it (every
+pair, and the full set minus `test_ssh_client.py`, pass cleanly,
+repeatedly) -- consistent with the already-tracked "real background
+threads + heavy Qt/thread churn in one process" root cause, now with
+`SshBridge`'s own thread added to the mix, not a logic bug in the
+auto-reconnect fix itself (which passes cleanly every time this
+specific combination isn't hit).
+
 **Deliberately out of scope, stated plainly rather than glossed over:**
 true character-mode/raw terminal input (tab-completion, Ctrl+C, `vim`/
 `top`/`less`) -- checkpointed and explicitly deferred, not an oversight.

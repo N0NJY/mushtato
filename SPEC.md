@@ -259,6 +259,25 @@ Two cleanly separated layers:
   threads) -- that one is fixed (rewritten on plain file I/O + an
   instance-scoped lock); this pre-existing gap is not, and remains
   exactly as scoped above.
+
+  **Reconfirmed again post-SSH-feature (2026-07-26), a new trigger
+  combination, same underlying pattern:** running
+  `tests/engine/test_ssh_client.py` (plain `asyncio.run()`, no Qt)
+  together with the Qt-heavy SSH/GUI test files (`test_ssh_bridge_
+  integration.py`, `test_auto_reconnect.py`, `test_blank_tab.py`,
+  `test_chrome.py`, `test_help_content.py`) segfaults reliably (2/2
+  repeated runs) -- confirmed via bisection, not assumed: any pair or
+  small subset of these files passes cleanly in isolation (including
+  `test_ssh_client.py` + `test_ssh_bridge_integration.py` together,
+  11/11 clean), and dropping `test_ssh_client.py` alone from the full
+  combination makes it pass cleanly too (111/111). This points at the
+  same root cause already tracked above -- real background threads
+  (now including `SshBridge`'s own asyncio loop thread) accumulating
+  alongside heavy Qt widget/thread churn in one process -- not a new
+  architectural gap and not a bug in the SSH feature's own logic
+  (every SSH test passes cleanly, repeatedly, whenever this specific
+  combination isn't hit). Not fixed, for the same reason as above:
+  the real fix is the same tracked subprocess-isolation redesign.
 - ~~macOS notarization: pursue Apple Developer Program membership, or ship
   unsigned with a documented Gatekeeper workaround?~~ **Decided (Phase 7):
   ship unsigned for now.** Not a technical call — section 3 already
