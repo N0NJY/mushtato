@@ -6,6 +6,21 @@ of work, per `CLAUDE.md`/`SPEC.md`'s roadmap) rather than by version
 number, reconstructed from `CLAUDE.md`'s phase-by-phase notes and git
 history. All dates below are from the actual commit history.
 
+## Post-Phase-13 fix — stray terminal escape sequences over SSH (2026-07-26)
+
+- A real bash session over the new SSH feature sends two kinds of
+  escape sequence a MU* server never does: bracketed-paste-mode
+  toggling (`ESC[?2004h`/`l`) and window-title-setting (`ESC]0;...`).
+  Neither matched `engine/ansi`'s parser (which only recognized plain
+  numeric CSI sequences), so both leaked through as literal garbled
+  text in the scrollback -- found by Rick in real testing. Fixed by
+  recognizing and silently discarding both sequence families, the same
+  treatment any other non-color CSI sequence already got; this doesn't
+  implement their actual behavior (no real title-bar or paste-mode
+  logic), it just stops them from rendering as visible garbage. Full
+  terminal emulation (cursor movement, screen redraws -- needed for
+  `vim`/`top`/`less`) remains a known, separate, much larger gap.
+
 ## Post-Phase-13 — SSH connections (2026-07-26)
 
 - MushTato can now open a real SSH session -- a genuine login shell on

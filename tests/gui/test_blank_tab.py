@@ -211,7 +211,7 @@ def test_ssh_forget_removes_a_saved_entry(qapp, tmp_path: Path):
     store = HostKeyStore(tmp_path / "known_hosts.json")
     import asyncssh
 
-    key = asyncssh.generate_private_key("ssh-rsa").convert_to_public()
+    key = asyncssh.generate_private_key("ssh-ed25519").convert_to_public()
     store.check("silvren.com", 505, key)  # seed a trusted entry
 
     tab = make_blank_tab(host_key_store=store)
@@ -232,7 +232,7 @@ def test_ssh_forget_defaults_to_port_22(qapp, tmp_path: Path):
     store = HostKeyStore(tmp_path / "known_hosts.json")
     import asyncssh
 
-    key = asyncssh.generate_private_key("ssh-rsa").convert_to_public()
+    key = asyncssh.generate_private_key("ssh-ed25519").convert_to_public()
     store.check("example.com", 22, key)
 
     tab = make_blank_tab(host_key_store=store)

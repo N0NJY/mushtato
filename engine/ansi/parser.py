@@ -4,9 +4,29 @@ Turns raw text containing ANSI escape sequences into a list of
 :class:`StyledSegment` objects -- (text, Style) pairs -- with no
 dependency on any GUI toolkit. Only SGR sequences (``ESC [ ... m``,
 which carry color and text attributes) affect the returned style;
-other CSI sequences (cursor movement, screen clearing, etc.) are
+other CSI sequences (cursor movement, screen clearing, DEC private
+modes, etc.) and OSC sequences (window-title-setting and similar) are
 recognized and dropped rather than rendered as literal text, since
 this is a color/style extractor, not a full terminal emulator.
+
+Post-SSH-feature fix: real interactive shell sessions (unlike MU*
+servers) routinely send two sequence families a MUD server never does
+-- DEC private-mode CSI sequences (``ESC [ ? ... h/l``, e.g. bash's
+bracketed-paste-mode toggle ``ESC[?2004h``) and OSC sequences
+(``ESC ] ... BEL``, e.g. the window-title-setting bash sends on every
+prompt). Neither matched the original CSI grammar (params were
+digits/semicolons only, and OSC uses a different second byte, ``]``
+not ``[``), so both fell through to the "unrecognized escape" path,
+which only drops the lone ESC byte and leaves the rest of the sequence
+behind as literal, visible text -- confirmed directly against a real
+bash session over the new SSH feature, not theoretical. Fixed by
+recognizing (and fully discarding) both families here, the same
+"consumed and dropped, not rendered as text" treatment every other
+non-SGR CSI sequence already gets -- this does not implement their
+actual semantics (no real window-title tracking, no real paste-mode
+logic), it just stops them from leaking into the scrollback. A MU*
+server has no reason to ever send either family, so this is a strict
+addition with no effect on existing Telnet/MU* rendering.
 
 The parser is stateful across calls to :meth:`AnsiParser.feed`, for two
 reasons: an escape sequence can be split across two reads from the
@@ -25,13 +45,34 @@ from .style import DEFAULT_STYLE, RGB, Style, StyledSegment
 
 ESC = "\x1b"
 
-# A complete CSI sequence: ESC [ params... final-byte.
-_CSI_RE = re.compile(r"\x1b\[([0-9;]*)([@-~])")
+# A complete CSI sequence: ESC [ params... final-byte. Parameter bytes
+# include "?" (not just digits/semicolons) specifically to also
+# recognize DEC private-mode sequences (ESC[?2004h/l -- bracketed
+# paste mode, ESC[?25h/l -- cursor visibility, ESC[?1049h/l --
+# alternate screen buffer, etc.) as real, recognized sequences to
+# discard, rather than leaving their "?..." tail behind as literal
+# text the way an unrecognized escape's fallback path does.
+_CSI_RE = re.compile(r"\x1b\[([0-9;?]*)([@-~])")
 
 # An escape sequence that's well-formed *so far* but cut off by the end
 # of the currently available data -- i.e. still waiting on its final
 # byte from the next network read.
-_PARTIAL_RE = re.compile(r"\x1b(\[[0-9;]*)?\Z")
+_PARTIAL_RE = re.compile(r"\x1b(\[[0-9;?]*)?\Z")
+
+# A complete OSC (Operating System Command) sequence: ESC ] ...
+# terminated by either BEL (the common real-world case -- e.g. bash's
+# window-title-setting) or ESC \ (the formal String Terminator).
+_OSC_RE = re.compile(r"\x1b\][^\x07\x1b]*(?:\x07|\x1b\\)")
+
+# An OSC sequence whose terminator hasn't arrived yet in the data seen
+# so far -- keep buffering rather than treating it as unrecognized/
+# literal text (mirrors _PARTIAL_RE's same role for CSI sequences).
+# The trailing "\x1b?" accounts for a lone ESC that might be the start
+# of an ST (ESC \) terminator whose second byte hasn't arrived yet --
+# without it, a *complete* ST-terminated sequence followed by more data
+# would be misdetected as still-partial, since nothing here stops at
+# BEL specifically the way _OSC_RE's "complete" match does.
+_OSC_PARTIAL_RE = re.compile(r"\x1b\][^\x07\x1b]*\x1b?\Z")
 
 
 class AnsiParser:
@@ -61,32 +102,41 @@ class AnsiParser:
                     segments.append(StyledSegment(data[text_start:], self._style))
                 return segments
 
-            if _PARTIAL_RE.match(data, esc):
+            if _PARTIAL_RE.match(data, esc) or _OSC_PARTIAL_RE.match(data, esc):
                 if text_start < esc:
                     segments.append(StyledSegment(data[text_start:esc], self._style))
                 self._pending = data[esc:]
                 return segments
 
             match = _CSI_RE.match(data, esc)
-            if match is None:
-                # An escape we don't understand (or malformed input).
-                # Drop just the ESC byte and keep scanning -- never get
-                # stuck on it.
+            if match is not None:
                 if text_start < esc:
                     segments.append(StyledSegment(data[text_start:esc], self._style))
-                pos = esc + 1
+                if match.group(2) == "m":
+                    self._apply_sgr(match.group(1))
+                # Any other CSI final byte (cursor movement, clear
+                # screen, DEC private modes like bracketed paste, etc.)
+                # is consumed and dropped, not rendered as text.
+                pos = match.end()
                 text_start = pos
                 continue
 
+            osc_match = _OSC_RE.match(data, esc)
+            if osc_match is not None:
+                if text_start < esc:
+                    segments.append(StyledSegment(data[text_start:esc], self._style))
+                # OSC sequences (window-title-setting and similar) are
+                # consumed and dropped entirely -- this parser has no
+                # concept of a window title to set.
+                pos = osc_match.end()
+                text_start = pos
+                continue
+
+            # An escape we don't understand (or malformed input). Drop
+            # just the ESC byte and keep scanning -- never get stuck on it.
             if text_start < esc:
                 segments.append(StyledSegment(data[text_start:esc], self._style))
-
-            if match.group(2) == "m":
-                self._apply_sgr(match.group(1))
-            # Any other CSI final byte (cursor movement, clear screen,
-            # etc.) is consumed and dropped, not rendered as text.
-
-            pos = match.end()
+            pos = esc + 1
             text_start = pos
 
     def _apply_sgr(self, params: str) -> None:

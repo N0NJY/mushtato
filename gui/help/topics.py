@@ -775,6 +775,15 @@ rather than a whole line at a time. This is a known, accepted limit of
 the current implementation, not a bug -- revisit if it turns out to
 matter enough in practice.
 
+A real shell also sends two kinds of escape sequence a MU* server
+never does -- bracketed-paste-mode toggling and window-title-setting
+-- both are recognized and silently discarded rather than shown as
+garbled text (fixed after Rick found them leaking through in real
+testing). Sequences a full terminal emulator would need to actually
+*act on* (cursor movement, screen redraws -- what the programs listed
+above rely on) are still just dropped, not implemented; only these two
+specific, harmless-to-ignore kinds get this treatment.
+
 ## Host key verification (trust-on-first-use)
 
 The first time you connect to a given host:port, MushTato remembers

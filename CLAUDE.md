@@ -3023,8 +3023,109 @@ GUI-facing addition this session; the local-server tests prove the
 real `asyncssh` wire protocol, real TOFU host-key persistence, and real
 Qt signal delivery across a real background thread, but not a real
 remote network round-trip, real terminal rendering of shell output, or
-the in-app password-prompt dialogs' real on-screen behavior. Rick can
-confirm against `silvren.com:505` and a packaged build when convenient.
+the in-app password-prompt dialogs' real on-screen behavior.
+
+**Update: verified against a real desktop and a real local account the
+same day, by Rick himself.** Confirmed working end to end (real host-
+key trust-and-save against the machine's actual `sshd`, real password
+auth, a real interactive shell session, and the documented auto-
+reconnect-retries-with-the-same-bad-password behavior reproduced
+exactly as predicted when Rick deliberately tested it) -- "Works
+GREAT!" Not yet tested against a real *remote* server (`silvren.com`),
+but no reason to expect different behavior there.
+
+**Post-fix: stray terminal escape sequences leaking into the scrollback
+over SSH — done.** Extended `engine/ansi/parser.py` only (`_CSI_RE`/
+`_PARTIAL_RE` broadened to accept `?` in CSI parameters; new `_OSC_RE`/
+`_OSC_PARTIAL_RE`).
+
+Found by Rick pasting real bash output from his own successful SSH
+test: literal `[?2004h`/`[?2004l` and `]0;user@host: ~` text appearing
+before the real prompt. Root-caused directly against the parser source
+before proposing a fix, not guessed: `_CSI_RE`'s parameter character
+class was `[0-9;]*` (digits/semicolons only), so DEC private-mode
+sequences like `ESC[?2004h` (bracketed paste mode -- real bash sends
+this around every prompt) failed to match at all, since `?` isn't in
+that class; separately, OSC sequences (`ESC]...BEL`, e.g. bash's
+window-title-setting, also sent on every prompt) use a completely
+different second byte (`]`, not `[`) that the CSI-only grammar never
+recognized in the first place. Both fell into the parser's existing
+"unrecognized escape -- drop just the ESC byte, leave the rest as
+literal text" fallback path, which is exactly why the *rest* of each
+sequence (everything after the invisible ESC byte) showed up as
+visible garbage.
+
+Fixed by recognizing (and fully discarding) both sequence families,
+the same "consumed and dropped, not rendered as text" treatment every
+other non-SGR CSI sequence already receives -- deliberately not
+implementing their actual semantics (no real window-title tracking, no
+real bracketed-paste-mode logic), matching Rick's own explicit
+instruction to take "the easier solution" rather than build toward a
+full terminal emulator (a genuinely bigger undertaking, confirmed and
+logged separately as a deferred item, not attempted here). A MU*
+server has no reason to ever send either sequence family, so this is a
+strict, additive recognition change with no path to affecting existing
+Telnet/MU* rendering -- confirmed by running the complete pre-existing
+`test_ansi_parser.py` suite unchanged (all 10 prior tests still pass
+verbatim) before adding anything new.
+
+**A real bug in the fix itself, caught by its own new test, not shipped
+unnoticed:** the first draft's OSC partial-match regex
+(`_OSC_PARTIAL_RE`) excluded BEL from its "still waiting" character
+class but not ESC, so a *complete*, ST-terminated (`ESC \`) sequence
+followed by more real text was wrongly classified as "still incomplete
+-- keep buffering," silently swallowing everything after it (including
+the real trailing text) into the buffered `_pending` state forever.
+Caught immediately by
+`test_osc_sequence_st_terminated_is_dropped` actually failing (not
+inspection) before this shipped; fixed by also excluding a lone
+trailing ESC (matched optionally) from what counts as "still pending,"
+with a dedicated split-across-two-`feed()`-calls regression test
+(`test_osc_sequence_st_terminated_split_right_at_the_terminator`)
+proving the exact failure mode is closed, not just re-describing the
+fix.
+
+Verified per standing rule 7: 8 new tests in `test_ansi_parser.py`
+covering bracketed-paste-mode dropping (both `h` and `l`, and split
+across `feed()` calls), OSC dropping under both real terminator forms
+(BEL and ST, including the split-right-at-the-terminator edge case
+that caught the bug above), a reconstruction of the *exact* real-world
+byte sequence Rick reported (`\x1b[?2004h\x1b]0;rick@n0njy: ~\x07rick@n0njy:~$ `)
+asserting the parser now emits only the real prompt text, and a check
+that a private-mode sequence appearing mid-stream doesn't disturb SGR
+style-tracking state. Also added a Help-topic update (SSH Connections)
+and this CHANGELOG entry. Full suite: unchanged pass count plus these 8
+new tests, confirmed clean; the pre-existing known-crash trio
+(`test_scripting_integration.py`, `test_world_properties_dialog.py`,
+`test_address_book_window.py`) re-verified passing together,
+unaffected by this fix (it never touches scripting/dialog code at
+all).
+
+**A second, genuinely unrelated real bug found while re-running the
+full suite to confirm the fix above, not caused by it:**
+`test_ssh_client.py::test_connect_send_and_receive` started failing
+100% reproducibly (`asyncssh.misc.KeyExchangeFailed: Unable to find
+compatible server host key`) -- confirmed via 5 repeated isolated runs
+that this was deterministic, not the already-documented flaky-segfault
+gap. Root-caused directly rather than assumed: every SSH test fixture
+across `test_ssh_client.py`/`test_ssh_bridge_integration.py`/
+`test_blank_tab.py` generated a throwaway `ssh-rsa` (RSA+SHA-1) test
+server host key; something in this environment (most likely a
+`cryptography`/`asyncssh` dependency update since these tests were
+last run clean earlier the same session) now rejects that legacy
+signature algorithm during key exchange, confirmed directly by testing
+`ssh-ed25519` key generation in isolation and finding it connects fine.
+Notably, this also matches this machine's own real `sshd` -- the
+manual verification earlier this session already showed it offers an
+ED25519 host key, not RSA, so the test fixtures' original `ssh-rsa`
+choice was already unrepresentative of real-world usage, not just now
+broken. Fixed by switching every test fixture's generated key type to
+`ssh-ed25519` (a one-line-per-occurrence change, `sed`-applied
+consistently across all three files) -- confirmed zero production-code
+references to any specific key algorithm anywhere in `engine/net/
+ssh_client.py` or `gui/windows/ssh_bridge.py` (the client never
+generates keys, only validates whatever a real server offers), so this
+was purely a test-fixture fix, nothing shipped was ever affected.
 
 ## Standing rules: verification and assumptions
 

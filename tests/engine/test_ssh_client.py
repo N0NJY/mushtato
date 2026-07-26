@@ -61,7 +61,7 @@ async def _read_text(client: SshClient) -> str:
 
 
 async def _run_connect_and_echo(known_hosts_path: Path) -> None:
-    key = asyncssh.generate_private_key("ssh-rsa")
+    key = asyncssh.generate_private_key("ssh-ed25519")
     server, port = await _start_server(key)
     async with server:
         store = HostKeyStore(known_hosts_path)
@@ -87,7 +87,7 @@ def test_connect_send_and_receive(tmp_path: Path):
 
 
 async def _run_wrong_password(known_hosts_path: Path) -> None:
-    key = asyncssh.generate_private_key("ssh-rsa")
+    key = asyncssh.generate_private_key("ssh-ed25519")
     server, port = await _start_server(key)
     async with server:
         store = HostKeyStore(known_hosts_path)
@@ -104,7 +104,7 @@ def test_wrong_password_raises_permission_denied(tmp_path: Path):
 
 
 async def _run_tofu_trust_then_reuse(known_hosts_path: Path) -> None:
-    key = asyncssh.generate_private_key("ssh-rsa")
+    key = asyncssh.generate_private_key("ssh-ed25519")
     server, port = await _start_server(key)
     async with server:
         store = HostKeyStore(known_hosts_path)
@@ -125,7 +125,7 @@ def test_first_connect_trusts_and_saves_the_key(tmp_path: Path):
 
 
 async def _run_tofu_mismatch(known_hosts_path: Path) -> None:
-    key1 = asyncssh.generate_private_key("ssh-rsa")
+    key1 = asyncssh.generate_private_key("ssh-ed25519")
     server1, port = await _start_server(key1)
     store = HostKeyStore(known_hosts_path)
 
@@ -137,7 +137,7 @@ async def _run_tofu_mismatch(known_hosts_path: Path) -> None:
     # A second server on the SAME port with a DIFFERENT key -- simulates
     # an impersonation/MITM scenario, or (more innocently) a legitimate
     # server reinstall.
-    key2 = asyncssh.generate_private_key("ssh-rsa")
+    key2 = asyncssh.generate_private_key("ssh-ed25519")
     server2 = await asyncssh.listen(
         "127.0.0.1", port, server_host_keys=[key2],
         process_factory=_fake_shell, server_factory=_FakeServer,
@@ -156,7 +156,7 @@ def test_changed_key_is_rejected_not_silently_trusted(tmp_path: Path):
 
 
 async def _run_forget_then_reconnect(known_hosts_path: Path) -> None:
-    key1 = asyncssh.generate_private_key("ssh-rsa")
+    key1 = asyncssh.generate_private_key("ssh-ed25519")
     server1, port = await _start_server(key1)
     store = HostKeyStore(known_hosts_path)
 
@@ -165,7 +165,7 @@ async def _run_forget_then_reconnect(known_hosts_path: Path) -> None:
         await trusted.connect()
         await trusted.close()
 
-    key2 = asyncssh.generate_private_key("ssh-rsa")
+    key2 = asyncssh.generate_private_key("ssh-ed25519")
     server2 = await asyncssh.listen(
         "127.0.0.1", port, server_host_keys=[key2],
         process_factory=_fake_shell, server_factory=_FakeServer,
@@ -197,7 +197,7 @@ def test_host_key_store_only_writes_the_path_it_was_given(tmp_path: Path):
     # at construction is ever touched.
     custom_path = tmp_path / "totally_isolated.json"
     store = HostKeyStore(custom_path)
-    key = asyncssh.generate_private_key("ssh-rsa").convert_to_public()
+    key = asyncssh.generate_private_key("ssh-ed25519").convert_to_public()
 
     assert store.check("example.com", 22, key) is True
 

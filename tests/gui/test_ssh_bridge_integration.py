@@ -58,7 +58,7 @@ def _start_fake_ssh_server_in_background(ready: threading.Event, host_port: dict
     state: dict = {}
 
     async def serve():
-        key = asyncssh.generate_private_key("ssh-rsa")
+        key = asyncssh.generate_private_key("ssh-ed25519")
         server = await asyncssh.listen(
             "127.0.0.1", 0, server_host_keys=[key],
             process_factory=_fake_shell, server_factory=_FakeServer,
@@ -151,7 +151,7 @@ def test_host_key_mismatch_emits_connection_failed_naming_ssh_forget(qapp, tmp_p
     assert ready.wait(timeout=3), "fake ssh server never started"
 
     known_hosts_path = tmp_path / "known_hosts.json"
-    wrong_key = asyncssh.generate_private_key("ssh-rsa").convert_to_public()
+    wrong_key = asyncssh.generate_private_key("ssh-ed25519").convert_to_public()
     entry = f"{host_port['host']}:{host_port['port']}"
     known_hosts_path.write_text(
         json.dumps({entry: wrong_key.export_public_key().decode("ascii")}), encoding="utf-8"
