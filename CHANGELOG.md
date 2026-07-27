@@ -12,6 +12,17 @@ and the About box) — bumped after each completed item on the working
 todo/bugs list, not per-commit: a patch bump (1.0.x) for a bug fix, a
 minor bump (1.x.0) for a new feature/behavior change.
 
+## 1.2.1 — Fix: About/version showed "dev" instead of the real version (2026-07-26)
+
+- The version display (`/version`, the About box, the Help window's
+  About section) relied entirely on Python package-install metadata,
+  which isn't present when running from source without `pip install
+  -e .`, and typically isn't bundled at all in a PyInstaller-frozen
+  build — both cases silently showed "dev" even on a real tagged
+  release. Fixed by falling back to reading `pyproject.toml`'s
+  `version` field directly (now also bundled into the packaged build)
+  whenever package metadata isn't found.
+
 ## 1.2.0 — Per-world input-pane splitter size (2026-07-26)
 
 - The dual-input splitter (the boundary between the scrollback and the

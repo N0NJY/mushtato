@@ -3468,6 +3468,66 @@ Not verified against a real desktop this round -- same honest gap as
 every GUI-facing change this session: real dragging feel and the
 actual persisted-across-restart behavior remain Rick's to confirm.
 
+**Fixed as version 1.2.1 (2026-07-26): About/version showed "dev"
+instead of the real version.** Extended `gui/version.py`,
+`packaging/mushtato.spec`.
+
+Rick reported the About box showing "dev" and asked for the real
+version number. Root-caused directly rather than assumed:
+`mushtato_version()` relied entirely on
+`importlib.metadata.version("mushtato")`, which only succeeds if the
+package has real installed dist-info/egg-info metadata -- true in this
+session's own dev venv (which had `pip install -e .` re-run after every
+version bump this session), but not necessarily true wherever Rick
+actually runs the app. Confirmed empirically in this sandbox (not
+assumed) that faking a `PackageNotFoundError` reproduces exactly the
+reported "dev" symptom.
+
+**A more significant finding surfaced while root-causing this, stated
+with the right amount of confidence per standing rule 1:** a
+PyInstaller-frozen build very likely hits this same failure
+unconditionally, every time, regardless of any local `pip install`
+step -- PyInstaller does not bundle a package's own dist-info metadata
+by default unless something explicitly asks it to (a well-known
+category of gotcha for a package that looks up its own metadata via
+`importlib.metadata` at runtime, usually solved via `copy_metadata()`
+in a PyInstaller hook). This could not be verified directly this
+session since PyInstaller isn't installed in this sandbox, so it's
+presented as "very likely, based on well-documented PyInstaller
+behavior, not directly confirmed this session" rather than a verified
+fact -- but it means the real, distributed packaged build was probably
+*always* going to show "dev," independent of Rick's own local reinstall
+habits, which made this worth fixing at the root rather than just
+telling him to reinstall.
+
+**Fix:** `mushtato_version()` now falls back to reading
+`pyproject.toml`'s `version` field directly (via stdlib `tomllib`,
+available since Python 3.11 -- this project's own `requires-python`
+floor, so no new dependency) whenever package metadata isn't found,
+resolving `pyproject.toml`'s path via the identical dev-vs-frozen-build
+pattern `gui/asset_paths.py` already established
+(`sys.frozen`/`sys._MEIPASS`). `packaging/mushtato.spec` now also
+bundles `pyproject.toml` at the frozen bundle's root (alongside the
+existing `gui/assets/` bundling) so this fallback has something to read
+in a packaged build, not just in dev-from-source. `importlib.metadata`
+remains the first-tried path (correct for an actual installed
+distribution, e.g. a real wheel), with this as the fallback, not a
+replacement.
+
+Verified per standing rule 7 with a new `tests/gui/test_version.py` (4
+tests, not assumed safe by inspection): the normal installed-package
+path still returns the real version; a faked `PackageNotFoundError`
+falls back to reading the real `pyproject.toml` and returns the actual
+current version (not "dev"); the identical fallback works when
+`sys.frozen`/`sys._MEIPASS` are monkeypatched to point at a temp
+directory holding a copied `pyproject.toml`, simulating the frozen-
+build path directly rather than trusting the dev-mode branch to imply
+the frozen one also works; and the ultimate `"dev"` placeholder still
+returns correctly when truly nothing is found (no crash). Not verified
+against a real PyInstaller build this round (PyInstaller isn't
+installed in this sandbox) -- Rick can confirm on the next GitHub
+Actions build.
+
 ## Standing rules: verification and assumptions
 
 These apply to every session, every phase, not just security-sensitive ones.

@@ -26,6 +26,17 @@ as every other OS's folder), so the macOS icon's real visible effect
 here is limited to the raw executable's own icon resource, not a
 Finder-visible .app icon -- a fuller macOS .app bundle is a separate,
 more invasive packaging change, not attempted here.
+
+Version display (2026-07-26): `pyproject.toml` is also bundled, at the
+frozen bundle's root (matching gui/version.py's sys._MEIPASS/
+pyproject.toml lookup) -- a frozen PyInstaller build doesn't carry a
+package's own dist-info metadata by default, so
+importlib.metadata.version("mushtato") would otherwise always fail in
+a packaged build and silently fall back to the "dev" placeholder even
+on a real tagged release; bundling the real source of truth directly
+is simpler than trying to make PyInstaller preserve install metadata
+that was never generated for an app that isn't pip-installed from a
+wheel in the first place.
 """
 
 import sys
@@ -41,7 +52,10 @@ a = Analysis(
     ["../gui/app.py"],
     pathex=[],
     binaries=[],
-    datas=[("../gui/assets", "gui/assets")],
+    datas=[
+        ("../gui/assets", "gui/assets"),
+        ("../pyproject.toml", "."),
+    ],
     hiddenimports=[],
     hookspath=[],
     hooksconfig={},
