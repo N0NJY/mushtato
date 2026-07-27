@@ -309,7 +309,10 @@ class MainWindow(QMainWindow):
             scrollback_font_size=self._scrollback_font_size,
             input_font_family=self._input_font_family,
             input_font_size=self._input_font_size,
-            splitter_sizes=self._splitter_sizes or None,
+            splitter_sizes=(
+                (world.splitter_sizes if world is not None and world.splitter_sizes else None)
+                or (self._splitter_sizes or None)
+            ),
             script_store_path=(
                 self._scripts_dir / f"{safe_filename(world.name)}.json" if world is not None else None
             ),
@@ -492,9 +495,18 @@ class MainWindow(QMainWindow):
 
     def record_splitter_sizes(self, sizes) -> None:
         """Remember the dual-input splitter's last-dragged sizes as one
-        global preference -- applied as the *starting* split for every
-        newly-opened tab, this session or a future launch (Rick's
-        explicit choice over per-world persistence).
+        global preference -- applied as the *starting* split for the
+        next newly-opened tab that has no world of its own (a blank tab,
+        or a raw ``/connect host port``), this session or a future
+        launch.
+
+        Post-1.1.0: a tab connected to a *saved* world no longer goes
+        through this method at all -- see
+        ``save_splitter_sizes_for_world`` below, which persists per-world
+        instead, reversing the original post-8b decision to keep this a
+        single app-wide preference (per Rick's later, explicit request).
+        This method remains the mechanism for world-less tabs, which
+        have nowhere per-world to persist to.
 
         Deliberately does NOT resize any already-open tab's splitter --
         unlike theme/fonts, dragging one tab's split isn't a "setting
@@ -507,6 +519,32 @@ class MainWindow(QMainWindow):
         """
         self._splitter_sizes = list(sizes)
         self._splitter_save_timer.start()
+
+    def save_splitter_sizes_for_world(self, world: WorldProfile, sizes) -> None:
+        """Persist ``world``'s dual-input splitter size (post-1.1.0) --
+        same reload-find-copy-save pattern as
+        ``save_mail_settings_for_world``, since ``world`` may not be the
+        same object AddressBookWindow's in-memory list holds. Debouncing
+        happens on the caller's side (SessionTab keeps its own per-tab
+        timer) since this does a full address-book reload/save on every
+        call -- much more expensive than the in-memory-only
+        ``record_splitter_sizes`` above, so it must never be called on
+        every raw ``splitterMoved`` pixel event.
+        """
+        world.splitter_sizes = list(sizes)
+        worlds = load_address_book(self._address_book_path)
+        for candidate in worlds:
+            if (
+                candidate.name.lower() == world.name.lower()
+                and candidate.host == world.host
+                and candidate.port == world.port
+            ):
+                candidate.splitter_sizes = world.splitter_sizes
+                break
+        save_address_book(self._address_book_path, worlds)
+        if self._address_book_window is not None:
+            self._address_book_window.worlds = worlds
+            self._address_book_window._refresh_list()
 
     # -- Phase 12: Text Editor shared "next new window" preferences ---
     # Same reasoning as record_splitter_sizes above: each of these is a

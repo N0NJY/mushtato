@@ -431,3 +431,16 @@ def test_result_profile_preserves_mail_settings_unchanged(qapp):
     assert result.mail_format_custom == "custom template %to% %body%"
     assert result.mail_convert_returns is False
     assert result.mail_convert_returns_to == "\\n"
+
+
+def test_result_profile_preserves_splitter_sizes_unchanged(qapp):
+    # Same class of bug as auto_login/mail_* above: this dialog has no
+    # UI for splitter_sizes at all (it's only ever set by dragging the
+    # splitter in an open tab) -- must be carried through unchanged.
+    world = make_world(splitter_sizes=[300, 200])
+    dialog = WorldPropertiesDialog(None, world=world)
+    dialog.name_edit.setText("Renamed World")  # an unrelated change
+
+    result = dialog.result_profile()
+
+    assert result.splitter_sizes == [300, 200]

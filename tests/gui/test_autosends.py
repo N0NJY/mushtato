@@ -244,3 +244,62 @@ def test_save_mail_settings_for_world_persists_across_a_fresh_load(qapp, tmp_pat
     assert reloaded.mail_format_custom == "custom template"
     assert reloaded.mail_convert_returns is False
     assert reloaded.mail_convert_returns_to == "\\n"
+
+
+def test_save_splitter_sizes_for_world_persists_across_a_fresh_load(qapp, tmp_path: Path):
+    from engine.storage import save_address_book
+
+    ab_path = tmp_path / "ab.json"
+    save_address_book(ab_path, [make_world(name="Persisted")])
+    host = MainWindow(address_book_storage_path=ab_path, scripts_dir=tmp_path / "scripts")
+    world = load_address_book(ab_path)[0]
+
+    host.save_splitter_sizes_for_world(world, [300, 200])
+
+    assert load_address_book(ab_path)[0].splitter_sizes == [300, 200]
+
+
+def test_open_tab_prefers_the_world_s_own_splitter_sizes_over_the_global_default(
+    qapp, tmp_path: Path
+):
+    from PySide6.QtWidgets import QApplication
+
+    # An unshown/unresized widget has ~0 real geometry in the offscreen
+    # test environment -- QSplitter.setSizes() has nothing to actually
+    # distribute against until the *host* window (the tab's real parent
+    # via tab_widget) gets a real size, not the tab itself.
+    # splitter.addWidget order is (scrollback, input), so sizes are
+    # given in that order too -- [500, 100] favors scrollback, [100,
+    # 500] favors input, deliberately opposite from each other so the
+    # assertion can't pass by accident if the wrong one is used.
+    host = MainWindow(address_book_storage_path=tmp_path / "ab.json", scripts_dir=tmp_path / "scripts")
+    host._splitter_sizes = [500, 100]  # the global fallback -- must be ignored here
+    world = make_world(splitter_sizes=[100, 500])
+
+    tab = host.open_tab("example.com", 4201, bridge=FakeBridge(), world=world)
+    host.resize(900, 700)
+    host.show()
+    QApplication.processEvents()
+    QTest.qWait(10)
+
+    scrollback_size, input_size = tab.splitter.sizes()
+    assert input_size > scrollback_size  # world's [100, 500] favors input, not the global fallback
+
+
+def test_open_tab_falls_back_to_the_global_default_when_the_world_has_no_saved_size(
+    qapp, tmp_path: Path
+):
+    from PySide6.QtWidgets import QApplication
+
+    host = MainWindow(address_book_storage_path=tmp_path / "ab.json", scripts_dir=tmp_path / "scripts")
+    host._splitter_sizes = [100, 500]  # global fallback -- should be used since the world has none
+    world = make_world()  # splitter_sizes defaults to []
+
+    tab = host.open_tab("example.com", 4201, bridge=FakeBridge(), world=world)
+    host.resize(900, 700)
+    host.show()
+    QApplication.processEvents()
+    QTest.qWait(10)
+
+    scrollback_size, input_size = tab.splitter.sizes()
+    assert input_size > scrollback_size

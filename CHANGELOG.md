@@ -12,6 +12,16 @@ and the About box) — bumped after each completed item on the working
 todo/bugs list, not per-commit: a patch bump (1.0.x) for a bug fix, a
 minor bump (1.x.0) for a new feature/behavior change.
 
+## 1.2.0 — Per-world input-pane splitter size (2026-07-26)
+
+- The dual-input splitter (the boundary between the scrollback and the
+  input boxes) now remembers its size per saved world, instead of one
+  shared size for every tab — dragging it while connected to "MyMUSH"
+  no longer affects the starting size of a tab you open for a
+  different world. A tab with no saved world (a blank tab, or a raw
+  `/connect host port`) keeps the previous shared-size behavior, since
+  there's nothing per-world to remember it against.
+
 ## 1.1.0 — Real icon + splash screen artwork (2026-07-26)
 
 - MushTato now has a real window icon, tray icon, and startup splash

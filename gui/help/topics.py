@@ -514,10 +514,13 @@ Both boxes keep their own independent recall history (Up/Down arrows
 step through what *that* box has sent, not the other one's).
 
 The boundary between the scrollback and the input boxes can be dragged
-to resize how much space each gets -- MushTato remembers wherever you
-last dragged it to and uses that as the starting size for every tab
-you open from then on, this session or a future launch. See the Fonts
-topic for changing the size/typeface of the text in either area.
+to resize how much space each gets. For a tab connected to a saved
+world, MushTato remembers that world's last-dragged size and uses it
+as the starting size the next time you open a tab for that same world
+-- this session or a future launch. A tab with no saved world (a blank
+tab, or a raw `/connect host port`) instead remembers one shared size
+across every such tab. See the Fonts topic for changing the size/
+typeface of the text in either area.
 """
 
 

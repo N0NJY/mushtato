@@ -6,6 +6,7 @@ Now lives on SessionTab (Phase 7e) rather than MainWindow itself.
 from PySide6.QtCore import Qt
 from PySide6.QtGui import QKeyEvent
 
+from engine.storage.address_book import WorldProfile
 from gui.windows.history_line_edit import HistoryLineEdit
 from gui.windows.session_tab import SessionTab
 from tests.gui.test_main_window_smoke import FakeBridge
@@ -100,9 +101,13 @@ def test_constructing_with_no_splitter_sizes_uses_the_stretch_factor_default(qap
 class _FakeHostForSplitter:
     def __init__(self) -> None:
         self.recorded_sizes = None
+        self.world_saves = []  # list of (world, sizes) tuples
 
     def record_splitter_sizes(self, sizes) -> None:
         self.recorded_sizes = list(sizes)
+
+    def save_splitter_sizes_for_world(self, world, sizes) -> None:
+        self.world_saves.append((world, list(sizes)))
 
 
 def test_dragging_the_splitter_reports_the_new_sizes_to_the_host(qapp):
@@ -113,6 +118,44 @@ def test_dragging_the_splitter_reports_the_new_sizes_to_the_host(qapp):
     tab.splitter.splitterMoved.emit(300, 1)
 
     assert host.recorded_sizes == tab.splitter.sizes()
+    assert host.world_saves == []
+
+
+def test_dragging_the_splitter_on_a_world_tab_saves_to_the_world_not_globally(qapp):
+    # Post-1.1.0: a tab with a saved world persists its splitter size
+    # per-world instead of to the app-wide preference -- debounced on
+    # SessionTab's own timer (see _on_splitter_moved), so nothing is
+    # recorded until that timer actually fires.
+    host = _FakeHostForSplitter()
+    world = WorldProfile(name="Example", host="example.com", port=4201)
+    tab = SessionTab("example.com", 4201, bridge=FakeBridge(), host_window=host, world=world)
+
+    tab.splitter.setSizes([300, 200])
+    tab.splitter.splitterMoved.emit(300, 1)
+
+    assert host.recorded_sizes is None
+    assert host.world_saves == []
+
+    tab._save_splitter_sizes_for_world_now()
+
+    assert host.recorded_sizes is None
+    assert host.world_saves == [(world, list(tab.splitter.sizes()))]
+
+
+def test_dragging_the_splitter_on_a_world_tab_debounces_the_save(qapp):
+    from PySide6.QtTest import QTest
+
+    host = _FakeHostForSplitter()
+    world = WorldProfile(name="Example", host="example.com", port=4201)
+    tab = SessionTab("example.com", 4201, bridge=FakeBridge(), host_window=host, world=world)
+
+    tab.splitter.setSizes([300, 200])
+    tab.splitter.splitterMoved.emit(300, 1)
+    assert host.world_saves == []
+
+    QTest.qWait(500)
+
+    assert host.world_saves == [(world, list(tab.splitter.sizes()))]
 
 
 def test_secondary_input_echoes_locally_and_clears(qapp):

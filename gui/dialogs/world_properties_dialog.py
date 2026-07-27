@@ -610,6 +610,12 @@ class WorldPropertiesDialog(QDialog):
             mail_format_custom=self._world.mail_format_custom,
             mail_convert_returns=self._world.mail_convert_returns,
             mail_convert_returns_to=self._world.mail_convert_returns_to,
+            # splitter_sizes isn't editable on this dialog either (it's
+            # only ever set by dragging the splitter in an open tab) --
+            # carried over unchanged, same treatment as mail_*/auto_login
+            # above, to avoid the identical class of bug already fixed
+            # twice for those fields.
+            splitter_sizes=self._world.splitter_sizes,
         )
 
     def result_scripts(self) -> List[ScriptRecord]:

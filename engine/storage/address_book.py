@@ -101,6 +101,15 @@ class WorldProfile:
     # ssh-protocol world always asks).
     protocol: str = DEFAULT_PROTOCOL
     ssh_username: str = ""
+    # Post-1.1.0 addition: the dual-input splitter's last-dragged size
+    # for this world specifically, reversing the earlier post-8b
+    # decision to keep it a single app-wide preference (see
+    # MainWindow.record_splitter_sizes's docstring) -- Rick's own
+    # later request. Empty means "no saved size for this world yet";
+    # a world-less tab (blank tab / raw /connect host port) has no
+    # WorldProfile to store this on at all, so it keeps using the
+    # original global Settings.splitter_sizes mechanism unchanged.
+    splitter_sizes: List[int] = field(default_factory=list)
 
 
 def load_address_book(path: Path) -> List[WorldProfile]:
@@ -146,6 +155,7 @@ def load_address_book(path: Path) -> List[WorldProfile]:
                 mail_convert_returns_to=entry.get("mail_convert_returns_to", "%r"),
                 protocol=entry.get("protocol", DEFAULT_PROTOCOL),
                 ssh_username=entry.get("ssh_username", ""),
+                splitter_sizes=list(entry.get("splitter_sizes", [])),
             )
         )
     return worlds
@@ -178,6 +188,7 @@ def save_address_book(path: Path, worlds: List[WorldProfile]) -> None:
                 "mail_convert_returns_to": w.mail_convert_returns_to,
                 "protocol": w.protocol,
                 "ssh_username": w.ssh_username,
+                "splitter_sizes": w.splitter_sizes,
             }
             for w in worlds
         ]

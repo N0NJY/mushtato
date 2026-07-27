@@ -294,3 +294,21 @@ def test_ssh_password_is_never_part_of_the_saved_shape(tmp_path: Path):
     # (AttributeError) if such a field were ever added back.
     world = WorldProfile(name="X", host="h", port=22, protocol="ssh")
     assert not hasattr(world, "ssh_password")
+
+
+def test_splitter_sizes_round_trip(tmp_path: Path):
+    path = tmp_path / "address_book.json"
+    world = WorldProfile(name="X", host="h", port=1, splitter_sizes=[300, 200])
+    save_address_book(path, [world])
+
+    loaded = load_address_book(path)[0]
+    assert loaded.splitter_sizes == [300, 200]
+
+
+def test_pre_splitter_sizes_format_json_defaults_to_empty(tmp_path: Path):
+    path = tmp_path / "address_book.json"
+    old_format_json = {"worlds": [{"name": "Old", "host": "old.example.com", "port": 1}]}
+    path.write_text(json.dumps(old_format_json), encoding="utf-8")
+
+    world = load_address_book(path)[0]
+    assert world.splitter_sizes == []

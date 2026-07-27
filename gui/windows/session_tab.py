@@ -268,13 +268,23 @@ class SessionTab(QWidget):
         self.splitter.setStretchFactor(1, 1)
         if splitter_sizes:
             self.splitter.setSizes(splitter_sizes)
-        # Persisted globally (one preference for every tab, not
-        # per-world -- Rick's explicit choice), so the *next* tab you
-        # open -- this session or a future one -- starts at whatever
-        # height you last dragged to. Deliberately does NOT resize
-        # already-open tabs live when another tab is dragged; see
+        # Persisted per-world when this tab has one (post-1.1.0), or
+        # globally as a fallback for a world-less tab -- so the *next*
+        # tab you open for the same world (or, world-less, any tab) --
+        # this session or a future one -- starts at whatever height you
+        # last dragged to. Deliberately does NOT resize already-open
+        # tabs live when another tab is dragged; see
         # MainWindow.record_splitter_sizes's docstring.
         self.splitter.splitterMoved.connect(self._on_splitter_moved)
+        # Debounces the per-world save specifically (see
+        # _on_splitter_moved) -- that path does a full address-book
+        # reload/save, much more expensive than the world-less path's
+        # in-memory-only MainWindow.record_splitter_sizes, which has its
+        # own separate debounce timer already.
+        self._splitter_save_timer = QTimer(self)
+        self._splitter_save_timer.setSingleShot(True)
+        self._splitter_save_timer.setInterval(400)
+        self._splitter_save_timer.timeout.connect(self._save_splitter_sizes_for_world_now)
 
         # Phase 11: hidden by default, toggled via Ctrl+F/Edit > Find...
         # (MainWindow) or /find. Operates on this tab's own scrollback
@@ -393,8 +403,19 @@ class SessionTab(QWidget):
 
     def _on_splitter_moved(self, pos: int, index: int) -> None:  # noqa: ARG002 -- Qt signal args
         del pos, index
-        if self.host_window is not None:
+        if self.host_window is None:
+            return
+        if self.world is not None:
+            # Debounced on this tab's own timer, not called directly --
+            # this path does a full address-book reload/save, which
+            # must not happen on every raw pixel of a drag.
+            self._splitter_save_timer.start()
+        else:
             self.host_window.record_splitter_sizes(self.splitter.sizes())
+
+    def _save_splitter_sizes_for_world_now(self) -> None:
+        if self.host_window is not None and self.world is not None:
+            self.host_window.save_splitter_sizes_for_world(self.world, self.splitter.sizes())
 
     # -- Phase 9: scripting ---------------------------------------------
     # engine/scripting wired in for real: every tab gets its own

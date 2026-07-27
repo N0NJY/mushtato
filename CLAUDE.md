@@ -3366,6 +3366,108 @@ message_and_signal`, nothing this pass's code touches. Recorded here
 rather than silently re-run until it happened to complete, per this
 file's own standing rule 8.
 
+**Added as version 1.2.0 (2026-07-26): per-world input-pane splitter
+size.** Extended `engine/storage/address_book.py` (`WorldProfile.
+splitter_sizes`), `gui/windows/main_window.py`
+(`save_splitter_sizes_for_world`, `open_tab`'s size resolution), `gui/
+windows/session_tab.py` (a new per-tab debounce timer), `gui/dialogs/
+world_properties_dialog.py`, `gui/help/topics.py`.
+
+Item 4 on the post-SSH working todo/bugs list, following 1.1.0 above --
+a minor bump, per the same version-tracking scheme. This deliberately
+reverses an earlier, explicit decision (the post-8b addition that made
+the splitter size "one global preference... not saved per-world (per-
+world would need a WorldProfile schema change for a fairly small visual
+preference)") -- Rick's own later request, already spelled out in the
+plan he reviewed before this pass started ("New WorldProfile.
+splitter_sizes field; SessionTab reads/writes it per-connection instead
+of the current app-wide Settings field"), so implementation proceeded
+directly rather than re-litigating the reversal itself.
+
+**The one real remaining fork -- world-less tabs -- resolved by what's
+structurally possible, not a coin-flip:** a blank tab or a raw
+`/connect host port` tab has no `WorldProfile` to persist a per-world
+size onto at all. Kept the *entire* original global-`Settings`
+mechanism (`MainWindow.record_splitter_sizes`, the app-wide
+`_splitter_sizes`/`_splitter_save_timer`) completely unchanged for
+exactly that case -- there's no second reasonable design here, so this
+didn't warrant a formal checkpoint, just a documented decision.
+
+**Data model:** `WorldProfile.splitter_sizes: List[int]` (empty = "no
+saved size for this world yet"), additive-migration-safe like every
+other `WorldProfile` field, threaded through `load_address_book`/
+`save_address_book` the same way. `open_tab()`'s resolution order: the
+world's own `splitter_sizes` if set, else the existing global
+`self._splitter_sizes` fallback, else `SessionTab`'s built-in 5:1
+stretch-factor default -- so a newly-added world with nothing dragged
+yet still gets a sensible starting point rather than always reverting
+to the bare default. `open_blank_tab()` is untouched, still resolving
+straight to the global fallback exactly as before.
+
+**Persistence, reusing the already-established pattern (rule 6), not a
+parallel implementation:** `MainWindow.save_splitter_sizes_for_world()`
+is the exact same reload-find-copy-save shape as
+`save_mail_settings_for_world` (Phase 12b) -- reloads the address book
+fresh, matches by name+host+port (not object identity, since a tab's
+`world` may not be the same object `AddressBookWindow`'s in-memory list
+holds), copies the field, saves, refreshes the address book window if
+open. Debouncing moved to a *new per-tab* `QTimer` on `SessionTab`
+itself (400ms, singleShot) rather than reusing `MainWindow`'s existing
+shared `_splitter_save_timer` -- the per-world path does a full JSON
+reload/save on every fire, meaningfully more expensive than the
+in-memory-only global path that timer was built for, and calling it on
+every raw `splitterMoved` pixel event (as the un-debounced call would)
+would hit disk dozens of times per drag. `SessionTab._on_splitter_moved`
+branches on `self.world`: per-world tabs restart the new per-tab timer;
+world-less tabs call `MainWindow.record_splitter_sizes` exactly as
+before, unchanged.
+
+**A real bug prevented, not found after the fact, by checking an
+established pattern before writing code:** `WorldPropertiesDialog.
+result_profile()` manually reconstructs a `WorldProfile` field-by-field
+(unlike `WorldEditDialog`, which uses `dataclasses.replace()` and so
+inherits new fields automatically) -- this exact dialog already caused
+two real, shipped-then-fixed regressions this session (`auto_login`,
+then all four `mail_*` fields silently reset on any Properties save,
+because a new field was added to `WorldProfile` without also adding it
+to this method's manual reconstruction). Checked for this before
+finishing the change, not after a bug report: added
+`splitter_sizes=self._world.splitter_sizes` to `result_profile()` in
+the same pass, with a regression test proving it
+(`test_result_profile_preserves_splitter_sizes_unchanged`) rather than
+just adding the line and assuming it was enough.
+
+Verified per standing rule 7: 2 new engine tests (`test_address_book.py`
+-- round-trip and old-format-JSON-defaults-to-empty, matching every
+other field's migration-safety test shape exactly); 1 new dialog test
+(the `result_profile()` preservation guard above); 3 new `SessionTab`-
+level tests (`test_dual_input.py` -- a world-less drag still calls
+`record_splitter_sizes` and never touches the per-world path; a
+world-tab drag calls neither until the debounce timer fires, then
+calls `save_splitter_sizes_for_world` with the exact sizes; a real,
+un-mocked `QTest.qWait(500)` proving the 400ms debounce actually
+elapses and fires on its own, not just that calling the handler
+directly works); 3 new `MainWindow`-level tests (`test_autosends.py` --
+`save_splitter_sizes_for_world` persists across a fresh
+`load_address_book()`, `open_tab()` prefers a world's own saved size
+over the global fallback, and falls back to the global default when
+the world has none -- the latter two needed the same "an unshown
+widget has ~0 real geometry; show the *host* window, not the tab
+itself, since the tab is `tab_widget`'s child" lesson this project
+already learned once during the font/splitter work, re-applied
+directly this time rather than rediscovered by a failing assertion
+first). Full suite: 431 passing in `tests/gui/` (minus the three
+known-segfault-risk files, run separately and confirmed clean: 73
+passing) plus 224 passing in `tests/engine/` (minus
+`engine/scripting`'s `google-re2`/RestrictedPython dependency gap, this
+sandbox's pre-existing, unrelated environment gap) -- 728 total, zero
+failures, one pre-existing expected warning (a deliberate background-
+thread exception in an error-log test, unrelated to this change).
+
+Not verified against a real desktop this round -- same honest gap as
+every GUI-facing change this session: real dragging feel and the
+actual persisted-across-restart behavior remain Rick's to confirm.
+
 ## Standing rules: verification and assumptions
 
 These apply to every session, every phase, not just security-sensitive ones.
