@@ -3528,6 +3528,318 @@ against a real PyInstaller build this round (PyInstaller isn't
 installed in this sandbox) -- Rick can confirm on the next GitHub
 Actions build.
 
+**Added as version 1.3.0 (2026-07-27): per-tab timestamps.** Extended
+`gui/windows/session_tab.py` (`show_timestamps`, `set_show_timestamps`,
+`_prefix_with_timestamp`, `_append_plain_raw`), `gui/windows/
+main_window.py` (`timestamps_action`, `_refresh_timestamps_action_state`),
+`gui/help/topics.py` (new `/timestamps` command, a new "Timestamps"
+Help subsection).
+
+Raised by Rick directly, not from the working todo list -- a new
+"NEED" item added mid-session. Researched Potato's real source first,
+per this file's own standing rule 1, since Potato genuinely has a
+"Show Timestamps" setting (`misc(showTimestamps)`, `potato.tcl`). That
+research overturned the obvious assumption: Potato's real timestamps
+are **not** a visible printed label at all -- every line gets an
+invisible timestamp tagged onto it (`$t tag configure timestamp -elide
+1`, confirmed in the actual source), revealed only as a mouse-hover
+tooltip (`showMessageTimestamp`). The only place Potato ever prints a
+real visible `[HH:MM:SS]` bracket is in a *saved log file*, never the
+live scrollback. Rick's own explicit wording ("labeled," visible, with
+an on/off toggle) is therefore a genuinely new MushTato feature, not a
+Potato port -- surfaced explicitly as such before building anything,
+not silently ported or silently invented.
+
+**Checkpointed via `AskUserQuestion` before writing code (four real
+forks), then one further nuance resolved directly from Rick's own
+free-text answer rather than picking from the offered options:**
+format (Rick's actual answer, more specific than either offered
+option: **compact time-only per line, but a full date+time marker
+line at the exact moment of toggling on or off** -- "so you can log
+things to a file"); scope (all three offered options selected: server
+text, MushTato's own system notices, *and* mirrored spawn log windows);
+persistence (Recommended: always starts off, per tab, never
+remembered); retroactivity (Recommended: only affects new lines going
+forward, never rewrites already-shown history).
+
+**Architecture, following the already-established single-choke-point
+pattern (rule 6), not a parallel implementation per insertion path:**
+`_prefix_with_timestamp(segments)` is one small helper, called at
+exactly the two places real "finalized" content already funnels
+through -- `_on_incoming_batch_ready` (real server text) and
+`_on_script_echo_requested` (script `echo()` output), both of which
+already share `_insert_finalized_segments` as their single rendering
+choke point (a pre-existing invariant this feature reuses, not
+reimplements). Deliberately does **not** touch `_show_preview` --
+the still-updating "preview" of an incomplete trailing line (e.g. a
+prompt) is re-rendered repeatedly as more of the same not-yet-finished
+line arrives and isn't a real, settled event yet; timestamping it would
+mean a partial line's timestamp visibly changing/duplicating as it's
+replaced in place. `_append_plain` (MushTato's own system notices --
+Connected, connection-closed, script errors) gained the identical
+compact-prefix treatment, with one real wrinkle handled explicitly: several existing call sites pass a leading `"\n[...]\n"` to force a
+blank line before a notice, so the timestamp is inserted *after* any
+leading newlines, not before them -- prepending blindly would have put
+the bracketed time on its own stray line ahead of the real message
+instead of directly in front of it. A new `_append_plain_raw` (the
+literal, unprefixed insert `_append_plain` used to be) is what the
+toggle's own marker line calls directly, so that line -- which already
+carries a full date/time inline -- is never *also* stapled with the
+compact per-line prefix on top.
+
+**Spawn-window mirroring, matching an existing, deliberately narrow
+convention exactly as it already was, not widened:** `_on_incoming_
+batch_ready` computes the timestamped segment list *once* and passes
+the *same* list to both `_insert_finalized_segments` and every spawn
+window's `receive_segments` -- proven with a test asserting the two
+rendered timestamps are identical, not just that each independently has
+some timestamp. Script `echo()` output was, and remains, never mirrored
+to spawn windows at all (a pre-existing, unrelated behavior -- spawn-
+mirroring has only ever covered real incoming server text, confirmed by
+reading the code before touching it) -- this feature doesn't change
+that boundary, only rides along with whatever already crosses it.
+
+**Menu wiring, following the "per-tab, not host-level" distinction this
+file has already drawn once for Theme vs. Find:** `MainWindow.
+timestamps_action` is a single checkable `QAction` (not part of Theme's
+`QActionGroup` -- an independent on/off, not a mutually-exclusive set)
+under the View menu, reflecting whichever tab is *currently active*,
+not one shared host-level state. `_refresh_timestamps_action_state()`
+re-syncs the checkbox on every `_on_current_tab_changed` (the same hook
+the tab-activity/active-tab-highlight mechanisms already use) --
+`blockSignals()` guards the programmatic `setChecked()` call there
+specifically so re-syncing the checkbox to match a newly-active tab's
+*real* state can never itself re-trigger the toggle handler and
+silently overwrite that tab's state to match whatever the *previous*
+tab's checkbox happened to show. Disabled with zero tabs open, the same
+list `_refresh_action_enabled_state` already gates Find/Spawn Log/Mail
+Window on. `/timestamps [on|off]` is a new client command, registered
+through the same single-source-of-truth `COMMAND_HELP` loop every other
+command already uses -- tab-scoped like `/spawnlog` (no `host_window`
+dependency at all), calling the *exact same* `set_show_timestamps()`
+the menu action calls, not a parallel implementation.
+
+A real, unrelated staleness bug fixed in the same pass, found while
+adding a new Help subsection right next to it: the Sessions & Tabs
+topic's tray-icon paragraph still said "a simple placeholder (not final
+artwork) until real branding exists" -- true before the 1.1.0 icon+
+splash work, false since. Fixed alongside, not left for a future
+session to rediscover, matching this file's own established pattern of
+fixing an adjacent staleness bug on sight rather than walking past it.
+
+Verified per standing rule 7: 17 new tests in `tests/gui/
+test_timestamps.py` -- off by default; a real incoming line correctly
+un-prefixed when disabled and prefixed when enabled; the spawn-window
+mirror's timestamp is asserted *identical* to the main scrollback's,
+not merely present; script `echo()` output gets prefixed; a system
+notice gets prefixed with its leading blank line preserved *before* the
+prefix, and is correctly left alone when disabled; toggling on/off each
+insert their own correctly-shaped full-date marker line; toggling to
+the already-current state is a genuine no-op (asserted via an unchanged
+document, not just "no crash"); the marker line itself is proven *not*
+also carrying the compact prefix (a real found-and-fixed risk, guarded
+explicitly); toggling mid-session is proven non-retroactive by checking
+each specific line's own prefix state, not just the toggle's own
+side-effect; both `/timestamps` outcomes plus its usage-error path; and
+four `MainWindow`-level tests covering the View-menu-triggers-the-
+active-tab's-real-state wiring, two tabs correctly showing independent
+checkbox states when switched between, and the disabled-with-zero-tabs
+gate. Full suite re-run: 452 passing across `tests/gui/` (minus the
+known-segfault-risk trio, run separately and still clean at 73) --
+zero failures, no regressions from touching `session_tab.py`'s core
+rendering path or `main_window.py`'s chrome.
+
+Not verified against a real desktop or a real MU* server this round --
+same honest gap as every GUI-facing change this session. Rick can
+confirm the toggle, the marker-line wording/format, and a saved
+spawnlog's readability against a real session when convenient.
+
+**Added as versions 1.4.0-1.7.0 (2026-07-27): SSL/TLS, NAWS/TERM-TYPE,
+fallback address, and SOCKS4 proxy for Telnet/MU* connections.** New
+`engine/net/socks4.py`; extended `engine/net/client.py` (`CertificateStore`/
+`CertificateMismatch`, SSL wrapping, proxy connect), `engine/net/telnet.py`
+(NAWS/TTYPE), `engine/net/__init__.py`, `engine/storage/address_book.py`
+(`use_ssl`/`telnet_naws`/`telnet_term`/`host2`/`port2`/`use_ssl2`/
+`proxy_host`/`proxy_port`), `engine/storage/paths.py` (`ssl_known_certs_path`),
+`gui/windows/telnet_bridge.py` (candidate-list connect loop, SSL/proxy/
+NAWS/TERM wiring), `gui/windows/session_tab.py` (`/ssl-forget`, threading
+all seven new fields through), `gui/dialogs/world_properties_dialog.py`
+(every Connection-page placeholder enabled), `gui/help/topics.py` (new
+SSL Connections topic, updated World Properties/Sessions & Tabs prose).
+
+This was the "on the back burner" item from earlier the same day,
+re-activated at Rick's own request once his priority read shifted --
+see that entry above for the original research and the reasons it was
+initially deferred (low confirmed real-world SSL adoption, ~15 sites).
+Implemented as four separate, individually-completable, individually-
+tested items per the plan Rick reviewed beforehand (`todo_and_bugs.txt`
+items 6-9), all landing in one combined commit per his explicit
+instruction ("accomplish all the work, then test, then move to the
+next piece before commit... when it is ALL finished, go ahead and
+commit"). Each item's version number in the plan (1.4.0-1.7.0) is
+preserved as its own `CHANGELOG.md` entry even though they share one
+commit, so the historical record of "what shipped in which version"
+stays accurate.
+
+**Item 6 (SSL/TLS), checkpointed decision: trust-on-first-use, not
+Potato's real no-verification choice.** `engine/net/client.py` gained
+`CertificateStore`/`CertificateMismatch`, an exact structural mirror of
+`ssh_client.py`'s `HostKeyStore`/`HostKeyMismatch` (same `check()`/
+`forget()`/`last_mismatch` shape). SSL wraps the raw socket in TLS
+immediately after connecting -- "implicit TLS on a dedicated port",
+matching real Potato's own approach (verified against its source,
+`potato.tcl`'s real `connect` proc) -- not STARTTLS, which exists in
+Potato's own code but is permanently hard-disabled there (`set will
+[expr {0 && ...}]`, a literal `0 &&` short-circuit). TLS verification
+is disabled at the handshake level (`check_hostname = False`,
+`verify_mode = CERT_NONE`) so a self-signed certificate can complete
+the handshake at all -- Potato's own comment explains why ("the
+majority of MUSHes use self-signed certificates") -- with
+`CertificateStore` doing its own post-handshake TOFU fingerprint check
+afterward, the same two-layer shape the SSH feature already
+established. New `/ssl-forget host:port` command mirrors `/ssh-forget`
+exactly, with one real difference: no default port fallback (SSH's 22
+has no MU* equivalent, so `host:port` must be given in full).
+
+**A real, load-bearing bug fixed as part of item 6, found by the exact
+same discipline that caught the identical class of bug twice before
+for `auto_login`/`mail_*`:** `WorldPropertiesDialog.result_profile()`
+manually reconstructs a `WorldProfile` field-by-field, so a new field
+added to `WorldProfile` without also adding it there silently resets on
+every Properties save. Checked and fixed for `splitter_sizes` *before*
+finishing that change, not after a bug report -- the same up-front
+check was repeated for every one of the seven new fields across items
+6-9, closing off what would otherwise have been a near-certain seventh
+occurrence of this exact bug.
+
+**Item 7 (NAWS + TERM-TYPE), checkpointed decision: a fixed 80x24, no
+new configurable setting.** `engine/net/telnet.py`'s `TelnetNegotiator`
+previously answered *every* option negotiation with a flat refusal --
+extending it to special-case two real options required a genuine (if
+bounded) redesign: the subnegotiation state machine used to discard
+payload bytes entirely (nothing was ever *read*, only watched for the
+terminating `IAC SE`); NAWS/TTYPE both need to actually parse and act on
+subnegotiation payloads, so `_IN_SUBNEGOTIATION`/`_SUBNEGOTIATION_GOT_IAC`
+now buffer bytes (correctly un-escaping `IAC IAC` mid-payload, the same
+escaping rule as ordinary application data) and dispatch on the
+buffered option code once a block closes. NAWS answers `WILL` then
+immediately, proactively sends its fixed-width/height subnegotiation
+(matching Potato's own real behavior -- verified its NAWS also sends a
+fixed configured width and a hardcoded height of 24, "we could check
+for window resize... but there's not a whole lot of point," not a
+computed value); TTYPE only answers `WILL` and waits for the server's
+own `SB TTYPE SEND` request before replying `IS "MushTato"` (Potato's
+own real default is "Potato"), since TTYPE is server-initiated, unlike
+NAWS. A width/height/name value of exactly 255 (`\xFF`) is defensively
+IAC-escaped in the outgoing subnegotiation even though the fixed
+defaults never actually produce one -- matching Potato's own real code
+doing the identical defensive escaping for the identical reason.
+
+**Item 8 (fallback address), the one flagged up front as the most
+architecturally invasive.** `TelnetBridge` gained `host2`/`port2`/
+`use_ssl2` (mirroring `WorldProfile`'s own new fields directly) and
+`_run()` now builds an ordered candidate list -- primary, then
+secondary if both `host2`/`port2` are actually set -- trying each in
+turn until one connects or all fail. Verified against real Potato's own
+confirmed behavior (its real `connect` proc, read line-by-line before
+implementing anything): try primary then secondary, in that fixed
+order, on *every* connect/reconnect attempt, never "sticky" toward
+whichever one worked last. This falls out for free from the existing
+architecture rather than needing its own special-casing: every call to
+`_run()` (every `start()`, including a reconnect's existing `stop()`-
+then-`start()` on the same bridge instance) rebuilds the candidate list
+from scratch and always tries it from the top -- proven directly with a
+real background-thread test that deliberately makes the primary
+reachable again *after* an initial fallback-to-secondary connection,
+and confirms a subsequent reconnect tries primary first, not secondary.
+`Socks4Error` (item 9) needed adding to this method's exception
+handling alongside `CertificateMismatch`/`OSError` -- a real gap that
+would have let a proxy-handshake failure crash the bridge's background
+thread uncaught instead of surfacing as `connectionFailed`, caught by
+tracing the exception hierarchy before shipping, not discovered via a
+crash.
+
+**Item 9 (SOCKS4 proxy), checkpointed decision: hand-rolled, no new
+dependency.** New `engine/net/socks4.py` -- verified byte-for-byte
+against real Potato's own implementation
+(`potato-proxy-SOCKS4.tcl`) before writing anything, which corrected a
+real assumption made in the original planning pass: Potato's SOCKS4
+support already includes the SOCKS4a hostname extension (a placeholder
+`0.0.0.1` address plus the real hostname appended after the user-ID
+field, letting the *proxy* resolve DNS) for a non-IP-literal host,
+falling back to classic SOCKS4 with a real encoded IPv4 address only
+when given a literal dotted address -- not the "always resolve DNS
+ourselves first" design originally assumed before reading the source.
+Replicated exactly, including matching Potato's real 8-byte reply
+parsing (status byte at offset 1, `0x5A` = granted) and its specific
+identd-failure-code messaging (`0x5C`/`0x5D`).
+
+**A real, subtle asyncio bug found and fixed while building the proxy
+-- SSL interaction specifically, not theorized or guessed at:** routing
+an SSL connection through a proxy requires connecting to the proxy in
+plaintext first, completing the SOCKS4 handshake, *then* upgrading that
+already-established connection to TLS in place (`asyncio.open_connection`'s
+own `ssl=` parameter only applies while first connecting, so `loop.
+start_tls()` -- confirmed against its actual docstring before relying on
+it -- is the correct primitive for upgrading a live connection). A first
+working-seeming implementation reproducibly failed under a real test
+with a real relaying proxy and a real TLS target: the connection
+appeared to succeed, then got a spurious EOF moments later, before the
+target's own banner ever arrived. Root-caused precisely, not patched
+around: `asyncio.StreamWriter.__del__` (confirmed directly by reading
+its source) closes its own transport on garbage collection if not
+already closing -- the pre-upgrade `writer` local variable, still
+holding a reference to the *same underlying transport* the new SSL
+layer was now using, went out of scope the moment the connect method
+returned and was garbage-collected almost immediately (CPython's
+reference counting, not eventual generational GC), tearing down the
+shared socket out from under the new SSL transport. Fixed by keeping an
+explicit `self._pre_tls_writer` reference alive for the client's own
+lifetime, not a defensive workaround -- proven by the same test that
+originally reproduced the failure now passing, not merely no longer
+crashing by coincidence.
+
+Verified per standing rule 7 throughout, each item's own claims backed
+by dedicated tests, not shared/assumed-safe-by-similarity: item 6 --
+`tests/engine/test_client_ssl.py` (7 tests, a real throwaway self-signed
+TLS server, TOFU trust/reuse/mismatch/forget, a plain-connection
+control proving `cert_store` is never touched when `use_ssl=False`) and
+`tests/gui/test_telnet_bridge_ssl.py` (2 tests, a real background
+thread + real TLS server, including the mismatch message naming
+`/ssl-forget`); item 7 -- `tests/engine/test_telnet_negotiation.py` (13
+new tests, real RFC-shaped byte sequences fed whole and byte-at-a-time,
+covering enabled/disabled/custom-value/escaping/split-across-reads for
+both options); item 8 -- `tests/gui/test_fallback_address.py` (4 tests,
+real background-thread servers, including the specific "not sticky on
+reconnect" claim proven by making the primary reachable again mid-test
+and confirming the *next* connect tries it first); item 9 --
+`tests/engine/test_socks4.py` (5 tests verifying exact wire bytes for
+both the IP-literal and SOCKS4a-hostname cases against a real fake
+proxy), `tests/engine/test_client_proxy.py` (3 tests, a real *relaying*
+fake proxy -- not handshake-only -- proving data genuinely flows
+client->proxy->target and back, including the proxy+SSL combination
+that caught the `StreamWriter.__del__` bug above), and `tests/gui/
+test_telnet_bridge_proxy.py` (1 test, the same real relay at the full
+bridge/background-thread level). Every one of the seven new
+`WorldProfile` fields also got its own round-trip + old-format-defaults
+test in `test_address_book.py`, and its own load/save-round-trip pair
+in `test_world_properties_dialog.py`, matching the established
+per-field testing convention exactly. Full suite: 797 total (539 gui +
+258 engine) passing, zero failures; the known pre-existing sandbox
+segfault trio (`test_scripting_integration.py`, `test_world_properties_
+dialog.py`, `test_address_book_window.py`) re-verified clean together,
+unaffected by any of this work.
+
+Not verified against a real MU* server, a real external SOCKS4 proxy,
+or a real desktop this round -- same honest gap as every network-
+protocol addition this session. The local fake-server tests prove the
+real wire protocols (TLS handshake/cert pinning, telnet NAWS/TTYPE
+subnegotiation, SOCKS4/SOCKS4a framing) and real cross-thread Qt signal
+delivery, but not a real remote server's specific quirks. Rick can
+confirm against a real SSL-enabled MU* and/or a real SOCKS4 proxy (e.g.
+Tor's, which specifically requires the SOCKS4a hostname extension just
+implemented) when convenient.
+
 ## Standing rules: verification and assumptions
 
 These apply to every session, every phase, not just security-sensitive ones.

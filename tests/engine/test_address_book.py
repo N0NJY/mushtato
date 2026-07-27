@@ -312,3 +312,85 @@ def test_pre_splitter_sizes_format_json_defaults_to_empty(tmp_path: Path):
 
     world = load_address_book(path)[0]
     assert world.splitter_sizes == []
+
+
+def test_use_ssl_round_trips(tmp_path: Path):
+    path = tmp_path / "address_book.json"
+    world = WorldProfile(name="X", host="h", port=1, use_ssl=True)
+    save_address_book(path, [world])
+
+    loaded = load_address_book(path)[0]
+    assert loaded.use_ssl is True
+
+
+def test_pre_use_ssl_format_json_defaults_to_false(tmp_path: Path):
+    path = tmp_path / "address_book.json"
+    old_format_json = {"worlds": [{"name": "Old", "host": "old.example.com", "port": 1}]}
+    path.write_text(json.dumps(old_format_json), encoding="utf-8")
+
+    world = load_address_book(path)[0]
+    assert world.use_ssl is False
+
+
+def test_telnet_naws_and_term_round_trip(tmp_path: Path):
+    path = tmp_path / "address_book.json"
+    world = WorldProfile(name="X", host="h", port=1, telnet_naws=True, telnet_term=True)
+    save_address_book(path, [world])
+
+    loaded = load_address_book(path)[0]
+    assert loaded.telnet_naws is True
+    assert loaded.telnet_term is True
+
+
+def test_pre_telnet_naws_term_format_json_defaults_to_false(tmp_path: Path):
+    path = tmp_path / "address_book.json"
+    old_format_json = {"worlds": [{"name": "Old", "host": "old.example.com", "port": 1}]}
+    path.write_text(json.dumps(old_format_json), encoding="utf-8")
+
+    world = load_address_book(path)[0]
+    assert world.telnet_naws is False
+    assert world.telnet_term is False
+
+
+def test_host2_port2_use_ssl2_round_trip(tmp_path: Path):
+    path = tmp_path / "address_book.json"
+    world = WorldProfile(
+        name="X", host="h", port=1, host2="fallback.example.com", port2=4202, use_ssl2=True
+    )
+    save_address_book(path, [world])
+
+    loaded = load_address_book(path)[0]
+    assert loaded.host2 == "fallback.example.com"
+    assert loaded.port2 == 4202
+    assert loaded.use_ssl2 is True
+
+
+def test_pre_host2_format_json_defaults_to_empty(tmp_path: Path):
+    path = tmp_path / "address_book.json"
+    old_format_json = {"worlds": [{"name": "Old", "host": "old.example.com", "port": 1}]}
+    path.write_text(json.dumps(old_format_json), encoding="utf-8")
+
+    world = load_address_book(path)[0]
+    assert world.host2 == ""
+    assert world.port2 == 0
+    assert world.use_ssl2 is False
+
+
+def test_proxy_host_port_round_trip(tmp_path: Path):
+    path = tmp_path / "address_book.json"
+    world = WorldProfile(name="X", host="h", port=1, proxy_host="proxy.example.com", proxy_port=1080)
+    save_address_book(path, [world])
+
+    loaded = load_address_book(path)[0]
+    assert loaded.proxy_host == "proxy.example.com"
+    assert loaded.proxy_port == 1080
+
+
+def test_pre_proxy_format_json_defaults_to_empty(tmp_path: Path):
+    path = tmp_path / "address_book.json"
+    old_format_json = {"worlds": [{"name": "Old", "host": "old.example.com", "port": 1}]}
+    path.write_text(json.dumps(old_format_json), encoding="utf-8")
+
+    world = load_address_book(path)[0]
+    assert world.proxy_host == ""
+    assert world.proxy_port == 0

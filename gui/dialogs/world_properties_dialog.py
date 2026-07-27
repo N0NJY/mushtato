@@ -452,50 +452,64 @@ class WorldPropertiesDialog(QDialog):
         # -- see gui/windows/telnet_bridge.py's docstring). No longer a
         # placeholder, so it moved out of the disabled section below.
         self.keepalive_checkbox = QCheckBox("Use NOP Keepalive")
+        # Real and functional (item 6 of the SSL/proxy/NAWS plan,
+        # 2026-07-27) -- encrypts the Telnet/MU* connection itself via
+        # implicit TLS, trust-on-first-use certificate verification
+        # (see engine/net/client.py's CertificateStore). Also moved out
+        # of the disabled placeholder section below, same treatment as
+        # keepalive_checkbox got when it became real.
+        self.ssl_checkbox = QCheckBox("Use SSL")
+        # Real and functional (item 7 of the SSL/proxy/NAWS plan,
+        # 2026-07-27) -- engine/net/telnet.py's TelnetNegotiator now
+        # really answers these two telnet options instead of always
+        # refusing them. Also moved out of the disabled placeholder
+        # section below, same treatment as keepalive/ssl above.
+        self.naws_checkbox = QCheckBox("Negotiate NAWS")
+        self.term_checkbox = QCheckBox("Send Client Info")
+        # Real and functional (item 8 of the SSL/proxy/NAWS plan,
+        # 2026-07-27) -- a fallback address tried after the primary one
+        # fails, on every connect/reconnect attempt (verified against
+        # real Potato's own confirmed behavior: fixed try-primary-then-
+        # secondary order, never "sticky"). use_ssl2 has no Potato-
+        # inherited placeholder to promote out of -- Potato's own real
+        # ssl2 field has a UI checkbox too, so this adds one rather than
+        # leaving the fallback address unable to use SSL independently
+        # of the primary's own Use SSL setting.
+        self.host2_edit = QLineEdit(page)
+        self.port2_spin = QSpinBox(page)
+        self.port2_spin.setRange(0, 65535)
+        self.ssl2_checkbox = QCheckBox("Use SSL for 2nd Address")
+        # Real and functional (item 9 of the SSL/proxy/NAWS plan,
+        # 2026-07-27) -- a hand-rolled SOCKS4/SOCKS4a client
+        # (engine/net/socks4.py), matching real Potato's own scope
+        # exactly (only SOCKS4 is actually implemented there, despite a
+        # proxy-type framework that could support more). A plain host/
+        # port pair rather than Potato's "None"/type-dropdown -- SOCKS4
+        # is the only real option, so "both fields set" is the on/off
+        # toggle, the same convention host2/port2 above already use.
+        # This was the *last* Connection-page item modeled on Potato
+        # but not yet supported -- the disabled-placeholder section
+        # that used to hold it is now gone entirely, not just this one
+        # row, since there's nothing left in it to be honest about.
+        self.proxy_host_edit = QLineEdit(page)
+        self.proxy_port_spin = QSpinBox(page)
+        self.proxy_port_spin.setRange(0, 65535)
 
         form = QFormLayout()
         form.addRow("Login Format:", self.login_format_edit)
         form.addRow("Login Delay:", self.login_delay_spin)
         form.addRow("", self.keepalive_checkbox)
-
-        # Not yet supported by engine/net -- shown disabled, not hidden,
-        # same honesty principle as Phase 7d's toolbar placeholders.
-        # No WorldProfile fields back these; there's nothing real to
-        # persist for a setting the engine can't act on yet.
-        placeholder_note = QLabel(
-            "The following are modeled on Potato's real Connection/Telnet "
-            "settings but aren't supported by MushTato's connection engine "
-            "yet -- shown disabled, not hidden."
-        )
-        placeholder_note.setWordWrap(True)
-
-        self.ssl_checkbox = QCheckBox("Use SSL")
-        self.ssl_checkbox.setEnabled(False)
-        self.host2_edit = QLineEdit(page)
-        self.host2_edit.setEnabled(False)
-        self.port2_spin = QSpinBox(page)
-        self.port2_spin.setRange(1, 65535)
-        self.port2_spin.setEnabled(False)
-        self.proxy_combo = QComboBox(page)
-        self.proxy_combo.addItem("None")
-        self.proxy_combo.setEnabled(False)
-        self.naws_checkbox = QCheckBox("Negotiate NAWS")
-        self.naws_checkbox.setEnabled(False)
-        self.term_checkbox = QCheckBox("Send Client Info")
-        self.term_checkbox.setEnabled(False)
-
-        placeholder_form = QFormLayout()
-        placeholder_form.addRow("2nd Address:", self.host2_edit)
-        placeholder_form.addRow("2nd Port:", self.port2_spin)
-        placeholder_form.addRow("SSL:", self.ssl_checkbox)
-        placeholder_form.addRow("Proxy:", self.proxy_combo)
-        placeholder_form.addRow("Telnet:", self.naws_checkbox)
-        placeholder_form.addRow("", self.term_checkbox)
+        form.addRow("", self.ssl_checkbox)
+        form.addRow("", self.naws_checkbox)
+        form.addRow("", self.term_checkbox)
+        form.addRow("2nd Address:", self.host2_edit)
+        form.addRow("2nd Port:", self.port2_spin)
+        form.addRow("", self.ssl2_checkbox)
+        form.addRow("Proxy Host:", self.proxy_host_edit)
+        form.addRow("Proxy Port:", self.proxy_port_spin)
 
         layout = QVBoxLayout(page)
         layout.addLayout(form)
-        layout.addWidget(placeholder_note)
-        layout.addLayout(placeholder_form)
         layout.addStretch(1)
         self._add_page("Connection", page)
 
@@ -551,6 +565,14 @@ class WorldPropertiesDialog(QDialog):
         self.login_format_edit.setText(world.login_format)
         self.login_delay_spin.setValue(world.login_delay)
         self.keepalive_checkbox.setChecked(world.nop_keepalive)
+        self.ssl_checkbox.setChecked(world.use_ssl)
+        self.naws_checkbox.setChecked(world.telnet_naws)
+        self.term_checkbox.setChecked(world.telnet_term)
+        self.host2_edit.setText(world.host2)
+        self.port2_spin.setValue(world.port2)
+        self.ssl2_checkbox.setChecked(world.use_ssl2)
+        self.proxy_host_edit.setText(world.proxy_host)
+        self.proxy_port_spin.setValue(world.proxy_port)
 
         self.autosend_firstconnect_edit.setPlainText(world.autosend_firstconnect)
         self.autosend_connect_edit.setPlainText(world.autosend_connect)
@@ -596,6 +618,14 @@ class WorldPropertiesDialog(QDialog):
             # change used to silently reset auto_login back to False.
             auto_login=self._world.auto_login,
             nop_keepalive=self.keepalive_checkbox.isChecked(),
+            use_ssl=self.ssl_checkbox.isChecked(),
+            telnet_naws=self.naws_checkbox.isChecked(),
+            telnet_term=self.term_checkbox.isChecked(),
+            host2=self.host2_edit.text().strip(),
+            port2=self.port2_spin.value(),
+            use_ssl2=self.ssl2_checkbox.isChecked(),
+            proxy_host=self.proxy_host_edit.text().strip(),
+            proxy_port=self.proxy_port_spin.value(),
             protocol=self._selected_protocol(),
             ssh_username=self.ssh_username_edit.text().strip(),
             # mail_* isn't editable on this dialog either (it's set from

@@ -64,6 +64,15 @@ def ssh_known_hosts_path() -> Path:
     return user_data_dir() / "ssh_known_hosts.json"
 
 
+def ssl_known_certs_path() -> Path:
+    # Trust-on-first-use certificate store for SSL/TLS-wrapped Telnet
+    # connections (item 6 of the SSL/proxy/NAWS plan) -- mirrors
+    # ssh_known_hosts_path() exactly: a separate, plain JSON file
+    # (host:port -> the server's certificate fingerprint), not the
+    # OS/browser's own certificate trust store.
+    return user_data_dir() / "ssl_known_certs.json"
+
+
 def safe_filename(name: str) -> str:
     """Sanitize an arbitrary world name for safe use as a filename."""
     cleaned = "".join(c if c.isalnum() or c in "-_ " else "_" for c in name).strip()

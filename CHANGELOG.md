@@ -12,6 +12,62 @@ and the About box) — bumped after each completed item on the working
 todo/bugs list, not per-commit: a patch bump (1.0.x) for a bug fix, a
 minor bump (1.x.0) for a new feature/behavior change.
 
+## 1.7.0 — SOCKS4 proxy support (2026-07-27)
+
+- World Properties → Connection now has real *Proxy Host*/*Proxy Port*
+  fields — routes the connection through a SOCKS4/SOCKS4a proxy (hand-
+  rolled, no new dependency, matching real Potato's own scope exactly:
+  only SOCKS4 is actually implemented there). Works together with SSL
+  (1.4.0) — the TLS handshake happens on top of the proxied connection.
+  This was the last Connection-page setting modeled on Potato that
+  MushTato's engine didn't support — every real Potato Connection
+  setting is now actually functional, no disabled placeholders remain.
+
+## 1.6.0 — Fallback second address/port (2026-07-27)
+
+- World Properties → Connection now has real *2nd Address*/*2nd Port*/
+  *Use SSL for 2nd Address* fields. If the primary address fails to
+  connect, the fallback is tried next — on every single connect and
+  reconnect attempt (matching real Potato's own confirmed behavior),
+  always starting from the primary again rather than staying on
+  whichever address worked last time.
+
+## 1.5.0 — NAWS + TERM-TYPE telnet negotiation (2026-07-27)
+
+- World Properties → Connection's *Negotiate NAWS*/*Send Client Info*
+  checkboxes are now real. NAWS reports a fixed terminal width/height
+  (80×24) to the server rather than something computed from the actual
+  window — MushTato's scrollback has no real "columns" concept, and
+  real Potato's own NAWS support does the same (a fixed configured
+  number, not a live computed one). TERM-TYPE identifies this client to
+  the server as "MushTato" if it asks.
+
+## 1.4.0 — SSL/TLS for Telnet connections (2026-07-27)
+
+- World Properties → Connection's *Use SSL* checkbox is now real —
+  encrypts the Telnet/MU* connection itself (a completely different
+  feature from Protocol: SSH, which is for a real shell account
+  instead). Certificate verification is trust-on-first-use, the same
+  model the SSH feature already uses: the server's certificate is
+  pinned on first connect, and a later mismatch is refused, not
+  silently allowed — `/ssl-forget host:port` clears a saved
+  certificate. A deliberately more cautious choice than real Potato's
+  own approach (which skips certificate verification for SSL
+  connections entirely).
+
+## 1.3.0 — Per-tab timestamps (2026-07-27)
+
+- New View → Show Timestamps (or `/timestamps [on|off]`) labels every
+  new line in a tab's scrollback with a compact `[HH:mm:ss]` prefix —
+  real server text, a script's own `echo()` output, and MushTato's own
+  system notices alike, mirrored into any spawn log window bound to
+  that tab too. Per-tab and never remembered across a restart — always
+  starts off. The moment you toggle it on or off, a full-date marker
+  line is inserted (e.g. `[Timestamps enabled -- 27/07/2026 -
+  14:32:07]`), so a saved transcript still tells you exactly which
+  calendar date the compact per-line times belong to. Only affects
+  lines from that point forward — never relabels history already shown.
+
 ## 1.2.1 — Fix: About/version showed "dev" instead of the real version (2026-07-26)
 
 - The version display (`/version`, the About box, the Help window's

@@ -43,9 +43,10 @@ from engine.storage import (
 from engine.storage import logs_dir as default_logs_dir
 from engine.storage import drafts_dir as default_drafts_dir
 from engine.storage import ssh_known_hosts_path
+from engine.storage import ssl_known_certs_path
 from engine.storage.paths import safe_filename
 from engine.errorlog import get_error_log
-from engine.net import HostKeyStore
+from engine.net import CertificateStore, HostKeyStore
 
 from ..dialogs.settings_dialog import SettingsDialog
 from ..help.help_window import HelpWindow
@@ -110,6 +111,7 @@ class MainWindow(QMainWindow):
         editor_last_dir: str = "",
         upload_last_dir: str = "",
         host_key_store=None,
+        cert_store=None,
     ) -> None:
         super().__init__()
         self.setWindowTitle("MushTato")
@@ -168,6 +170,13 @@ class MainWindow(QMainWindow):
         # worlds), since it's backed by one shared on-disk file.
         self._host_key_store = (
             host_key_store if host_key_store is not None else HostKeyStore(ssh_known_hosts_path())
+        )
+        # SSL support (item 6 of the SSL/proxy/NAWS plan): identical
+        # override pattern to _host_key_store above -- one shared
+        # instance for every tab, backed by one shared on-disk file,
+        # overridable so tests never touch the real per-user store.
+        self._cert_store = (
+            cert_store if cert_store is not None else CertificateStore(ssl_known_certs_path())
         )
         self._editor_font_family = editor_font_family
         self._editor_font_size = editor_font_size
@@ -319,6 +328,7 @@ class MainWindow(QMainWindow):
             logs_dir_override=self._logs_dir,
             upload_last_dir=self._upload_last_dir,
             host_key_store=self._host_key_store,
+            cert_store=self._cert_store,
         )
         self._wire_new_tab(tab)
         return tab
@@ -339,6 +349,7 @@ class MainWindow(QMainWindow):
             splitter_sizes=self._splitter_sizes or None,
             upload_last_dir=self._upload_last_dir,
             host_key_store=self._host_key_store,
+            cert_store=self._cert_store,
         )
         self._wire_new_tab(tab)
         return tab
@@ -616,6 +627,7 @@ class MainWindow(QMainWindow):
         self._set_tray_activity_pending(False)
         self._refresh_status_bar()
         self._refresh_action_enabled_state()
+        self._refresh_timestamps_action_state()
 
     def _update_active_tab_highlight(self, new_tab: Optional[SessionTab]) -> None:
         """Colors the currently active tab's label distinctly (cyan) so
@@ -941,6 +953,15 @@ class MainWindow(QMainWindow):
             action.triggered.connect(lambda checked=False, t=theme_name: self.set_theme(t))
         (self.dark_theme_action if self._theme == "dark" else self.light_theme_action).setChecked(True)
 
+        # Per-tab, not host-level (checkpointed 2026-07-27) -- unlike
+        # Theme, this checkbox reflects whichever tab is currently
+        # active and is re-synced on every tab switch (see
+        # _refresh_timestamps_action_state), not one shared state.
+        self.timestamps_action = QAction("Show Timestamps", self)
+        self.timestamps_action.setCheckable(True)
+        self.timestamps_action.triggered.connect(self._toggle_timestamps_on_current_tab)
+        view_menu.addAction(self.timestamps_action)
+
         # -- Logging -------------------------------------------------------
         self.logging_menu = logging_menu = menu_bar.addMenu("&Logging")
         self.spawn_log_action = add_action(
@@ -1023,6 +1044,7 @@ class MainWindow(QMainWindow):
             self.find_action,
             self.mail_window_action,
             self.upload_action,
+            self.timestamps_action,
         ):
             action.setEnabled(has_tab)
 
@@ -1076,6 +1098,25 @@ class MainWindow(QMainWindow):
         tab = self.tab_widget.currentWidget()
         if tab is not None:
             tab.toggle_find_bar()
+
+    def _toggle_timestamps_on_current_tab(self, checked: bool) -> None:
+        tab = self.tab_widget.currentWidget()
+        if tab is not None:
+            tab.set_show_timestamps(checked)
+
+    def _refresh_timestamps_action_state(self) -> None:
+        """Syncs the View menu's checkbox to whichever tab is now
+        active -- this is genuinely per-tab state (unlike Theme), so
+        switching tabs must not silently carry one tab's on/off setting
+        over to another's display. blockSignals guards against
+        setChecked() here re-triggering _toggle_timestamps_on_current_tab,
+        which would otherwise flip the *new* tab's real state to match
+        whatever the old tab's checkbox happened to show.
+        """
+        tab = self.tab_widget.currentWidget()
+        self.timestamps_action.blockSignals(True)
+        self.timestamps_action.setChecked(tab.show_timestamps if tab is not None else False)
+        self.timestamps_action.blockSignals(False)
 
     def _switch_input_focus_on_current_tab(self) -> None:
         tab = self.tab_widget.currentWidget()

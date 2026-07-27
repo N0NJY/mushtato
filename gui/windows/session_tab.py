@@ -40,7 +40,7 @@ from PySide6.QtWidgets import (
 
 from engine.ansi import DEFAULT_STYLE, Style, StyledSegment
 from engine.commands import CommandTable
-from engine.net import HostKeyStore
+from engine.net import CertificateStore, HostKeyStore
 from engine.scripting import (
     MAX_CONSECUTIVE_TRIGGER_FAILURES,
     DispatchOutcome,
@@ -58,6 +58,7 @@ from engine.storage import (
     load_world_scripts,
     save_world_scripts,
     ssh_known_hosts_path,
+    ssl_known_certs_path,
     world_script_path,
 )
 
@@ -166,6 +167,7 @@ class SessionTab(QWidget):
         logs_dir_override=None,  # Phase 11: passed straight through to each spawn window; see spawn_log_window()
         upload_last_dir: str = "",  # shared "next Upload dialog's starting directory" preference
         host_key_store: Optional[HostKeyStore] = None,  # for /ssh and /ssh-forget; see _host_key_store()
+        cert_store: Optional[CertificateStore] = None,  # for SSL and /ssl-forget; see _cert_store()
     ) -> None:
         super().__init__()
         # host=="" is a "blank tab" -- no bridge yet, established later by
@@ -182,8 +184,12 @@ class SessionTab(QWidget):
         self._logs_dir_override = logs_dir_override
         self._host_key_store_override = host_key_store
         self._explicit_character = character
+        self._cert_store_override = cert_store
         self._theme = theme if theme is not None else DEFAULT_THEME
         self.connected_at: Optional[QDateTime] = None
+        # Per-tab, never persisted (checkpointed 2026-07-27: always starts
+        # off) -- see _prefix_with_timestamp/set_show_timestamps below.
+        self.show_timestamps: bool = False
         self.bridge = None  # set below (blank tab) or by _start_bridge (connected)
         self.connection_state = "Connecting" if host else "Disconnected"
         self.spawn_windows: List[SpawnWindow] = []
@@ -324,7 +330,18 @@ class SessionTab(QWidget):
         # runtime path just omits this argument.
         if host:
             default_bridge = bridge if bridge is not None else TelnetBridge(
-                host, port, nop_keepalive=world.nop_keepalive if world is not None else False
+                host,
+                port,
+                nop_keepalive=world.nop_keepalive if world is not None else False,
+                use_ssl=world.use_ssl if world is not None else False,
+                cert_store=self._cert_store(),
+                naws_enabled=world.telnet_naws if world is not None else False,
+                term_enabled=world.telnet_term if world is not None else False,
+                host2=world.host2 if world is not None else "",
+                port2=world.port2 if world is not None else 0,
+                use_ssl2=world.use_ssl2 if world is not None else False,
+                proxy_host=world.proxy_host if world is not None else "",
+                proxy_port=world.proxy_port if world is not None else 0,
             )
             self._start_bridge(default_bridge, host, port, f"Connecting to {host}:{port} ...\n")
         else:
@@ -343,6 +360,16 @@ class SessionTab(QWidget):
         if self._host_key_store_override is not None:
             return self._host_key_store_override
         return HostKeyStore(ssh_known_hosts_path())
+
+    def _cert_store(self) -> CertificateStore:
+        """Resolves to the real per-user SSL certificate store (engine/
+        storage/paths.ssl_known_certs_path) unless a test explicitly
+        overrode it at construction -- identical dependency-injection
+        pattern to _host_key_store() above.
+        """
+        if self._cert_store_override is not None:
+            return self._cert_store_override
+        return CertificateStore(ssl_known_certs_path())
 
     def _start_bridge(self, bridge, host: str, port: int, connecting_message: str) -> None:
         """Wire up and start ``bridge`` (a TelnetBridge or SshBridge --
@@ -527,9 +554,10 @@ class SessionTab(QWidget):
             if finalized.gagged:
                 self._clear_preview()
             elif finalized.segments:
-                self._insert_finalized_segments(finalized.segments, restore_preview=False)
+                segments = self._prefix_with_timestamp(finalized.segments)
+                self._insert_finalized_segments(segments, restore_preview=False)
                 for spawn in self.spawn_windows:
-                    spawn.receive_segments(finalized.segments)
+                    spawn.receive_segments(segments)
                 any_output = True
             self._report_dispatch_outcome(finalized.outcome)
         if result.preview is not None:
@@ -575,6 +603,47 @@ class SessionTab(QWidget):
             self._preview_start_position = self._end_of_document_position()
         replace_tail(self.scrollback, self._preview_start_position, segments)
         self._preview_segments = segments
+
+    # -- Timestamps (checkpointed 2026-07-27): a per-tab, non-persisted
+    # toggle. Every *finalized* line (real server text and script echo()
+    # output alike -- both funnel through _insert_finalized_segments)
+    # gets a compact "[HH:mm:ss] " prefix when enabled; the still-
+    # updating "preview" of an incomplete trailing line deliberately
+    # does NOT get one, since it's re-rendered repeatedly as more of the
+    # same not-yet-finished line arrives and isn't a real, settled event
+    # yet. Toggling itself inserts a full-date marker line (see
+    # set_show_timestamps) rather than silently starting/stopping --
+    # Rick's own explicit ask, so a saved log's compact per-line times
+    # can still be pinned to a real calendar date.
+
+    def _timestamp_prefix_segment(self) -> StyledSegment:
+        now = QDateTime.currentDateTime().toString("HH:mm:ss")
+        return StyledSegment(f"[{now}] ", DEFAULT_STYLE)
+
+    def _prefix_with_timestamp(self, segments: List[StyledSegment]) -> List[StyledSegment]:
+        if not self.show_timestamps:
+            return segments
+        return [self._timestamp_prefix_segment()] + list(segments)
+
+    def set_show_timestamps(self, enabled: bool) -> None:
+        """Toggles per-line timestamps for this tab -- reused identically
+        by MainWindow's View menu action and the /timestamps command, not
+        a parallel implementation of either. A no-op if already in the
+        requested state, so an incidental duplicate call (e.g. re-
+        syncing the menu checkbox) can never double-announce.
+        """
+        if enabled == self.show_timestamps:
+            return
+        self.show_timestamps = enabled
+        # The status bar clock (MainWindow._update_clock) already
+        # established this exact "dd/MM/yyyy - HH:mm:ss" display format
+        # -- reused here rather than inventing a second one. Inserted via
+        # _append_plain_raw, not _append_plain, so this marker line is
+        # never itself also prefixed with the compact per-line time --
+        # it already carries a full date/time inline.
+        now = QDateTime.currentDateTime().toString("dd/MM/yyyy - HH:mm:ss")
+        state = "enabled" if enabled else "disabled"
+        self._append_plain_raw(f"[Timestamps {state} -- {now}]\n")
 
     def _insert_finalized_segments(
         self, segments: List[StyledSegment], *, restore_preview: bool = True
@@ -627,7 +696,8 @@ class SessionTab(QWidget):
 
     def _on_script_echo_requested(self, text: str, style: Optional[Style]) -> None:
         seg_style = style if style is not None else DEFAULT_STYLE
-        self._insert_finalized_segments([StyledSegment(text + "\n", seg_style)])
+        segments = self._prefix_with_timestamp([StyledSegment(text + "\n", seg_style)])
+        self._insert_finalized_segments(segments)
         self.activity.emit()
 
     def _schedule_timer_request(self, timer_request) -> None:
@@ -668,6 +738,26 @@ class SessionTab(QWidget):
         self._drain_and_schedule_pending_timers()
 
     def _append_plain(self, text: str) -> None:
+        """Inserts a MushTato-originated system notice (connect/
+        disconnect/error messages) -- also timestamped when enabled
+        (checkpointed 2026-07-27), same as real server text. A leading
+        run of newlines (several call sites use "\\n[...]\\n" to force a
+        blank line before a notice) is preserved *before* the timestamp
+        prefix rather than after it, so the visible bracketed message
+        still reads "[HH:mm:ss] [...]" on its own line, not a stray
+        timestamped blank line followed by the real message.
+        """
+        if self.show_timestamps:
+            leading_newlines = ""
+            rest = text
+            while rest.startswith("\n"):
+                leading_newlines += "\n"
+                rest = rest[1:]
+            now = QDateTime.currentDateTime().toString("HH:mm:ss")
+            text = f"{leading_newlines}[{now}] {rest}"
+        self._append_plain_raw(text)
+
+    def _append_plain_raw(self, text: str) -> None:
         cursor = QTextCursor(self.scrollback.document())
         cursor.movePosition(QTextCursor.End)
         cursor.insertText(text)
@@ -1075,6 +1165,8 @@ class SessionTab(QWidget):
             "upload": self._cmd_upload,
             "ssh": self._cmd_ssh,
             "ssh-forget": self._cmd_ssh_forget,
+            "ssl-forget": self._cmd_ssl_forget,
+            "timestamps": self._cmd_timestamps,
         }
         for name, help_text in COMMAND_HELP:
             self._commands.register(name, handlers[name], help_text)
@@ -1194,6 +1286,24 @@ class SessionTab(QWidget):
             )
         return f"No saved host key found for {host}:{port}."
 
+    def _cmd_ssl_forget(self, args: str) -> Optional[str]:
+        target = args.strip()
+        # Unlike /ssh-forget, there's no universal default port to fall
+        # back to here (SSH conventionally runs on 22; MU*s run on all
+        # sorts of ports) -- host:port is required explicitly.
+        if ":" not in target:
+            return "Usage: /ssl-forget <host>:<port>"
+        host, _, port_text = target.rpartition(":")
+        if not host or not port_text.isdigit():
+            return "Usage: /ssl-forget <host>:<port>"
+        port = int(port_text)
+        if self._cert_store().forget(host, port):
+            return (
+                f"Forgot the saved certificate for {host}:{port}. "
+                "The next connect will trust whatever certificate the server offers."
+            )
+        return f"No saved certificate found for {host}:{port}."
+
     def _cmd_settings(self, args: str) -> Optional[str]:
         del args
         if self.host_window is None:
@@ -1233,6 +1343,13 @@ class SessionTab(QWidget):
         if self.host_window is None:
             return "Not available in this session (no host window)."
         return self.host_window.set_theme(theme)
+
+    def _cmd_timestamps(self, args: str) -> Optional[str]:
+        value = args.strip().lower()
+        if value not in ("on", "off"):
+            return "Usage: /timestamps [on|off]"
+        self.set_show_timestamps(value == "on")
+        return None
 
     def _cmd_disconnect(self, args: str) -> Optional[str]:
         del args

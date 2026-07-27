@@ -44,7 +44,7 @@ from typing import Callable, Optional
 
 from PySide6.QtCore import QObject, Signal
 
-from engine.net import TelnetClient
+from engine.net import CertificateMismatch, CertificateStore, Socks4Error, TelnetClient
 
 
 class TelnetBridge(QObject):
@@ -69,12 +69,46 @@ class TelnetBridge(QObject):
         *,
         on_text: Optional[Callable[[str], None]] = None,
         nop_keepalive: bool = False,
+        use_ssl: bool = False,
+        cert_store: Optional[CertificateStore] = None,
+        naws_enabled: bool = False,
+        term_enabled: bool = False,
+        host2: str = "",
+        port2: int = 0,
+        use_ssl2: bool = False,
+        proxy_host: str = "",
+        proxy_port: int = 0,
     ) -> None:
         super().__init__(parent)
         self._host = host
         self._port = port
         self._on_text = on_text
         self._nop_keepalive = nop_keepalive
+        self._use_ssl = use_ssl
+        self._cert_store = cert_store
+        self._naws_enabled = naws_enabled
+        self._term_enabled = term_enabled
+        # Item 9 of the SSL/proxy/NAWS plan: a SOCKS4/SOCKS4a proxy,
+        # tried only if both are actually set. Applies to *every*
+        # candidate (primary and, if configured, the item 8 fallback
+        # address) -- matches real Potato's own behavior, which routes
+        # every address in its host list through the same proxy setting
+        # rather than a per-address proxy choice.
+        self._proxy_host = proxy_host
+        self._proxy_port = proxy_port
+        # Item 8 of the SSL/proxy/NAWS plan: an optional fallback
+        # address, tried only if host2/port2 are both actually set --
+        # matches real Potato's own confirmed behavior (verified
+        # against its source): primary then secondary, in that fixed
+        # order, on *every* connect/reconnect attempt, never "sticky"
+        # toward whichever one worked last. Each call to _run() (every
+        # start(), including a reconnect's stop()-then-start()) rebuilds
+        # this candidate list from scratch and always tries it from the
+        # top, which is what gives "no stickiness" for free rather than
+        # needing to be implemented as its own special case.
+        self._host2 = host2
+        self._port2 = port2
+        self._use_ssl2 = use_ssl2
         self._loop: Optional[asyncio.AbstractEventLoop] = None
         self._client: Optional[TelnetClient] = None
         self._thread: Optional[threading.Thread] = None
@@ -170,16 +204,52 @@ class TelnetBridge(QObject):
             loop.close()
 
     async def _run(self) -> None:
-        client = TelnetClient(self._host, self._port)
-        self._client = client
+        candidates = [(self._host, self._port, self._use_ssl)]
+        if self._host2 and self._port2:
+            candidates.append((self._host2, self._port2, self._use_ssl2))
+
+        client: Optional[TelnetClient] = None
+        connect_error: Optional[Exception] = None
+        for candidate_host, candidate_port, candidate_ssl in candidates:
+            candidate_client = TelnetClient(
+                candidate_host,
+                candidate_port,
+                use_ssl=candidate_ssl,
+                cert_store=self._cert_store,
+                naws_enabled=self._naws_enabled,
+                term_enabled=self._term_enabled,
+                proxy_host=self._proxy_host,
+                proxy_port=self._proxy_port,
+            )
+            self._client = candidate_client
+            try:
+                await candidate_client.connect()
+            except asyncio.CancelledError:
+                await candidate_client.close()
+                raise
+            except (CertificateMismatch, OSError, Socks4Error) as exc:
+                connect_error = exc
+                await candidate_client.close()
+                continue
+            else:
+                client = candidate_client
+                connect_error = None
+                break
+
+        if client is None:
+            self._client = None
+            if isinstance(connect_error, CertificateMismatch):
+                self.connectionFailed.emit(
+                    f"{connect_error}\n"
+                    f"If this change is expected (e.g. the server's certificate was "
+                    f"reissued), run: /ssl-forget {connect_error.host}:{connect_error.port}  then reconnect."
+                )
+            else:
+                self.connectionFailed.emit(str(connect_error))
+            return
+
         keepalive_task: Optional[asyncio.Task] = None
         try:
-            try:
-                await client.connect()
-            except OSError as exc:
-                self.connectionFailed.emit(str(exc))
-                return
-
             self.connected.emit()
             if self._nop_keepalive:
                 keepalive_task = asyncio.create_task(self._send_nop_periodically(client))

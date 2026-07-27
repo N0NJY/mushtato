@@ -110,6 +110,44 @@ class WorldProfile:
     # WorldProfile to store this on at all, so it keeps using the
     # original global Settings.splitter_sizes mechanism unchanged.
     splitter_sizes: List[int] = field(default_factory=list)
+    # Item 6 of the SSL/proxy/NAWS plan (2026-07-27): this is about
+    # encrypting a Telnet/MU* connection itself (implicit TLS on a
+    # dedicated port, verified against real Potato's own approach),
+    # completely distinct from the SSH feature's protocol field above.
+    # Certificate verification is trust-on-first-use -- see
+    # engine/net/client.py's CertificateStore -- not Potato's own real
+    # choice of no verification at all.
+    use_ssl: bool = False
+    # Item 7 of the SSL/proxy/NAWS plan: real telnet-negotiation options
+    # (engine/net/telnet.py's TelnetNegotiator), both opt-in and off by
+    # default. NAWS reports a fixed width/height (not computed from
+    # real window size -- see that module's own docstring); TTYPE
+    # reports a fixed client-identifying name, "MushTato" -- neither is
+    # user-configurable yet, matching the checkpointed decision that
+    # this didn't need new per-world text fields, just the two on/off
+    # toggles already present as UI placeholders.
+    telnet_naws: bool = False
+    telnet_term: bool = False
+    # Item 8 of the SSL/proxy/NAWS plan: an optional fallback address,
+    # tried only if both host2 and port2 are actually set (verified
+    # against real Potato's own confirmed behavior: primary then
+    # secondary, in that fixed order, on every connect/reconnect
+    # attempt, never "sticky" toward whichever one worked last time).
+    # use_ssl2 is independent of use_ssl -- a fallback address can use a
+    # different SSL setting than the primary one, matching Potato's own
+    # real per-address ssl/ssl2 fields.
+    host2: str = ""
+    port2: int = 0
+    use_ssl2: bool = False
+    # Item 9 of the SSL/proxy/NAWS plan: a SOCKS4/SOCKS4a proxy
+    # (engine/net/socks4.py, hand-rolled -- matches real Potato's own
+    # scope exactly, which only ever implements SOCKS4 despite having a
+    # proxy-type framework that could support more). A plain on/off
+    # toggle rather than a type dropdown, since SOCKS4 is the only real
+    # option -- tried only if both are actually set, same convention as
+    # host2/port2 above.
+    proxy_host: str = ""
+    proxy_port: int = 0
 
 
 def load_address_book(path: Path) -> List[WorldProfile]:
@@ -156,6 +194,14 @@ def load_address_book(path: Path) -> List[WorldProfile]:
                 protocol=entry.get("protocol", DEFAULT_PROTOCOL),
                 ssh_username=entry.get("ssh_username", ""),
                 splitter_sizes=list(entry.get("splitter_sizes", [])),
+                use_ssl=entry.get("use_ssl", False),
+                telnet_naws=entry.get("telnet_naws", False),
+                telnet_term=entry.get("telnet_term", False),
+                host2=entry.get("host2", ""),
+                port2=entry.get("port2", 0),
+                use_ssl2=entry.get("use_ssl2", False),
+                proxy_host=entry.get("proxy_host", ""),
+                proxy_port=entry.get("proxy_port", 0),
             )
         )
     return worlds
@@ -189,6 +235,14 @@ def save_address_book(path: Path, worlds: List[WorldProfile]) -> None:
                 "protocol": w.protocol,
                 "ssh_username": w.ssh_username,
                 "splitter_sizes": w.splitter_sizes,
+                "use_ssl": w.use_ssl,
+                "telnet_naws": w.telnet_naws,
+                "telnet_term": w.telnet_term,
+                "host2": w.host2,
+                "port2": w.port2,
+                "use_ssl2": w.use_ssl2,
+                "proxy_host": w.proxy_host,
+                "proxy_port": w.proxy_port,
             }
             for w in worlds
         ]

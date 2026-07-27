@@ -55,6 +55,8 @@ COMMAND_HELP: List[Tuple[str, str]] = [
     ("upload", "Upload a file to this tab, line by line"),
     ("ssh", "Connect this (blank) tab via SSH: /ssh [-p port] user@host"),
     ("ssh-forget", "Forget a saved SSH host key: /ssh-forget [host[:port]]"),
+    ("ssl-forget", "Forget a saved SSL certificate: /ssl-forget [host:port]"),
+    ("timestamps", "Toggle line timestamps on this tab: /timestamps [on|off]"),
 ]
 
 
@@ -168,18 +170,25 @@ list on the left, that section's fields on the right):
   {password}`, sent with the default Character's name/password
   substituted in), *Login Delay* (how long to wait after connecting
   before sending it, giving the server time to show its own banner
-  first), and *Keepalive* (send a Telnet no-op every 60 seconds to keep
-  idle firewalls/NAT from silently dropping this connection) are real
-  and functional. The rest of this section (SSL, a 2nd address/port,
-  proxy, and several other Telnet-specific options) mirrors real
-  settings from Potato but is shown **disabled** -- MushTato's
-  connection engine doesn't support them yet. Visible on purpose, so
-  it's clear what's planned versus what's broken. (Note: this "SSL"
-  checkbox is about *encrypting a Telnet/MU* connection* specifically,
-  a different, still-unbuilt feature -- if you want to connect to a
-  real Unix shell account, that's the Protocol: SSH option on the
-  Basic page instead, which is real and functional; see the SSH
-  Connections topic.)
+  first), *Keepalive* (send a Telnet no-op every 60 seconds to keep
+  idle firewalls/NAT from silently dropping this connection), *Use SSL*
+  (encrypts the Telnet/MU* connection itself -- see the SSL Connections
+  topic), *Negotiate NAWS* (tells the server a fixed terminal width/
+  height, 80x24 -- not computed from the actual window, which has no
+  real "columns" concept to report), *Send Client Info* (identifies
+  this client to the server as "MushTato" if it asks), and *2nd
+  Address*/*2nd Port*/*Use SSL for 2nd Address* (a fallback address --
+  if the primary address fails to connect, this one is tried next,
+  every single connect and reconnect attempt, always starting from the
+  primary again rather than staying on whichever one worked last time),
+  and *Proxy Host*/*Proxy Port* (routes the connection through a SOCKS4
+  proxy -- leave both blank to connect directly) are all real and
+  functional. Every Connection-page setting modeled on Potato is now
+  actually supported -- none of them are disabled placeholders anymore.
+  (Note: "Use SSL" here is about encrypting a Telnet/MU* connection
+  specifically -- a different feature from Protocol: SSH on the Basic
+  page, which is for connecting to a real Unix shell account instead;
+  see the SSH Connections topic for that.)
 - **Auto-Sends** -- three optional blocks of text (one line each) sent
   automatically on connect, in this order: *first connect ever*
   (tracked per world -- only ever fires once, the very first time you
@@ -297,9 +306,7 @@ small menu (Restore, Exit). It blinks the same way a background tab
 does: whenever new text arrives on a tab you're not looking at, *or*
 on any tab at all while the whole MushTato window itself isn't
 focused (e.g. you've alt-tabbed away or minimized it) -- switching
-tabs, or just bringing MushTato back into focus, clears it. The icon
-itself is a simple placeholder (not final artwork) until real branding
-exists.
+tabs, or just bringing MushTato back into focus, clears it.
 
 ## Clickable links
 
@@ -308,6 +315,25 @@ Any `http://` or `https://` URL appearing in a tab's scrollback
 distinct color and is clickable -- clicking one opens it in your
 system's default web browser. This is purely a display-layer feature;
 it doesn't change what the server actually sent or what triggers see.
+
+## Timestamps
+
+View -> Show Timestamps (or `/timestamps [on|off]`) labels every new
+line in a tab's scrollback with a compact `[HH:mm:ss]` prefix -- both
+real server text and a script's own `echo()` output, plus MushTato's
+own system notices (Connected, connection-closed, script errors, and
+so on). A spawned log window mirroring that tab shows the same
+timestamps too.
+
+This is a per-tab setting that always starts off and is never
+remembered across a restart -- switching to a different tab, or
+opening a new one, doesn't carry the setting over. The moment you
+toggle it on or off, a marker line with the full current date *and*
+time is inserted (e.g. `[Timestamps enabled -- 27/07/2026 -
+14:32:07]`), so a saved transcript or spawnlog still tells you exactly
+which real calendar date the compact per-line times that follow belong
+to. Turning timestamps on or off only affects lines from that point
+forward -- it never adds or removes labels on lines already shown.
 
 ## Detecting a dropped connection
 
@@ -357,7 +383,8 @@ buttons, plus a status bar at the bottom.
   whichever widget currently has keyboard focus -- an input box, or
   the active tab's scrollback for Copy/Select All), and Find...
   (`Ctrl+F`, see the Sessions & Tabs topic).
-- **View** -- Theme submenu (Dark/Light).
+- **View** -- Theme submenu (Dark/Light), Show Timestamps (see the
+  Sessions & Tabs topic).
 - **Logging** -- Spawn Log Window (opens a log-mirror window for the
   active tab).
 - **Options** -- Settings... (hotkeys and theme).
@@ -376,11 +403,11 @@ for yet. A grayed-out item means "planned, not yet built," not
 "broken."
 
 Reconnect, Disconnect, Close, Spawn Log Window, Upload, Mail Window,
-and the Edit menu's six focus-dispatched actions plus Find are disabled
-whenever there's no tab open at all, since there's nothing for them to
-act on. Editor, Error Log, Address Book, Settings, Help, and About stay
-available with zero tabs open, since none of them are tied to any one
-connection.
+Show Timestamps, and the Edit menu's six focus-dispatched actions plus
+Find are disabled whenever there's no tab open at all, since there's
+nothing for them to act on. Editor, Error Log, Address Book, Settings,
+Help, and About stay available with zero tabs open, since none of them
+are tied to any one connection.
 
 ## Text Editor
 
@@ -835,6 +862,64 @@ content is protocol-agnostic).
 """
 
 
+def _render_ssl(ctx: HelpContext) -> str:
+    del ctx
+    return """# SSL Connections
+
+World Properties -> Connection has a *Use SSL* checkbox -- this
+encrypts the Telnet/MU* connection itself, wrapping it in TLS right
+after connecting (the same "implicit TLS on a dedicated port" model
+most SSL-enabled MU*s actually use, not an in-band upgrade of a plain
+connection). This is a completely different feature from Protocol: SSH
+on the Basic page -- that's for logging into a real Unix shell account
+instead (see the SSH Connections topic); Use SSL still connects you to
+the same MU*/MUSH world, just encrypted.
+
+Real-world adoption of SSL among MU*/MUSH servers is fairly low --
+check with a specific world's admin/documentation for whether it even
+offers an SSL-enabled port before turning this on for it.
+
+## Certificate verification (trust-on-first-use)
+
+The first time you connect to a given host:port with Use SSL checked,
+MushTato remembers the server's certificate. Every later connection to
+that same host:port checks the certificate still matches -- if it ever
+changes, the connection is **refused**, not silently allowed, the same
+trust-on-first-use model already used for SSH host keys. The rejection
+message tells you the old and new certificate fingerprints and names
+the exact command to run if the change is actually expected (e.g. the
+server's certificate was reissued or renewed):
+
+```
+/ssl-forget host:port
+```
+
+Unlike `/ssh-forget`, there's no default port to fall back to if you
+leave it off -- MU*s run on all sorts of ports, unlike SSH's
+conventional 22, so `host:port` must be given in full.
+
+This forgets the saved certificate for that one host:port so the
+*next* connection attempt is treated as first-use again (trusting
+whatever certificate the server offers, and saving it).
+
+Saved certificates live in their own file, separate from anything on
+your real system: `ssl_known_certs.json` in the same per-OS MushTato
+data directory as your address book and settings (see `INSTALL.md`'s
+"Removing your data" section for the exact path). This never consults
+or modifies your OS/browser's own certificate trust store. You can also
+delete that JSON file directly (or a single entry inside it) if you'd
+rather edit it by hand than use `/ssl-forget`.
+
+Note this is a deliberately different (and more cautious) choice than
+several real MU* clients make, which often skip certificate
+verification for SSL connections entirely on the reasoning that most
+MUSHes use self-signed certificates anyway -- MushTato still lets a
+self-signed certificate through (it isn't checked against a real
+certificate authority), but *does* insist a given host:port's
+certificate stays the same one you trusted the first time.
+"""
+
+
 def _render_faq(ctx: HelpContext) -> str:
     del ctx
     return """# FAQ / Troubleshooting
@@ -898,6 +983,7 @@ TOPICS: List[HelpTopic] = [
     HelpTopic("address-book", "Address Book", _render_address_book),
     HelpTopic("tabs", "Sessions & Tabs", _render_tabs),
     HelpTopic("ssh-connections", "SSH Connections", _render_ssh),
+    HelpTopic("ssl-connections", "SSL Connections", _render_ssl),
     HelpTopic("chrome", "Menus & Toolbar", _render_chrome),
     HelpTopic("dual-input", "Dual Input", _render_dual_input),
     HelpTopic("spawn-windows", "Spawn Windows", _render_spawn_windows),

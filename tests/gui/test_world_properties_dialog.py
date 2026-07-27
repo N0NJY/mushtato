@@ -151,21 +151,6 @@ def test_result_profile_returns_none_for_blank_name(qapp):
     assert dialog.result_profile() is None
 
 
-def test_connection_specifics_placeholders_are_disabled(qapp):
-    world = make_world()
-    dialog = WorldPropertiesDialog(None, world=world)
-
-    for widget in (
-        dialog.ssl_checkbox,
-        dialog.host2_edit,
-        dialog.port2_spin,
-        dialog.proxy_combo,
-        dialog.naws_checkbox,
-        dialog.term_checkbox,
-    ):
-        assert widget.isEnabled() is False
-
-
 def test_functional_connection_fields_are_enabled(qapp):
     world = make_world()
     dialog = WorldPropertiesDialog(None, world=world)
@@ -174,6 +159,23 @@ def test_functional_connection_fields_are_enabled(qapp):
     # No longer a placeholder (post-Phase-9) -- real and functional,
     # unlike its disabled Connection-page neighbors above.
     assert dialog.keepalive_checkbox.isEnabled() is True
+    # Real and functional (item 6 of the SSL/proxy/NAWS plan), same
+    # treatment as keepalive_checkbox above.
+    assert dialog.ssl_checkbox.isEnabled() is True
+    # Real and functional (item 7 of the SSL/proxy/NAWS plan), same
+    # treatment as ssl_checkbox above.
+    assert dialog.naws_checkbox.isEnabled() is True
+    assert dialog.term_checkbox.isEnabled() is True
+    # Real and functional (item 8 of the SSL/proxy/NAWS plan), same
+    # treatment as the others above.
+    assert dialog.host2_edit.isEnabled() is True
+    assert dialog.port2_spin.isEnabled() is True
+    assert dialog.ssl2_checkbox.isEnabled() is True
+    # Real and functional (item 9 of the SSL/proxy/NAWS plan) -- the
+    # last of the four items, and the last real Potato Connection-page
+    # setting MushTato's engine didn't support; no placeholders remain.
+    assert dialog.proxy_host_edit.isEnabled() is True
+    assert dialog.proxy_port_spin.isEnabled() is True
 
 
 def test_category_list_has_six_sections(qapp):
@@ -352,6 +354,102 @@ def test_result_profile_reflects_edited_nop_keepalive(qapp):
     dialog.keepalive_checkbox.setChecked(True)
 
     assert dialog.result_profile().nop_keepalive is True
+
+
+# -- SSL (item 6 of the SSL/proxy/NAWS plan) ------------------------------
+
+
+def test_dialog_loads_use_ssl_from_the_world(qapp):
+    dialog_on = WorldPropertiesDialog(None, world=make_world(use_ssl=True))
+    dialog_off = WorldPropertiesDialog(None, world=make_world(use_ssl=False))
+
+    assert dialog_on.ssl_checkbox.isChecked() is True
+    assert dialog_off.ssl_checkbox.isChecked() is False
+
+
+def test_result_profile_reflects_edited_use_ssl(qapp):
+    dialog = WorldPropertiesDialog(None, world=make_world(use_ssl=False))
+
+    dialog.ssl_checkbox.setChecked(True)
+
+    assert dialog.result_profile().use_ssl is True
+
+
+# -- NAWS/TERM-TYPE (item 7 of the SSL/proxy/NAWS plan) -------------------
+
+
+def test_dialog_loads_telnet_naws_and_term_from_the_world(qapp):
+    dialog_on = WorldPropertiesDialog(
+        None, world=make_world(telnet_naws=True, telnet_term=True)
+    )
+    dialog_off = WorldPropertiesDialog(
+        None, world=make_world(telnet_naws=False, telnet_term=False)
+    )
+
+    assert dialog_on.naws_checkbox.isChecked() is True
+    assert dialog_on.term_checkbox.isChecked() is True
+    assert dialog_off.naws_checkbox.isChecked() is False
+    assert dialog_off.term_checkbox.isChecked() is False
+
+
+def test_result_profile_reflects_edited_telnet_naws_and_term(qapp):
+    dialog = WorldPropertiesDialog(
+        None, world=make_world(telnet_naws=False, telnet_term=False)
+    )
+
+    dialog.naws_checkbox.setChecked(True)
+    dialog.term_checkbox.setChecked(True)
+
+    result = dialog.result_profile()
+    assert result.telnet_naws is True
+    assert result.telnet_term is True
+
+
+# -- 2nd address/port (item 8 of the SSL/proxy/NAWS plan) -----------------
+
+
+def test_dialog_loads_host2_port2_use_ssl2_from_the_world(qapp):
+    world = make_world(host2="fallback.example.com", port2=4202, use_ssl2=True)
+    dialog = WorldPropertiesDialog(None, world=world)
+
+    assert dialog.host2_edit.text() == "fallback.example.com"
+    assert dialog.port2_spin.value() == 4202
+    assert dialog.ssl2_checkbox.isChecked() is True
+
+
+def test_result_profile_reflects_edited_host2_port2_use_ssl2(qapp):
+    dialog = WorldPropertiesDialog(None, world=make_world())
+
+    dialog.host2_edit.setText("fallback.example.com")
+    dialog.port2_spin.setValue(4202)
+    dialog.ssl2_checkbox.setChecked(True)
+
+    result = dialog.result_profile()
+    assert result.host2 == "fallback.example.com"
+    assert result.port2 == 4202
+    assert result.use_ssl2 is True
+
+
+# -- SOCKS4 proxy (item 9 of the SSL/proxy/NAWS plan) ---------------------
+
+
+def test_dialog_loads_proxy_host_port_from_the_world(qapp):
+    world = make_world(proxy_host="proxy.example.com", proxy_port=1080)
+    dialog = WorldPropertiesDialog(None, world=world)
+
+    assert dialog.proxy_host_edit.text() == "proxy.example.com"
+    assert dialog.proxy_port_spin.value() == 1080
+
+
+def test_result_profile_reflects_edited_proxy_host_port(qapp):
+    dialog = WorldPropertiesDialog(None, world=make_world())
+
+    dialog.proxy_host_edit.setText("proxy.example.com")
+    dialog.proxy_port_spin.setValue(1080)
+
+    result = dialog.result_profile()
+    assert result.proxy_host == "proxy.example.com"
+    assert result.proxy_port == 1080
 
 
 # -- Regression: auto_login used to be silently dropped by this dialog --

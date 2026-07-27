@@ -12,6 +12,7 @@ from .paths import (
     logs_dir,
     settings_path,
     ssh_known_hosts_path,
+    ssl_known_certs_path,
     user_data_dir,
     world_script_path,
 )
@@ -40,6 +41,7 @@ __all__ = [
     "logs_dir",
     "drafts_dir",
     "ssh_known_hosts_path",
+    "ssl_known_certs_path",
     "PROTOCOLS",
     "DEFAULT_PROTOCOL",
 ]
