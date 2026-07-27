@@ -3206,6 +3206,166 @@ ssh_client.py` or `gui/windows/ssh_bridge.py` (the client never
 generates keys, only validates whatever a real server offers), so this
 was purely a test-fixture fix, nothing shipped was ever affected.
 
+**Added as version 1.1.0 (2026-07-26): real icon + splash screen
+artwork wired in.** New `gui/asset_paths.py`, `gui/splash.py`; moved
+`gui/assets/` in from `art/` (git-tracked, per Rick's checkpoint
+choice); extended `gui/app.py`, `gui/tray_icon.py`, `gui/help/
+help_window.py`, `packaging/mushtato.spec`.
+
+This is Item 3 on the post-SSH working todo/bugs list, following the
+1.0.1/1.0.2 fixes above -- a minor bump (new feature/behavior), not a
+patch, per the version-tracking scheme those entries established.
+Continues directly from the icon-transparency fix already done earlier
+in `art/` (see that entry above): this pass moved the fixed assets into
+the real source tree and actually wired them up, per Rick's own
+checkpoint answers (3-second minimum splash display; a way to re-show
+it from Help, "either smaller, or a link"; assets committed under
+`gui/assets/`; all three wiring targets -- window icon, tray icon,
+PyInstaller spec icon; plus a real bug report: a generic "gear" icon in
+the Linux taskbar instead of MushTato's own).
+
+`gui/asset_paths.py` resolves `gui/assets/` correctly whether running
+from source or a frozen PyInstaller build (`sys.frozen`/`sys._MEIPASS`,
+the standard PyInstaller pattern), mirroring the same dependency-
+injection-free "just resolve the right path" role `gui/version.py`
+already plays -- kept Qt-free so both `gui/tray_icon.py` and
+`gui/help/help_window.py` can import it without a circular-import risk
+and so most of its own tests don't need a `qapp` fixture at all.
+
+**`gui/splash.py`** (`create_splash`/`run_with_splash`/
+`show_splash_again`): shown for Rick's explicit 3-second minimum
+regardless of how fast real startup actually is (MushTato's own init is
+fast enough that a close-the-instant-we're-ready splash would likely
+flash by unseen). `_wait_ms()` pumps a real `QEventLoop` (`QTimer.
+singleShot` + `loop.exec()`) rather than `time.sleep()`, so the splash
+stays responsive/repainted instead of freezing.
+
+**A real, offscreen-QPA-platform-specific timing quirk found while
+writing this module's own tests, not a bug in the wait-calculation
+logic:** a test asserting "no extra wait is added once `init_fn` alone
+already exceeded `minimum_ms`" failed with `elapsed_ms` around 1200ms
+instead of the expected ~200ms. Root-caused directly, not guessed at:
+timed `QSplashScreen.show()` in isolation and found it costs a fixed
+~1000ms under `QT_QPA_PLATFORM=offscreen`, confirmed independent of
+pixmap size (reproduced identically with a 1x1 `QPixmap`) and specific
+to the real `QSplashScreen` class itself -- a plain `QWidget.show()`,
+even constructed with the identical `Qt.WindowType.SplashScreen` window
+flag, is near-instant. This is the same category of offscreen-QPA
+quirk as Phase 12a's `resizeEvent`-on-an-unshown-window finding: real
+under this test harness, not expected to reflect real-desktop behavior
+(a real compositor's `QSplashScreen.show()` is just a repaint, not a
+~1-second wait). Fixed in the *test*, not the production code: rather
+than asserting an absolute wall-clock ceiling (contaminated by that
+fixed overhead), the test now monkeypatches `gui.splash._wait_ms` and
+asserts directly on the actual claim -- it's never called with a
+positive duration once `init_fn` alone already exceeded `minimum_ms`.
+The other four tests in `test_splash.py` keep real, un-mocked timing
+throughout (they only assert a floor, e.g. `elapsed_ms >= 140`, which
+the fixed `show()` overhead can only ever help satisfy, never break).
+
+**Show Splash Screen, from Help (Rick's "a link to show the screen"
+option):** `HelpWindow` gained its own small `View` menu with a single
+"Show Splash Screen" action calling `show_splash_again()` directly --
+reusing the sibling function `gui/splash.py` was already built with
+for exactly this purpose, not a parallel implementation. Kept as a
+named `self.view_menu`/`self.show_splash_action` attribute, not a bare
+local, per the real PySide6/shiboken wrapper-lifetime bug Phase 7d
+already found (a `QMenu`/`QAction` kept only as a local can have its
+underlying C++ object garbage-collected once the enclosing method
+returns).
+
+**Window icon / Linux taskbar "gear" fix:** confirmed directly (not
+assumed) that `QApplication.setWindowIcon()`, called once in
+`gui/app.py`'s `main()` right after constructing the `QApplication`
+(before `MainWindow` is built), cascades correctly to a `MainWindow`
+constructed afterward -- `window.windowIcon().isNull()` is `False` with
+no icon ever set on `MainWindow` itself, verified with a real headless
+script, matching Qt's documented "affects windows created after the
+property is set" behavior. This is also the real, root-caused fix for
+the generic "gear" icon Rick reported in a Linux taskbar: there had
+never been *any* `setWindowIcon()` call anywhere in the app before this
+pass, so every window fell back to Qt's own generic default, which a
+standards-compliant Linux window manager's taskbar/window list renders
+as exactly that kind of placeholder. New `gui/app.py:load_app_icon()`
+builds a real multi-resolution `QIcon` from every pre-rendered
+`gui/assets/icon/{16,24,32,48,64,128,256,512,1024}.png` (via
+`QIcon.addFile(..., QSize(size, size))`) rather than handing Qt the
+single 1024px master and letting it downscale at runtime for whatever
+small size a taskbar/title-bar actually wants -- verified directly that
+the resulting icon really does carry all nine sizes
+(`icon.availableSizes()`), both in isolation and on a constructed
+`MainWindow`. `ICON_SIZES` is a new shared constant in
+`gui/asset_paths.py` (previously duplicated inline in
+`test_asset_paths.py`) so the two can't silently drift.
+
+**Tray icon, real artwork:** `gui/tray_icon.py`'s `generate_resting_icon()`/
+`generate_activity_icon()` (Phase 12c placeholders, whose own docstring
+already said "swap out ... for real artwork whenever it exists, without
+needing to touch any other code") now load the real `icon/64.png`
+instead of drawing a plain circle+"M". The activity (blinking) state
+composites a small `ACTIVITY_COLOR` badge onto the same real icon via
+`QPainter` rather than using a second, different piece of art --
+MushTato only has the one character icon, unlike Potato's own two
+distinct real tray-icon images, so "icon" vs. "icon + a bright dot" is
+this project's own equivalent of Potato's real two-icon-position blink,
+keeping the same visual language as `MainWindow.ACTIVITY_COLOR`'s tab-
+activity flash. `RESTING_COLOR` (the old placeholder's fill color) is
+gone -- nothing else referenced it. The one test that depended on it
+(`test_resting_and_activity_colors_are_distinct`) was rewritten to
+assert the property that actually matters now: sampling the badge
+corner shows the activity icon picking up `ACTIVITY_COLOR` there while
+the resting icon (real artwork, transparent/non-orange in that corner)
+does not.
+
+**PyInstaller spec (`packaging/mushtato.spec`):** `datas` now bundles
+the whole `gui/assets/` directory verbatim (`("../gui/assets",
+"gui/assets")`), matching `gui/asset_paths.py`'s frozen-build path
+shape exactly so nothing there needs a frozen-vs-source special case.
+`EXE(icon=...)` is platform-selected (`sys.platform`): `icon.icns` on
+macOS, `icon.ico` on Windows, `None` on Linux -- confirmed (not
+assumed) that PyInstaller's `icon=` parameter only does anything on
+Windows/macOS and is silently a no-op on Linux, so `None` there isn't a
+gap. Noted explicitly in the spec's own docstring: this build has no
+`BUNDLE()` step (no real macOS `.app` bundle -- `COLLECT`'s plain
+onedir folder is just archived with `ditto` in `build.yml`, same as
+every other OS), so the macOS icon setting's real visible effect here
+is limited to the raw executable's own icon resource, not a
+Finder-visible `.app` icon; a fuller macOS `.app` bundle is a separate,
+more invasive packaging change, not attempted in this pass.
+
+Verified per standing rule 7: 5 tests in `test_splash.py` (including
+the offscreen-quirk-aware rewrite above), 5 in `test_asset_paths.py`
+(dev-mode path resolution, frozen-`sys._MEIPASS` path resolution via
+monkeypatch, every standard icon size exists, the master icon's real
+alpha transparency via `QImage` -- not PIL/Pillow, still not a project
+dependency, confirmed again after almost reusing it by mistake in a
+first draft of this same test), 1 new test in `test_help_content.py`
+(the Show Splash Screen action calls `show_splash_again()`, `show_
+splash_again` itself monkeypatched so the test doesn't actually block
+for 3 seconds), 1 new test in `test_first_run.py` (`load_app_icon()` is
+non-null and carries every standard size), and the `test_tray_icon.py`
+rewrite above. Not independently verified against a real desktop this
+pass -- same honest gap as every other GUI-facing change this session:
+the real taskbar-icon fix, the real tray icon's on-screen appearance,
+and the real PyInstaller-built executable's icon (PyInstaller itself
+isn't installed in this dev sandbox, so not even a local packaged build
+was attempted, let alone a real one) all remain Rick's to confirm,
+ideally against a fresh GitHub Actions build once pushed, per this
+project's own established pattern for anything that needs a real
+window manager/compositor/build pipeline.
+
+A full-suite run afterward (`pytest tests/`, offscreen) reached 70%+
+with zero failures -- well past every file this pass touched or added
+(all sort alphabetically before `test_scripting_integration.py`) --
+before hitting the pre-existing, already-documented segfault (SPEC.md
+section 8): confirmed via the crash's own thread dump that it's the
+identical `engine/scripting/sandbox.py` `run_with_timeout()`/
+`Thread.join()` deadlock-turned-segfault inside
+`test_scripting_integration.py::test_trigger_auto_disable_surfaces_
+message_and_signal`, nothing this pass's code touches. Recorded here
+rather than silently re-run until it happened to complete, per this
+file's own standing rule 8.
+
 ## Standing rules: verification and assumptions
 
 These apply to every session, every phase, not just security-sensitive ones.

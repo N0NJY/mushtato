@@ -26,9 +26,10 @@ from __future__ import annotations
 
 from typing import Dict
 
-from PySide6.QtGui import QTextBlockFormat, QTextCursor
+from PySide6.QtGui import QAction, QTextBlockFormat, QTextCursor
 from PySide6.QtWidgets import QMainWindow, QTextBrowser, QVBoxLayout, QWidget
 
+from ..splash import show_splash_again
 from ..theme import apply_widget_and_viewport_palette
 from .topics import TOPICS, HelpContext
 
@@ -49,7 +50,22 @@ class HelpWindow(QMainWindow):
         layout.addWidget(self.browser)
         self.setCentralWidget(central)
 
+        self._build_menu()
         self.refresh(hotkeys, theme)
+
+    def _build_menu(self) -> None:
+        # Rick's own requested "a link to show the [splash] screen"
+        # from within Help -- reuses show_splash_again() (gui/splash.py)
+        # as-is, not a parallel re-implementation. Kept as a named
+        # self.* attribute, not a bare local, per the real PySide6/
+        # shiboken wrapper-lifetime bug found in Phase 7d (a QMenu/
+        # QAction kept only as a local can have its underlying C++
+        # object garbage-collected once this method returns).
+        menu_bar = self.menuBar()
+        self.view_menu = menu_bar.addMenu("&View")
+        self.show_splash_action = QAction("Show Splash Screen", self)
+        self.show_splash_action.triggered.connect(lambda: show_splash_again())
+        self.view_menu.addAction(self.show_splash_action)
 
     def refresh(self, hotkeys: Dict[str, str], theme: str) -> None:
         """Rebuild the document from current live data (hotkeys/theme

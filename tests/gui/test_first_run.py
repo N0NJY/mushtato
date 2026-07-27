@@ -3,7 +3,8 @@
 from pathlib import Path
 
 from engine.storage import DEFAULT_THEME, Settings, load_settings, save_settings
-from gui.app import ensure_settings
+from gui.app import ensure_settings, load_app_icon
+from gui.asset_paths import ICON_SIZES
 
 
 class FakeFirstRunDialog:
@@ -81,3 +82,11 @@ def test_default_dialog_factory_is_the_real_settings_dialog():
 
     default = inspect.signature(ensure_settings).parameters["dialog_factory"].default
     assert default is SettingsDialog
+
+
+def test_load_app_icon_is_not_null_and_has_every_standard_size(qapp):
+    icon = load_app_icon()
+    assert icon.isNull() is False
+    available = {(s.width(), s.height()) for s in icon.availableSizes()}
+    for size in ICON_SIZES:
+        assert (size, size) in available

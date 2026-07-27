@@ -12,6 +12,24 @@ and the About box) — bumped after each completed item on the working
 todo/bugs list, not per-commit: a patch bump (1.0.x) for a bug fix, a
 minor bump (1.x.0) for a new feature/behavior change.
 
+## 1.1.0 — Real icon + splash screen artwork (2026-07-26)
+
+- MushTato now has a real window icon, tray icon, and startup splash
+  screen, replacing the placeholder art/unset icons used since Phase
+  12c. A 3-second splash shows on startup (Rick's own explicit
+  minimum); it can also be re-shown at any time from the Help window's
+  new View → Show Splash Screen action.
+- Fixed the generic "gear" icon that showed in a Linux taskbar instead
+  of MushTato's own — no window icon had ever actually been set
+  anywhere in the app before this. The real icon is now built as a
+  proper multi-resolution `QIcon` (9 pre-rendered sizes) rather than
+  one image scaled at runtime.
+- The system tray icon (Phase 12c) now uses the real MushTato artwork
+  instead of a plain placeholder circle, with a small colored badge
+  overlay for its blinking "unseen activity" state.
+- The Windows/macOS PyInstaller build now embeds the real icon and
+  bundles the icon/splash artwork into the packaged app.
+
 ## 1.0.2 — Fix: SSH no longer auto-reconnects after a bad password (2026-07-26)
 
 - After an SSH login/authentication failure, MushTato used to still

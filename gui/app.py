@@ -41,6 +41,8 @@ import sys
 from pathlib import Path
 from typing import List
 
+from PySide6.QtCore import QSize
+from PySide6.QtGui import QIcon
 from PySide6.QtWidgets import QApplication
 
 from engine.errorlog import get_error_log, install_excepthook, install_thread_excepthook
@@ -53,7 +55,9 @@ from engine.storage import (
     save_settings,
     settings_path,
 )
+from gui.asset_paths import ICON_SIZES, icon_png_path
 from gui.dialogs.settings_dialog import SettingsDialog
+from gui.splash import run_with_splash
 from gui.theme import apply_theme
 from gui.windows.main_window import MainWindow
 
@@ -74,6 +78,20 @@ def ensure_settings(path: Path, *, dialog_factory=SettingsDialog) -> Settings:
     settings = dialog.result_settings()
     save_settings(path, settings)
     return settings
+
+
+def load_app_icon() -> QIcon:
+    """Builds a real multi-resolution QIcon from every pre-rendered
+    icon/ size, rather than handing Qt the single 1024px master and
+    letting it scale down at runtime for a small taskbar/title-bar
+    target -- crisper at the small sizes a window manager actually
+    uses. Split out from main() so it's directly testable without a
+    running QApplication/event-loop.
+    """
+    icon = QIcon()
+    for size in ICON_SIZES:
+        icon.addFile(str(icon_png_path(size)), QSize(size, size))
+    return icon
 
 
 def worlds_to_auto_login(worlds: List[WorldProfile]) -> List[WorldProfile]:
@@ -110,26 +128,40 @@ def main() -> int:
     install_thread_excepthook(get_error_log())
 
     app = QApplication(sys.argv)
+    # Application-wide, not just MainWindow's own -- propagates to
+    # every window that doesn't set a more specific icon of its own
+    # (Address Book, Help, Text Editor, Mail Window, etc.), and is also
+    # what a standards-compliant Linux window manager's taskbar/window
+    # list picks up for the running process -- fixes the real "gear"
+    # placeholder Rick reported in a Linux taskbar (Qt's own generic
+    # fallback for a process with no window icon set at all, confirmed
+    # by there having been no setWindowIcon() call anywhere before
+    # this).
+    app.setWindowIcon(load_app_icon())
 
-    settings = ensure_settings(settings_path())
-    apply_theme(app, settings.theme)
+    def _init() -> MainWindow:
+        settings = ensure_settings(settings_path())
+        apply_theme(app, settings.theme)
+        return MainWindow(
+            hotkeys=settings.hotkeys,
+            theme=settings.theme,
+            scrollback_font_family=settings.scrollback_font_family,
+            scrollback_font_size=settings.scrollback_font_size,
+            input_font_family=settings.input_font_family,
+            input_font_size=settings.input_font_size,
+            splitter_sizes=settings.splitter_sizes,
+            editor_font_family=settings.editor_font_family,
+            editor_font_size=settings.editor_font_size,
+            editor_line_numbers=settings.editor_line_numbers,
+            editor_word_wrap=settings.editor_word_wrap,
+            editor_window_geometry=settings.editor_window_geometry,
+            editor_last_dir=settings.editor_last_dir,
+            upload_last_dir=settings.upload_last_dir,
+        )
 
-    window = MainWindow(
-        hotkeys=settings.hotkeys,
-        theme=settings.theme,
-        scrollback_font_family=settings.scrollback_font_family,
-        scrollback_font_size=settings.scrollback_font_size,
-        input_font_family=settings.input_font_family,
-        input_font_size=settings.input_font_size,
-        splitter_sizes=settings.splitter_sizes,
-        editor_font_family=settings.editor_font_family,
-        editor_font_size=settings.editor_font_size,
-        editor_line_numbers=settings.editor_line_numbers,
-        editor_word_wrap=settings.editor_word_wrap,
-        editor_window_geometry=settings.editor_window_geometry,
-        editor_last_dir=settings.editor_last_dir,
-        upload_last_dir=settings.upload_last_dir,
-    )
+    # Shown for a fixed minimum duration regardless of how fast real
+    # startup actually is -- see gui/splash.py's own docstring.
+    window = run_with_splash(_init)
     window.resize(900, 700)
     window.show()
 

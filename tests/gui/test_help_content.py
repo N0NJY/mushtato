@@ -148,3 +148,13 @@ def test_anchor_click_simulated_jumps_to_the_right_section(qapp):
     target_slug = TOPICS[-1].slug
     window._on_anchor_clicked(QUrl(f"#{target_slug}"))
     assert window.browser.textCursor().position() == window._section_positions[target_slug]
+
+
+def test_show_splash_screen_action_calls_show_splash_again(qapp, monkeypatch):
+    calls = []
+    monkeypatch.setattr("gui.help.help_window.show_splash_again", lambda: calls.append(1))
+
+    window = HelpWindow(hotkeys={}, theme="dark")
+    window.show_splash_action.trigger()
+
+    assert calls == [1]

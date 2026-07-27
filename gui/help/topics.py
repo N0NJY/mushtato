@@ -365,7 +365,9 @@ buttons, plus a status bar at the bottom.
   Upload (send a file to the active tab, line by line; see below),
   Mail Window (compose/send mail for the active tab's world; see
   below), Error Log (unhandled-exception history; see below).
-- **Help** -- Help (this window) and About.
+- **Help** -- Help (this window) and About. This Help window's own
+  View menu also has Show Splash Screen, which re-displays the startup
+  splash screen on demand.
 
 **Not implemented yet -- shown disabled/grayed out on purpose, not
 missing by accident:** the Tools menu's Events. Modeled on a real

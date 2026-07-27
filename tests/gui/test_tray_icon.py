@@ -9,7 +9,7 @@ from PySide6.QtWidgets import QSystemTrayIcon
 from gui.tray_icon import (
     ACTIVITY_COLOR,
     BLINK_INTERVAL_MS,
-    RESTING_COLOR,
+    ICON_SIZE,
     TrayIcon,
     generate_activity_icon,
     generate_resting_icon,
@@ -21,8 +21,19 @@ def test_resting_and_activity_icons_are_not_null(qapp):
     assert generate_activity_icon().isNull() is False
 
 
-def test_resting_and_activity_colors_are_distinct():
-    assert RESTING_COLOR != ACTIVITY_COLOR
+def test_activity_icon_is_the_resting_icon_plus_a_visible_badge(qapp):
+    # The resting icon is the real MushTato artwork; the activity icon
+    # composites a small ACTIVITY_COLOR badge onto the same artwork
+    # rather than using separate art (MushTato only has the one icon,
+    # unlike Potato's real two-image blink) -- checked by sampling the
+    # bottom-right corner, where the badge is drawn, and confirming it
+    # picks up the activity color there but the resting icon doesn't.
+    resting = generate_resting_icon().pixmap(ICON_SIZE, ICON_SIZE).toImage()
+    activity = generate_activity_icon().pixmap(ICON_SIZE, ICON_SIZE).toImage()
+    corner = (ICON_SIZE - 5, ICON_SIZE - 5)
+
+    assert activity.pixelColor(*corner) == ACTIVITY_COLOR
+    assert resting.pixelColor(*corner) != ACTIVITY_COLOR
 
 
 def test_blink_interval_matches_potato_s_real_value():
