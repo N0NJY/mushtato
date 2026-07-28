@@ -12,6 +12,17 @@ and the About box) — bumped after each completed item on the working
 todo/bugs list, not per-commit: a patch bump (1.0.x) for a bug fix, a
 minor bump (1.x.0) for a new feature/behavior change.
 
+## 1.7.1 — Re-publish the first public release with correct assets (2026-07-28)
+
+- No code changes. The first published GitHub Release was tagged
+  `v1.7.0` and had its assets uploaded manually, with a naming mismatch
+  (`MushTato-linux.zip` instead of the real build's `MushTato-linux.tar.gz`).
+  GitHub's release-immutability protection meant that release's assets
+  could never be corrected in place, and once deleted, the `v1.7.0` tag
+  itself could never be reused on this repository. This version exists
+  solely to publish the real, correctly-packaged, CI-built release
+  under a new tag.
+
 ## 1.7.0 — SOCKS4 proxy support (2026-07-27)
 
 - World Properties → Connection now has real *Proxy Host*/*Proxy Port*
