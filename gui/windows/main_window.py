@@ -112,6 +112,7 @@ class MainWindow(QMainWindow):
         upload_last_dir: str = "",
         host_key_store=None,
         cert_store=None,
+        settings_path_override=None,
     ) -> None:
         super().__init__()
         self.setWindowTitle("MushTato")
@@ -177,6 +178,15 @@ class MainWindow(QMainWindow):
         # overridable so tests never touch the real per-user store.
         self._cert_store = (
             cert_store if cert_store is not None else CertificateStore(ssl_known_certs_path())
+        )
+        # Item 5 of the working todo/bugs list, held back until last on
+        # purpose (a pure test-hygiene fix, not a security issue -- see
+        # CLAUDE.md): same override pattern as every field above --
+        # _save_settings_to_disk() was the one remaining place in this
+        # class that touched the real per-user settings.json directly,
+        # with no way for a test to redirect it.
+        self._settings_path = (
+            settings_path_override if settings_path_override is not None else settings_path()
         )
         self._editor_font_family = editor_font_family
         self._editor_font_size = editor_font_size
@@ -502,7 +512,7 @@ class MainWindow(QMainWindow):
         )
 
     def _save_settings_to_disk(self) -> None:
-        save_settings(settings_path(), self._current_settings())
+        save_settings(self._settings_path, self._current_settings())
 
     def record_splitter_sizes(self, sizes) -> None:
         """Remember the dual-input splitter's last-dragged sizes as one

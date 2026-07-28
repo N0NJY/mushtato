@@ -174,6 +174,23 @@ def test_rapid_splitter_moves_only_write_once_after_the_debounce_settles(
     assert load_settings(settings_file).splitter_sizes == [309, 150]
 
 
+def test_settings_path_override_redirects_saves_without_monkeypatching(qapp, tmp_path: Path):
+    # Item 5 of the working todo/bugs list: a real constructor-level
+    # override, matching every other MainWindow dependency's pattern
+    # (address_book_storage_path, scripts_dir, host_key_store, ...)
+    # rather than needing to monkeypatch the module-level settings_path
+    # function the way every other test in this file still does.
+    settings_file = tmp_path / "settings.json"
+    host = MainWindow(
+        address_book_storage_path=tmp_path / "ab.json",
+        settings_path_override=settings_file,
+    )
+
+    host.set_theme("light")
+
+    assert load_settings(settings_file).theme == "light"
+
+
 def test_new_tabs_open_with_the_saved_splitter_sizes(qapp, tmp_path: Path):
     from PySide6.QtWidgets import QApplication
 

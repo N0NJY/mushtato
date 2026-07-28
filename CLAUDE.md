@@ -3840,6 +3840,55 @@ confirm against a real SSL-enabled MU* and/or a real SOCKS4 proxy (e.g.
 Tor's, which specifically requires the SOCKS4a hostname extension just
 implemented) when convenient.
 
+**Item 5 (internal only, no version bump): `MainWindow` gained a real
+`settings_path_override` constructor parameter.** The last item on the
+working todo/bugs list, held back until the end per Rick's own
+explicit instruction ("don't worry about #5 until all the other stuff
+is done... as long as it's not a vulnerability" -- confirmed it isn't,
+purely test-hygiene). Before doing any work, checked whether this
+actually required a rewrite (Rick's own explicit condition for
+proceeding): it didn't -- `_save_settings_to_disk()` was the *only*
+place in the class touching the real per-user `settings_path()`
+directly, and the fix is the exact same additive override pattern
+already used 6+ times elsewhere in this same class (`address_book_
+storage_path`, `scripts_dir`, `host_key_store`, `cert_store`, etc.).
+
+Checked systematically before assuming a leak existed anywhere:
+grepped every test file constructing a real `MainWindow` (10 files)
+for every method that actually triggers a save
+(`open_settings`/`set_theme`/`record_splitter_sizes`/`record_editor_*`/
+`record_upload_last_dir`) -- every single call site already correctly
+isolates itself via `monkeypatch.setattr("gui.windows.main_window.
+settings_path", ...)` applied before construction, an already-valid
+(if less consistent) isolation technique that predates this fix and
+that the new constructor-level override doesn't break (confirmed by
+re-running the full existing suite for those files unchanged). No
+active leak was found or fixed here -- this adds the cleaner, more
+consistent option for new tests going forward, matching every sibling
+dependency's pattern, not a bug fix.
+
+A real, momentary false alarm during verification, resolved rather
+than left unexplained: `~/.local/share/MushTato/settings.json`'s mtime
+changed during a full test-suite run, which looked at first like a
+leak. Traced directly rather than assumed safe: a real, independent
+`MushTato` process (Rick's own packaged build, PID confirmed via `ps`,
+running since well before this check) was actively running on the same
+machine and had its own real, customized settings in that file
+(`editor_font_family: "Courier New"`) -- Rick's own live use of the app,
+completely unrelated to the test suite. Confirmed by re-running the
+known-segfault-risk trio in isolation with no further change to that
+file's mtime from the test run itself.
+
+Verified per standing rule 7: one new test
+(`test_settings_path_override_redirects_saves_without_monkeypatching`)
+proving the new constructor parameter itself works, using `set_theme()`
+as the trigger and asserting the saved file's real content -- not just
+that construction doesn't crash. Existing tests in the same file
+(`test_host_window.py`) and `test_chrome.py` re-verified passing
+unchanged (their monkeypatch-based isolation still works correctly
+alongside the new option). Full suite: 460 passing across `tests/gui/`
+(minus the known-segfault-risk trio, run separately and clean at 80).
+
 ## Standing rules: verification and assumptions
 
 These apply to every session, every phase, not just security-sensitive ones.
