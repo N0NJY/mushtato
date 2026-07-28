@@ -57,6 +57,23 @@ COMMAND_HELP: List[Tuple[str, str]] = [
     ("ssh-forget", "Forget a saved SSH host key: /ssh-forget [host[:port]]"),
     ("ssl-forget", "Forget a saved SSL certificate: /ssl-forget [host:port]"),
     ("timestamps", "Toggle line timestamps on this tab: /timestamps [on|off]"),
+    ("newtab", "Open a new blank tab"),
+    ("addressbook", "Open the Address Book window"),
+    ("exit", "Exit MushTato entirely (every tab, not just this one)"),
+    ("errorlog", "Open the Error Log window"),
+    ("about", "Show the About box"),
+    ("cut", "Cut the focused input box's selection"),
+    ("copy", "Copy the focused box's selection (input box, or the scrollback)"),
+    ("paste", "Paste into the focused input box"),
+    ("undo", "Undo in the focused input box"),
+    ("redo", "Redo in the focused input box"),
+    ("selectall", "Select all text in the focused box"),
+    ("find", "Toggle this tab's Find bar"),
+    ("addworld", "Add a saved world to the Address Book: /addworld [-x] [-c[char]:[pass]] [name] [host] [port]"),
+    ("worlds", "List every saved world in the Address Book"),
+    ("tabs", "List every currently open tab"),
+    ("vars", "List this tab's script variables (set_var()/get_var())"),
+    ("recall", "Search this tab's own on-screen scrollback for a pattern: /recall [pattern]"),
 ]
 
 
@@ -978,10 +995,103 @@ Connections topic.
 """
 
 
+def _render_file_menu(ctx: HelpContext) -> str:
+    del ctx
+    return """# File Menu
+
+Every item here can also be typed as a command in any tab -- dual
+access, same handler either way (menu click or typed command).
+
+- **New Tab** -- `/newtab` -- opens a new blank tab (no world/host yet;
+  use `/connect [host] [port]` or `/ssh` in it, or pick a world from
+  the Address Book).
+- **Address Book...** -- `/addressbook` -- opens the Address Book
+  window.
+- **Reconnect** -- `/reconnect` -- reconnects the active tab.
+- **Disconnect** -- `/disconnect` -- disconnects the active tab.
+- **Close** -- `/quit` -- closes the active tab (never the last tab's
+  host window itself).
+- **Exit** -- `/exit` -- quits MushTato entirely, closing every tab.
+"""
+
+
+def _render_edit_menu(ctx: HelpContext) -> str:
+    del ctx
+    return """# Edit Menu
+
+Cut/Copy/Paste/Undo/Redo/Select All act on whichever box currently has
+keyboard focus -- normally the input line you just typed the command
+into, same as clicking the menu item would. Copy also reaches the
+scrollback if it's the focused widget with a selection.
+
+- **Cut** -- `/cut`
+- **Copy** -- `/copy`
+- **Paste** -- `/paste`
+- **Undo** -- `/undo`
+- **Redo** -- `/redo`
+- **Select All** -- `/selectall`
+- **Find...** -- `/find` -- toggles the active tab's own Find bar.
+"""
+
+
+def _render_view_menu(ctx: HelpContext) -> str:
+    del ctx
+    return """# View Menu
+
+- **Theme > Dark/Light** -- `/theme [dark|light]`
+- **Show Timestamps** -- `/timestamps [on|off]` -- per-tab, see the
+  Sessions & Tabs topic.
+"""
+
+
+def _render_logging_menu(ctx: HelpContext) -> str:
+    del ctx
+    return """# Logging Menu
+
+- **Spawn Log Window** -- `/spawnlog` -- opens a log-mirror window for
+  the active tab; see the Spawn Windows topic. You can also
+  `Save Spawnlog` from that window once it's open.
+"""
+
+
+def _render_options_menu(ctx: HelpContext) -> str:
+    del ctx
+    return """# Options Menu
+
+- **Settings...** -- `/settings` -- hotkeys, theme, and fonts. See the
+  Hotkeys, Themes, and Fonts topics.
+"""
+
+
+def _render_tools_menu(ctx: HelpContext) -> str:
+    del ctx
+    return """# Tools Menu
+
+- **Editor** -- `/editor` -- opens a new Text Editor window.
+- **Upload** -- `/upload` -- upload a file to the active tab, line by
+  line.
+- **Mail Window** -- `/mail` -- this tab's Mail Window (compose/send).
+- **Events** -- shown disabled on purpose; no MushTato feature behind
+  it yet.
+- **Error Log** -- `/errorlog` -- opens the Error Log window (genuinely
+  unhandled exceptions only, not script/trigger/connection errors,
+  which already show up per-tab).
+"""
+
+
 TOPICS: List[HelpTopic] = [
-    HelpTopic("about", "About MushTato", _render_about),
+    # Slug renamed from "about" (2026-07-28): the new /about command
+    # (opens the real About box, Item 10) would otherwise collide with
+    # this topic's own slug -- same "topic slugs and command names must
+    # stay disjoint" rule that renamed the Sessions & Tabs topic's slug
+    # above. "/help credits" reaches this topic's content now instead.
+    HelpTopic("credits", "About MushTato", _render_about),
     HelpTopic("address-book", "Address Book", _render_address_book),
-    HelpTopic("tabs", "Sessions & Tabs", _render_tabs),
+    # Slug renamed from "tabs" (2026-07-28): the new /tabs command (list
+    # currently open tabs) would otherwise collide with this topic's own
+    # slug -- topic slugs and command names must stay disjoint (see
+    # test_topic_slugs_never_collide_with_command_names).
+    HelpTopic("sessions", "Sessions & Tabs", _render_tabs),
     HelpTopic("ssh-connections", "SSH Connections", _render_ssh),
     HelpTopic("ssl-connections", "SSL Connections", _render_ssl),
     HelpTopic("chrome", "Menus & Toolbar", _render_chrome),
@@ -993,6 +1103,12 @@ TOPICS: List[HelpTopic] = [
     HelpTopic("commands", "Built-in Commands", _render_commands),
     HelpTopic("faq", "FAQ / Troubleshooting", _render_faq),
     HelpTopic("scripting", "Scripting", _render_scripting),
+    HelpTopic("file", "File Menu", _render_file_menu),
+    HelpTopic("edit", "Edit Menu", _render_edit_menu),
+    HelpTopic("view", "View Menu", _render_view_menu),
+    HelpTopic("logging", "Logging Menu", _render_logging_menu),
+    HelpTopic("options", "Options Menu", _render_options_menu),
+    HelpTopic("tools", "Tools Menu", _render_tools_menu),
 ]
 
 _TOPICS_BY_SLUG: Dict[str, HelpTopic] = {topic.slug: topic for topic in TOPICS}

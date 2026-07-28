@@ -460,6 +460,43 @@ class MainWindow(QMainWindow):
             self._address_book_window.worlds = worlds
             self._address_book_window._refresh_list()
 
+    def add_world_to_address_book(self, world: WorldProfile) -> str:
+        """Item 10 (2026-07-28): the real implementation behind
+        ``/addworld`` -- adds ``world`` straight to the Address Book
+        with no dialog at all, then persists and refreshes exactly like
+        record_world_connected/save_mail_settings_for_world above
+        (reload fresh from disk, since this may run before any
+        AddressBookWindow exists at all). Rejects a name that's already
+        in use (case-insensitive, matching the lookup /connect [name]
+        already uses) rather than silently creating an ambiguous
+        duplicate.
+        """
+        worlds = load_address_book(self._address_book_path)
+        if any(candidate.name.lower() == world.name.lower() for candidate in worlds):
+            return f"A world named {world.name!r} already exists."
+        worlds.append(world)
+        save_address_book(self._address_book_path, worlds)
+        if self._address_book_window is not None:
+            self._address_book_window.worlds = worlds
+            self._address_book_window._refresh_list()
+        return f"Added world {world.name!r} ({world.host}:{world.port})."
+
+    def worlds_summary_text(self) -> str:
+        """The real implementation behind ``/worlds`` -- a plain-text
+        listing of every saved world, reloaded fresh from disk (same
+        reasoning as add_world_to_address_book above: correct even if
+        called before any AddressBookWindow has ever been opened).
+        """
+        worlds = load_address_book(self._address_book_path)
+        if not worlds:
+            return "No worlds saved in the Address Book yet."
+        lines = []
+        for world in worlds:
+            protocol = "ssh" if world.protocol == "ssh" else ("ssl" if world.use_ssl else "telnet")
+            auto = " [auto-login]" if world.auto_login else ""
+            lines.append(f"{world.name} -- {world.host}:{world.port} ({protocol}){auto}")
+        return "Saved worlds:\n" + "\n".join(lines)
+
     def _open_mail_window_for_current_tab(self) -> None:
         tab = self.tab_widget.currentWidget()
         if tab is not None:

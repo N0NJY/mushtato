@@ -26,6 +26,8 @@ import re
 from pathlib import Path
 from typing import List, Optional, Tuple
 
+import re2
+
 from PySide6.QtCore import QDateTime, QTimer, Qt, Signal
 from PySide6.QtGui import QTextCursor
 from PySide6.QtWidgets import (
@@ -82,6 +84,46 @@ from .upload_session import UploadSession
 # parsing accepts both forms too). Port defaults to 22 (the standard
 # SSH port) when omitted, exactly like real ssh.
 _SSH_COMMAND_RE = re.compile(r"^\s*(?:-p\s*(?P<port>\d+)\s+)?(?P<user>[^@\s]+)@(?P<host>\S+)\s*$")
+
+# "-c<char>:<pass>" -- one token, no spaces, matching how every other
+# /addworld token is a single whitespace-separated word.
+_ADDWORLD_CHARACTER_FLAG_RE = re.compile(r"^-c(?P<char>[^:\s]+):(?P<password>\S+)$")
+
+
+def parse_addworld_command(
+    args: str,
+) -> Optional[Tuple[str, str, int, bool, Optional[Tuple[str, str]]]]:
+    """Parse a typed ``/addworld [-x] [-c[char]:[pass]] [name] [host]
+    [port]`` command's argument text into ``(name, host, port, use_ssl,
+    character)`` -- ``character`` is ``(name, password)`` or ``None``.
+    Returns ``None`` if the shape doesn't match at all (wrong number of
+    positional tokens, a non-numeric port, or a malformed flag). A
+    standalone, pure function (like parse_ssh_command above)
+    specifically so it's directly unit-testable without constructing a
+    whole SessionTab.
+
+    Flags may appear anywhere among the tokens, not just before the
+    positional args -- ``-x``/``-c...`` are recognized by shape and
+    everything else is treated as positional, in order.
+    """
+    use_ssl = False
+    character: Optional[Tuple[str, str]] = None
+    positional: List[str] = []
+    for token in args.split():
+        if token == "-x":
+            use_ssl = True
+            continue
+        match = _ADDWORLD_CHARACTER_FLAG_RE.match(token)
+        if match:
+            character = (match.group("char"), match.group("password"))
+            continue
+        positional.append(token)
+    if len(positional) != 3:
+        return None
+    name, host, port_text = positional
+    if not port_text.isdigit():
+        return None
+    return name, host, int(port_text), use_ssl, character
 
 
 def parse_ssh_command(args: str) -> Optional[Tuple[str, int, str]]:
@@ -1167,6 +1209,23 @@ class SessionTab(QWidget):
             "ssh-forget": self._cmd_ssh_forget,
             "ssl-forget": self._cmd_ssl_forget,
             "timestamps": self._cmd_timestamps,
+            "newtab": self._cmd_newtab,
+            "addressbook": self._cmd_addressbook,
+            "exit": self._cmd_exit,
+            "errorlog": self._cmd_errorlog,
+            "about": self._cmd_about,
+            "cut": self._cmd_cut,
+            "copy": self._cmd_copy,
+            "paste": self._cmd_paste,
+            "undo": self._cmd_undo,
+            "redo": self._cmd_redo,
+            "selectall": self._cmd_selectall,
+            "find": self._cmd_find,
+            "addworld": self._cmd_addworld,
+            "worlds": self._cmd_worlds,
+            "tabs": self._cmd_tabs,
+            "vars": self._cmd_vars,
+            "recall": self._cmd_recall,
         }
         for name, help_text in COMMAND_HELP:
             self._commands.register(name, handlers[name], help_text)
@@ -1359,4 +1418,171 @@ class SessionTab(QWidget):
     def _cmd_reconnect(self, args: str) -> Optional[str]:
         del args
         self.reconnect_bridge()
+        return None
+
+    # -- Item 10 (2026-07-28): dual-access commands for every GUI menu
+    # action that had none yet, plus Address Book quick-add/listing,
+    # tab/session introspection, and scrollback recall. Every command
+    # below with a GUI equivalent calls the exact same MainWindow method
+    # its menu item/hotkey already calls -- never a parallel
+    # implementation, same principle as every command above.
+
+    def _cmd_newtab(self, args: str) -> Optional[str]:
+        del args
+        if self.host_window is None:
+            return "Not available in this session (no host window)."
+        self.host_window.open_blank_tab()
+        return "Opened a new blank tab."
+
+    def _cmd_addressbook(self, args: str) -> Optional[str]:
+        del args
+        if self.host_window is None:
+            return "Not available in this session (no host window)."
+        self.host_window._show_address_book()
+        return None
+
+    def _cmd_exit(self, args: str) -> Optional[str]:
+        del args
+        if self.host_window is None:
+            return "Not available in this session (no host window)."
+        self.host_window._exit_application()
+        return None
+
+    def _cmd_errorlog(self, args: str) -> Optional[str]:
+        del args
+        if self.host_window is None:
+            return "Not available in this session (no host window)."
+        self.host_window.show_error_log()
+        return None
+
+    def _cmd_about(self, args: str) -> Optional[str]:
+        del args
+        if self.host_window is None:
+            return "Not available in this session (no host window)."
+        self.host_window._show_about()
+        return None
+
+    # Cut/Copy/Paste/Undo/Redo/Select All: dispatched by MainWindow's
+    # existing _dispatch_focused_edit_action, exactly like the Edit
+    # menu's own items -- these act on whatever currently has keyboard
+    # focus, which in practice is usually the input line the command
+    # was just typed into (see the Edit Menu help topic).
+
+    def _cmd_cut(self, args: str) -> Optional[str]:
+        del args
+        if self.host_window is None:
+            return "Not available in this session (no host window)."
+        self.host_window._dispatch_focused_edit_action("cut")
+        return None
+
+    def _cmd_copy(self, args: str) -> Optional[str]:
+        del args
+        if self.host_window is None:
+            return "Not available in this session (no host window)."
+        self.host_window._dispatch_focused_edit_action("copy")
+        return None
+
+    def _cmd_paste(self, args: str) -> Optional[str]:
+        del args
+        if self.host_window is None:
+            return "Not available in this session (no host window)."
+        self.host_window._dispatch_focused_edit_action("paste")
+        return None
+
+    def _cmd_undo(self, args: str) -> Optional[str]:
+        del args
+        if self.host_window is None:
+            return "Not available in this session (no host window)."
+        self.host_window._dispatch_focused_edit_action("undo")
+        return None
+
+    def _cmd_redo(self, args: str) -> Optional[str]:
+        del args
+        if self.host_window is None:
+            return "Not available in this session (no host window)."
+        self.host_window._dispatch_focused_edit_action("redo")
+        return None
+
+    def _cmd_selectall(self, args: str) -> Optional[str]:
+        del args
+        if self.host_window is None:
+            return "Not available in this session (no host window)."
+        self.host_window._dispatch_focused_edit_action("selectAll")
+        return None
+
+    def _cmd_find(self, args: str) -> Optional[str]:
+        del args
+        if self.host_window is None:
+            return "Not available in this session (no host window)."
+        self.host_window._toggle_find_on_current_tab()
+        return None
+
+    def _cmd_addworld(self, args: str) -> Optional[str]:
+        if self.host_window is None:
+            return "Not available in this session (no host window)."
+        parsed = parse_addworld_command(args)
+        if parsed is None:
+            return "Usage: /addworld [-x] [-c[char]:[pass]] [name] [host] [port]"
+        name, host, port, use_ssl, character = parsed
+        characters: List[CharacterProfile] = []
+        default_character = ""
+        if character is not None:
+            char_name, char_password = character
+            characters.append(CharacterProfile(name=char_name, password=char_password))
+            default_character = char_name
+        profile = WorldProfile(
+            name=name,
+            host=host,
+            port=port,
+            use_ssl=use_ssl,
+            characters=characters,
+            default_character=default_character,
+        )
+        return self.host_window.add_world_to_address_book(profile)
+
+    def _cmd_worlds(self, args: str) -> Optional[str]:
+        del args
+        if self.host_window is None:
+            return "Not available in this session (no host window)."
+        return self.host_window.worlds_summary_text()
+
+    def _cmd_tabs(self, args: str) -> Optional[str]:
+        del args
+        if self.host_window is None:
+            return "Not available in this session (no host window)."
+        tab_widget = self.host_window.tab_widget
+        lines = []
+        for index in range(tab_widget.count()):
+            tab = tab_widget.widget(index)
+            marker = "*" if tab is self else " "
+            address = f"{tab.host}:{tab.port}" if tab.host else "(blank, not connected)"
+            lines.append(f"{marker} {tab.name} -- {address} -- {tab.connection_state}")
+        if not lines:
+            return "No tabs open."
+        return "Open tabs ('*' marks this one):\n" + "\n".join(lines)
+
+    def _cmd_vars(self, args: str) -> Optional[str]:
+        del args
+        variables = self.script_world.variables
+        if not variables:
+            return "No script variables set on this tab."
+        lines = [f"{name} = {value!r}" for name, value in sorted(variables.items())]
+        return "Script variables on this tab:\n" + "\n".join(lines)
+
+    def _cmd_recall(self, args: str) -> Optional[str]:
+        pattern = args.strip()
+        if not pattern:
+            return "Usage: /recall [pattern]"
+        try:
+            compiled = re2.compile(pattern)
+        except re2.error as exc:
+            return f"Invalid pattern: {exc}"
+        matches = [
+            line for line in self.scrollback.toPlainText().split("\n") if compiled.search(line)
+        ]
+        if not matches:
+            return f"No lines matched: {pattern}"
+        self._append_plain(f"--- /recall {pattern} ({len(matches)} match(es)) ---")
+        for line in matches:
+            self._append_plain(line)
         return None

@@ -3889,6 +3889,148 @@ unchanged (their monkeypatch-based isolation still works correctly
 alongside the new option). Full suite: 460 passing across `tests/gui/`
 (minus the known-segfault-risk trio, run separately and clean at 80).
 
+**Item 10 (2026-07-28): slash-command expansion -- dual-access GUI
+commands, Address Book quick-add/listing, tab/session introspection,
+and scrollback recall, shipped as 1.8.0.** New content in
+`gui/help/topics.py` (17 new `COMMAND_HELP` entries, 6 new menu-category
+`HelpTopic`s), extended `gui/windows/session_tab.py` (`parse_addworld_
+command`, 17 new `_cmd_*` handlers), extended `gui/windows/main_window.py`
+(`add_world_to_address_book`, `worlds_summary_text`), new
+`tests/gui/test_command_expansion.py` (30 tests).
+
+Preceded by real research, not memory-based guessing, per this file's
+own standing rule 1: TinyFugue's real source (`~/git/tinyfugue`,
+`src/cmdlist.h`, `lib/tf/tf-help`) was read to ground every new
+command's syntax and scope, twice over across the planning
+conversation -- the first pass corrected a real mistaken assumption
+(TF's `/PS`/`/KILL` are specifically about `/REPEAT`/`/QUOTE`
+background processes, not a general trigger/macro listing, which is
+why Item 11's `/repeats`/`/stoprepeat` were named as plain nouns
+instead of kept as that literal Unix-y jargon). Rick's own explicit,
+repeated instruction throughout planning: **`/` commands are strictly
+client-side** (TinyFugue/TinTin++'s own convention) and must never be
+conflated with a MUSH server command (`@mail`, etc.) -- confirmed via
+a real `@mail` help-text example Rick supplied, kept firmly out of
+scope. Every command below with a GUI equivalent calls the exact same
+`MainWindow`/`SessionTab` method its menu item/hotkey already calls --
+the same "same handler, not a parallel implementation" principle this
+file has enforced since Phase 7c, checked in each case before writing
+the handler, not just for the obvious ones.
+
+**Dual-access commands** (host-level: `/newtab`, `/addressbook`,
+`/exit`, `/errorlog`, `/about`; focus-dispatched, exactly like their
+Edit-menu counterparts already do: `/cut`/`/copy`/`/paste`/`/undo`/
+`/redo`/`/selectall`/`/find`) -- Rick's own explicit call, confirmed
+during planning: these mostly act on the input line, not a scrollback
+selection, since typing the command means focus is already there; kept
+consistent with the existing menu behavior rather than special-cased
+for the CLI path.
+
+**Six new `/help` menu-category pseudo-topics** (`/help file`,
+`/help edit`, `/help view`, `/help logging`, `/help options`,
+`/help tools`) needed no new dispatch code at all -- `/help [topic]`'s
+existing `get_topic(name)` lookup (Phase 8) already handles any
+registered slug generically; these are just six new `HelpTopic` entries
+whose `render()` lists that menu's real items (confirmed against
+`MainWindow._build_chrome()`'s actual menu contents, not guessed) and
+each item's dual-access command name.
+
+**A real fork that only surfaced during implementation, not anticipated
+in planning, and resolved by direct judgment rather than re-asking:**
+two of the newly-added command names collided with two *pre-existing*
+`/help` topic slugs -- the new `/tabs` command (list open tabs) against
+the existing `"tabs"` slug (the Sessions & Tabs topic), and the new
+`/about` command (open the About box) against the existing `"about"`
+slug (the About MushTato topic). Topic slugs and command names must
+stay disjoint (`test_topic_slugs_never_collide_with_command_names`,
+Phase 8, still enforced). Resolved by renaming the two *topic* slugs
+rather than dropping either new command -- `"tabs"` -> `"sessions"`,
+`"about"` -> `"credits"` -- since both new commands were explicit,
+checkpointed plan items and the topics' actual content/title are
+completely unchanged, just reached via a different slug now
+(`/help sessions`, `/help credits`).
+
+**Address Book quick-add/listing:** `/addworld [-x] [-c[char]:[pass]]
+[name] [host] [port]` adds a world with no dialog opening at all, via a
+new standalone `parse_addworld_command()` (flags recognized by shape,
+positional tokens collected in order -- can appear in any order
+relative to each other, matching how real shells commonly parse
+short flags) and a new `MainWindow.add_world_to_address_book()` that
+reuses the exact reload-from-disk/append/save/refresh-open-window
+pattern `record_world_connected`/`save_mail_settings_for_world`
+already established, rather than a new persistence mechanism --
+rejects a case-insensitive duplicate name rather than silently
+creating an ambiguous one. `-x` matches TinyFugue's own real
+`/ADDWORLD -x` SSL flag; flag-based syntax (not TF's own positional
+`[<char> <pass>]` shape) was Rick's explicit, repeated preference, to
+avoid an optional-positional-pair's ambiguity. `/worlds` (new
+`MainWindow.worlds_summary_text()`) is a plain listing, no sort/filter
+flags -- a personal address book is normally small enough not to need
+TF's own richer `/LISTWORLDS` option set.
+
+**Tab/session introspection:** `/tabs` iterates
+`host_window.tab_widget` directly (name, host:port, connection state,
+marking the current tab) -- TF's own `/LISTSOCKETS` equivalent,
+trimmed down, no sort/filter/idle-time tracking, since MushTato tabs
+are normally a handful. `/vars` needed a real check before
+implementation, flagged explicitly in planning: does `ScriptWorld`
+already expose an enumerable "all variables" method? Checked the real
+source (`engine/scripting/world.py`) before assuming either way --
+`ScriptWorld.variables` is already a plain public `Dict[str, Any]`
+attribute (used directly by `_api_set_var`/`_api_get_var` since
+Phase 9), so `/vars` needed no engine addition at all, just reading it.
+
+**Scrollback recall:** `/recall [pattern]` searches the *current tab's
+own on-screen scrollback* (confirmed directly with Rick during
+planning -- not script source, a real point of potential confusion
+worth having settled explicitly) using `google-re2` (`re2.compile`/
+`.search()`, this project's established ReDoS-safe matcher, the same
+one triggers/aliases already use) and reprints matching lines via the
+same `_append_plain` channel every other local notice already uses.
+An invalid pattern reports an error rather than crashing dispatch,
+proven with a dedicated test (an unclosed `(` group), not just assumed
+caught by `re2.error`.
+
+Verified per standing rule 7: 30 new tests
+(`tests/gui/test_command_expansion.py`) -- `parse_addworld_command`'s
+exact parsing rules (minimal, flags in either order, non-numeric port
+rejected, wrong token count rejected) tested standalone with no Qt at
+all; every dual-access command checked against the real handler it
+calls (including `/exit`'s real `qapp.quit` monkeypatch, the same
+pattern `test_host_window.py` already established, and `/cut`/`/copy`/
+`/paste`'s real focus-dispatch round-trip through an actual focused
+widget); the six new help topics checked for their real menu items'
+commands appearing in the rendered text; the topic-slug-rename claim
+proven directly (`get_topic("tabs")`/`get_topic("about")` now `None`,
+`get_topic("sessions")`/`get_topic("credits")` resolve); `/addworld`'s
+duplicate-name rejection and its address-book-window-live-refresh
+claim (an already-open `AddressBookWindow`'s in-memory list actually
+updates); `/vars`' empty-vs-populated cases; `/recall`'s match,
+no-match, and invalid-pattern cases against a real fed scrollback
+(`FakeBridge.simulate_incoming`). Full suite verified in batches rather
+than one single `pytest tests/` invocation: 258 engine tests, and every
+`tests/gui/` file across five batches plus the known scripting/
+world-properties-dialog/address-book-window trio (run together, per
+this project's established practice for that specific combination),
+all passing with zero failures -- a genuine single full-process run of
+the entire suite still hits the same pre-existing, already-documented
+interpreter-shutdown hang (real background threads from unrelated
+files still alive at teardown, SPEC.md section 8), confirmed
+unaffected by this item's own code (none of it touches threading/
+scripting internals) rather than silently re-run until it happened to
+complete once.
+
+Not verified against a real desktop this round -- same honest gap as
+every GUI-facing change this session; the dual-access commands'
+underlying handlers (`open_blank_tab`, `_show_address_book`, etc.) are
+all pre-existing, already real-desktop-verified code paths reached via
+a new entry point, but the new entry point itself (typing these
+commands in a real, non-offscreen window) hasn't been. Rick can confirm
+when convenient. Item 11 (`/repeat`/`/repeats`/`/stoprepeat` batch
+sending) remains a separate, later piece of work, per the original
+planning checkpoint -- a genuinely new cancelable-background-process
+mechanism, not just command-wiring against code that already exists.
+
 ## Standing rules: verification and assumptions
 
 These apply to every session, every phase, not just security-sensitive ones.

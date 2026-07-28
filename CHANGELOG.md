@@ -12,6 +12,40 @@ and the About box) — bumped after each completed item on the working
 todo/bugs list, not per-commit: a patch bump (1.0.x) for a bug fix, a
 minor bump (1.x.0) for a new feature/behavior change.
 
+## 1.8.0 — Slash-command expansion: dual access, Address Book quick-add, tab/session introspection, and recall (2026-07-28)
+
+- Every remaining GUI-only menu action now also has a `/` command,
+  calling the exact same handler its menu item already calls: `/newtab`,
+  `/addressbook`, `/exit`, `/errorlog`, `/about` (host-level), and
+  `/cut`/`/copy`/`/paste`/`/undo`/`/redo`/`/selectall`/`/find` (act on
+  whatever currently has keyboard focus, same as their menu items).
+- Six new `/help` menu-category topics — `/help file`, `/help edit`,
+  `/help view`, `/help logging`, `/help options`, `/help tools` — each
+  listing that menu's real items and their commands.
+- `/addworld [-x] [-c[char]:[pass]] [name] [host] [port]` adds a world
+  straight to the Address Book with no dialog at all; `-x` sets SSL
+  (matching TinyFugue's own real `/ADDWORLD -x` flag), `-c` sets an
+  initial Character. `/worlds` lists every saved world.
+- `/tabs` lists every currently open tab (world/host:port/connection
+  state, marking the current one); `/vars` lists the current tab's own
+  script variables (`set_var()`/`get_var()`).
+- `/recall [pattern]` searches the current tab's own on-screen
+  scrollback (not script source) for a pattern (`google-re2`, same
+  ReDoS-safe matcher already used for triggers/aliases) and reprints
+  matching lines.
+- Two pre-existing Help topic slugs were renamed to make room for new
+  command names that would otherwise collide with them (topic slugs and
+  command names must stay disjoint): "tabs" → "sessions" (the Sessions
+  & Tabs topic), "about" → "credits" (the About MushTato topic, still
+  reachable from the Help menu/window and `/help credits` unchanged).
+- Modeled on TinyFugue's real command set (`~/git/tinyfugue`,
+  `lib/tf/tf-help`), scoped to what's actually "MushTato" (Worlds not
+  TF's raw sockets, etc.) — TF's own macro-scripting directives, local
+  shell execution, and Unix-process concepts were deliberately not
+  ported, same reasoning as the original Phase 7c command research.
+  Batch sending (`/repeat`/`/repeats`/`/stoprepeat`) is a separate,
+  larger piece of work, not part of this release.
+
 ## 1.7.1 — Re-publish the first public release with correct assets (2026-07-28)
 
 - No code changes. The first published GitHub Release was tagged
