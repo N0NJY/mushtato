@@ -103,6 +103,19 @@ jobs:
             ${{ matrix.artifact_name }}.zip
             ${{ matrix.artifact_name }}.tar.gz
           if-no-files-found: ignore
+          # This repo is private, so Actions artifact storage is capped
+          # at 500MB total (GitHub's free-tier quota) -- with no
+          # retention set, artifacts default to 90 days and, at this
+          # project's push frequency (3 OS builds uploaded per push to
+          # main), that quota gets blown through in days, not months
+          # (hit directly: 105 accumulated artifacts, 5.58GB, well past
+          # the cap, on 2026-07-28). 7 days matches how these are
+          # actually used -- catching a packaging break shortly after
+          # a push, not kept as a long-term archive. Doesn't affect the
+          # tag-triggered release job below: it downloads and attaches
+          # these to the GitHub Release within the same workflow run,
+          # minutes after upload, long before any expiry would apply.
+          retention-days: 7
 
   release:
     needs: build
