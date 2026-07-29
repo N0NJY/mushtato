@@ -12,6 +12,26 @@ and the About box) — bumped after each completed item on the working
 todo/bugs list, not per-commit: a patch bump (1.0.x) for a bug fix, a
 minor bump (1.x.0) for a new feature/behavior change.
 
+## 1.9.0 — Batch sending: /repeat, /repeats, /stoprepeat (2026-07-28)
+
+- `/repeat [-d[seconds]] [count]|i [command]` sends `[command]` multiple
+  times on its own background process — `[count]` is a number or `i`
+  for indefinite (runs until stopped); `-d[seconds]` optionally paces
+  each send (without it, sends fire back-to-back). The first send
+  happens immediately, not after the first delay. Each firing goes
+  through the exact same command/alias/send pipeline as a manually
+  typed line, so a repeated `[command]` can itself be a `/` command.
+- `/repeats` lists the current tab's active repeat processes (id,
+  remaining count, delay, command); `/stoprepeat [id]` cancels one.
+- Repeats are per-tab, not shared across tabs, and are automatically
+  cancelled if their tab disconnects or closes — matching the fix
+  already made for Upload (a repeat sending into a dead connection
+  would otherwise silently go nowhere).
+- New "Batch Sending (/repeat)" Help topic (`/help repeat-processes`).
+- Modeled loosely on TinyFugue's real `/repeat`/`/ps`/`/kill` trio
+  (renamed to plain nouns — `/repeats`/`/stoprepeat` — matching
+  `/tabs`/`/worlds`/`/vars`'s own naming convention).
+
 ## 1.8.0 — Slash-command expansion: dual access, Address Book quick-add, tab/session introspection, and recall (2026-07-28)
 
 - Every remaining GUI-only menu action now also has a `/` command,

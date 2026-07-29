@@ -24,7 +24,7 @@ from __future__ import annotations
 
 import re
 from pathlib import Path
-from typing import List, Optional, Tuple
+from typing import Dict, List, Optional, Tuple
 
 import re2
 
@@ -126,6 +126,41 @@ def parse_addworld_command(
     return name, host, int(port_text), use_ssl, character
 
 
+# "[-d<seconds>] <count>|i <command>" -- the delay flag (if present) must
+# come first, unlike /addworld's flags -- <command> is free text and could
+# itself start with something flag-shaped, so only a fixed flag position
+# is unambiguous. "i"/"I" for <count> means "repeat indefinitely" (TF's
+# own real /repeat has the identical "i" convention).
+_REPEAT_RE = re.compile(
+    r"^(?:-d(?P<delay>[0-9]*\.?[0-9]+)\s+)?(?P<count>[iI]|\d+)\s+(?P<command>\S.*)$"
+)
+
+
+def parse_repeat_command(args: str) -> Optional[Tuple[Optional[int], float, str]]:
+    """Parse a typed ``/repeat [-d[seconds]] [count]|i [command]``
+    command's argument text into ``(count, delay_seconds, command)`` --
+    ``count`` is ``None`` for an indefinite ("i") repeat. Returns
+    ``None`` if the shape doesn't match at all (no command text, a
+    zero/malformed count). A standalone, pure function (like
+    parse_ssh_command/parse_addworld_command above) specifically so
+    it's directly unit-testable without constructing a whole
+    SessionTab.
+    """
+    match = _REPEAT_RE.match(args)
+    if match is None:
+        return None
+    count_text = match.group("count")
+    count: Optional[int]
+    if count_text.lower() == "i":
+        count = None
+    else:
+        count = int(count_text)
+        if count < 1:
+            return None
+    delay_seconds = float(match.group("delay")) if match.group("delay") else 0.0
+    return count, delay_seconds, match.group("command")
+
+
 def parse_ssh_command(args: str) -> Optional[Tuple[str, int, str]]:
     """Parse a typed ``/ssh`` command's argument text into
     ``(host, port, username)``, or ``None`` if it doesn't match the
@@ -149,6 +184,28 @@ def _is_authentication_failure(message: str) -> bool:
     testable without constructing a whole SessionTab.
     """
     return message.startswith("PermissionDenied")
+
+
+class _RepeatProcess:
+    """One active ``/repeat`` -- a small bundle of the command to fire,
+    how many times (``None`` means indefinite), the delay between
+    firings, and the QTimer driving it. Always a *singleShot* timer,
+    rescheduled after every firing rather than a repeating interval
+    timer -- even with a 0-second delay, this still yields to the Qt
+    event loop between sends (via ``QTimer.start(0)``, not a tight
+    synchronous loop), which is what makes an indefinite repeat
+    actually stoppable by ``/stoprepeat`` rather than freezing the GUI
+    forever once started.
+    """
+
+    def __init__(self, repeat_id: int, command: str, total_count: Optional[int], delay_seconds: float) -> None:
+        self.id = repeat_id
+        self.command = command
+        self.total_count = total_count
+        self.remaining = total_count
+        self.delay_seconds = delay_seconds
+        self.timer = QTimer()
+        self.timer.setSingleShot(True)
 
 
 class SessionTab(QWidget):
@@ -245,6 +302,14 @@ class SessionTab(QWidget):
         # a new file picker" behavior (uploadWindow's dispatcher).
         self.upload_session: Optional[UploadSession] = None
         self._upload_last_dir = upload_last_dir
+        # Item 11 (2026-07-28): /repeat processes, tab-scoped (per the
+        # checkpoint decision) -- matches every other per-connection
+        # resource on this tab (upload_session, mail_window) rather than
+        # a single app-wide registry. Keyed by a small per-tab integer
+        # id (TF's own real /repeat also returns/uses a numeric id, its
+        # "pid"), not reused after a repeat finishes/is stopped.
+        self._repeat_processes: Dict[int, _RepeatProcess] = {}
+        self._next_repeat_id = 1
         # The "preview" of the still-incomplete trailing line (Phase 9,
         # see engine/scripting/line_dispatch.py's module docstring) --
         # tracked as a document position so a later feed() result can
@@ -940,6 +1005,30 @@ class SessionTab(QWidget):
         if self.upload_session is not None:
             self.upload_session.cancel()
 
+    def _cancel_all_repeats(self) -> None:
+        # Same reasoning as _cancel_upload_if_running above, and the
+        # same checkpointed answer (2026-07-28): a /repeat whose tab
+        # has closed or disconnected has nowhere left to send to --
+        # leaving it running would silently no-op every firing (the
+        # same failure class Upload's own cancel-on-disconnect fix
+        # exists to prevent) rather than making the stop visible.
+        for process in list(self._repeat_processes.values()):
+            process.timer.stop()
+        self._repeat_processes.clear()
+
+    def _fire_repeat(self, repeat_id: int) -> None:
+        process = self._repeat_processes.get(repeat_id)
+        if process is None:
+            return  # already stopped via /stoprepeat, or cancelled
+        self._process_typed_line(process.command)
+        if process.total_count is not None:
+            process.remaining -= 1
+            if process.remaining <= 0:
+                del self._repeat_processes[repeat_id]
+                self._append_plain(f"[/repeat #{repeat_id} finished]\n")
+                return
+        process.timer.start(int(process.delay_seconds * 1000))
+
     def _on_connection_closed(self) -> None:
         self._append_plain("\n[Connection closed by server]\n")
         self.input_line.setEnabled(False)
@@ -947,6 +1036,7 @@ class SessionTab(QWidget):
         self.connected_at = None
         self._set_connection_state("Disconnected")
         self._cancel_upload_if_running()
+        self._cancel_all_repeats()
         self.save_script_state()
         self._start_auto_reconnect()
 
@@ -957,6 +1047,7 @@ class SessionTab(QWidget):
         self.connected_at = None
         self._set_connection_state("Disconnected")
         self._cancel_upload_if_running()
+        self._cancel_all_repeats()
         self.save_script_state()
         if _is_authentication_failure(message):
             # Retrying with the exact same (bad) credentials every 30s,
@@ -993,6 +1084,14 @@ class SessionTab(QWidget):
     def _on_primary_send(self) -> None:
         text = self.input_line.text()
         self.input_line.clear()
+        self._process_typed_line(text)
+
+    def _process_typed_line(self, text: str) -> None:
+        # Factored out of _on_primary_send (Item 11) so a /repeat's
+        # scheduled firing goes through the *exact same* command/alias/
+        # send pipeline a manually-typed line in the primary input box
+        # already does -- a repeated command can itself be a "/"
+        # command, not just plain server-bound text.
         outcome = self._commands.process(text)
         if outcome.action == "send":
             self._send_to_bridge(outcome.text, apply_aliases=True)
@@ -1142,6 +1241,7 @@ class SessionTab(QWidget):
             return
         self._stop_auto_reconnect()
         self._cancel_upload_if_running()
+        self._cancel_all_repeats()
         self.bridge.stop()
         self.input_line.setEnabled(False)
         self.secondary_input.setEnabled(False)
@@ -1175,6 +1275,7 @@ class SessionTab(QWidget):
         """
         self._stop_auto_reconnect()
         self._cancel_upload_if_running()
+        self._cancel_all_repeats()
         if self.bridge is not None:
             self.bridge.stop()
         for spawn in list(self.spawn_windows):
@@ -1226,6 +1327,9 @@ class SessionTab(QWidget):
             "tabs": self._cmd_tabs,
             "vars": self._cmd_vars,
             "recall": self._cmd_recall,
+            "repeat": self._cmd_repeat,
+            "repeats": self._cmd_repeats,
+            "stoprepeat": self._cmd_stoprepeat,
         }
         for name, help_text in COMMAND_HELP:
             self._commands.register(name, handlers[name], help_text)
@@ -1586,3 +1690,59 @@ class SessionTab(QWidget):
         for line in matches:
             self._append_plain(line)
         return None
+
+    # -- Item 11 (2026-07-28): /repeat and its /repeats/`/stoprepeat
+    # companions -- a background, cancelable, tab-scoped repeat-process
+    # mechanism, modeled loosely on TinyFugue's real /repeat/`/ps`/`/kill`
+    # trio (see tf-help's "processes" topic) but scoped down to this
+    # project's own naming convention (plain nouns, matching /tabs/
+    # /worlds/vars rather than TF's Unix-y "/ps"/"/kill"). Each fired
+    # repetition goes through _process_typed_line -- the exact same
+    # command/alias/send pipeline manually typing a line into the
+    # primary input box already uses, so a repeated <command> can
+    # itself be a "/" command, not only plain server-bound text.
+
+    def _cmd_repeat(self, args: str) -> Optional[str]:
+        parsed = parse_repeat_command(args)
+        if parsed is None:
+            return "Usage: /repeat [-d[seconds]] [count]|i [command]"
+        count, delay_seconds, command = parsed
+        repeat_id = self._next_repeat_id
+        self._next_repeat_id += 1
+        process = _RepeatProcess(repeat_id, command, count, delay_seconds)
+        process.timer.timeout.connect(lambda rid=repeat_id: self._fire_repeat(rid))
+        self._repeat_processes[repeat_id] = process
+        # The first firing happens immediately, not after the first
+        # delay -- a deliberate simplification of TF's own real default
+        # (which delays the first run too, unless its separate -n flag
+        # is given); "repeat this now, N times" is the more expected
+        # v1 behavior and needed no second flag to get there.
+        self._fire_repeat(repeat_id)
+        return None
+
+    def _cmd_repeats(self, args: str) -> Optional[str]:
+        del args
+        if not self._repeat_processes:
+            return "No active /repeat processes on this tab."
+        lines = []
+        for repeat_id, process in sorted(self._repeat_processes.items()):
+            remaining = (
+                "indefinite"
+                if process.total_count is None
+                else f"{process.remaining}/{process.total_count}"
+            )
+            lines.append(
+                f"#{repeat_id} -- {remaining} remaining, every {process.delay_seconds}s -- {process.command}"
+            )
+        return "Active /repeat processes:\n" + "\n".join(lines)
+
+    def _cmd_stoprepeat(self, args: str) -> Optional[str]:
+        text = args.strip()
+        if not text.isdigit():
+            return "Usage: /stoprepeat [id]"
+        repeat_id = int(text)
+        process = self._repeat_processes.pop(repeat_id, None)
+        if process is None:
+            return f"No such /repeat process: #{repeat_id}"
+        process.timer.stop()
+        return f"Stopped /repeat #{repeat_id}."

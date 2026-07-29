@@ -1,6 +1,6 @@
 [project]
 name = "mushtato"
-version = "1.8.0"
+version = "1.9.0"
 description = "A modern, cross-platform Python MUD/MUSH client with sandboxed Python scripting"
 readme = "README.md"
 requires-python = ">=3.11"

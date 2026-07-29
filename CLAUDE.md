@@ -4031,6 +4031,132 @@ sending) remains a separate, later piece of work, per the original
 planning checkpoint -- a genuinely new cancelable-background-process
 mechanism, not just command-wiring against code that already exists.
 
+**Item 11 (2026-07-28): batch sending -- `/repeat`, `/repeats`,
+`/stoprepeat`, shipped as 1.9.0.** The last item on the working list.
+New `_RepeatProcess` class and `parse_repeat_command()` in
+`gui/windows/session_tab.py`, three new `_cmd_*` handlers, a refactor
+of `_on_primary_send` into a reusable `_process_typed_line`, four new
+`_cancel_all_repeats()` call sites, a new "Batch Sending (/repeat)"
+Help topic, new `tests/gui/test_repeat.py` (23 tests).
+
+The plan (per this file's own Item 10 write-up above) flagged three
+real open questions as explicitly not yet decided. Grounded in real
+TinyFugue source before asking (`~/git/tinyfugue/lib/tf/tf-help`'s
+`/repeat` entry) rather than guessing at what "the real `/repeat`" even
+does -- confirmed it genuinely does support a delay option (`-<time>`,
+with formats like `h:m:s`), a `-w<world>` scope, synchronous/prompt-
+triggered variants, and an `-n` flag to skip the first delay; this
+grounded the checkpoint's options in real behavior rather than
+assumption. All three were then checkpointed via `AskUserQuestion`
+before writing any code, and all three went with the recommended
+option: (1) yes, an optional delay flag -- `-d<seconds>`, deliberately
+renamed from TF's own bare `-<time>` (a negative-number-shaped flag is
+harder to parse unambiguously, and this project's own convention is
+already named letter-flags like `-x`/`-c` from `/addworld`); (2)
+tab-scoped, not app-wide -- matches every other per-connection resource
+in this app (`ScriptWorld`, `MailWindow`, `upload_session`), no other
+feature here uses an app-wide-scoped registry; (3) auto-cancel on tab
+close *or* disconnect -- matching the fix already made for Upload
+(`_cancel_upload_if_running`, called from the same four sites this
+reuses: `disconnect_bridge`, `_on_connection_closed`,
+`_on_connection_failed`, `shutdown`) -- a repeat sending into a dead
+connection would otherwise silently go nowhere, the identical failure
+class Upload's own fix already exists to prevent. `reconnect_bridge`
+deliberately does *not* cancel repeats, matching Upload's own precedent
+there exactly (reconnect is a manual "try again" action, not a "give
+up" one).
+
+**Syntax, finalized:** `/repeat [-d[seconds]] [count]|i [command]` --
+`[count]` a positive integer or `i`/`I` for indefinite (TF's own real
+convention, kept as-is since it's unambiguous and well-precedented);
+`-d[seconds]` must come first if present (unlike `/addworld`'s flags,
+which can appear anywhere) -- `[command]` is free text that could
+itself start with something flag-shaped, so a fixed flag position
+ahead of the positional args is the only unambiguous parse. A
+deliberate simplification versus TF's own real default, called out as
+such rather than silently changed: the *first* firing always happens
+immediately, never after the first delay -- TF's own real behavior
+delays the first run too unless a separate `-n` flag is given; adding
+a second flag for marginal benefit wasn't judged worth it, and
+"repeat this now, `[count]` times" is the more expected v1 behavior
+without one.
+
+**Same-pipeline dispatch, not a parallel send path:** each firing calls
+a new `_process_typed_line()`, factored directly out of what used to be
+`_on_primary_send`'s own body -- the exact same command/alias/send
+processing a manually typed line in the primary input box already goes
+through, so a repeated `[command]` can itself be a `/` command (not
+just plain server-bound text). Proven, not just asserted: a test
+`/repeat`s `/version` (a locally-handled command, never sent to the
+server) and confirms the bridge never receives anything while the
+version string appears in the scrollback twice.
+
+**A real design point worth recording, reasoned through rather than
+picked arbitrarily:** every `_RepeatProcess` uses a real `QTimer`
+(`setSingleShot(True)`, rescheduled after each firing) rather than a
+tight synchronous loop, *even when the delay is 0 seconds*. This
+matters specifically for an indefinite (`i`) repeat: a synchronous
+`for`/`while` loop with no delay would never yield control back to the
+Qt event loop at all, meaning `/stoprepeat` (itself dispatched through
+that same event loop) could never actually run -- the GUI would freeze
+permanently the moment an indefinite 0-delay repeat started. Scheduling
+via `QTimer.start(0)` between every firing, even the fastest possible
+pacing, keeps the event loop pumping and `/stoprepeat` genuinely able
+to interrupt it -- proven with a real test that starts a fast
+(`-d0.05`) indefinite repeat, waits for it to have fired at least once,
+stops it, then waits again and confirms no further sends arrive (not
+just that the tracking dict was cleared, which wouldn't catch a timer
+left silently running).
+
+**Cancellation race handled explicitly, not just hoped safe:**
+`_fire_repeat(repeat_id)` looks its process up in the tracking dict by
+id on every call and returns immediately if it's gone -- covers the
+case where a timer tick was already scheduled before `/stoprepeat` (or
+an auto-cancel) ran, so the tick still fires into `_fire_repeat` but
+finds nothing to do rather than raising a `KeyError` or resurrecting a
+stopped process. Proven with a dedicated test that manually stops a
+repeat's tracking and then calls `_fire_repeat()` directly, confirming
+no crash and no further send.
+
+**New Help topic**, not just a `COMMAND_HELP` one-liner (which the
+three commands also have, generated into the existing "Built-in
+Commands" topic for free, same single-source-of-truth mechanism as
+every command since Phase 8): `/help repeat-processes` ("Batch Sending
+(/repeat)") explains the syntax, the immediate-first-fire behavior, and
+both checkpointed semantics (per-tab scoping, auto-cancel on
+disconnect/close) in one place -- the same treatment SSH/SSL/Scripting
+already got for features with real depth beyond a one-line description.
+
+Verified per standing rule 7: 23 new tests
+(`tests/gui/test_repeat.py`), using real `QTimer`s via `QTest.qWait`
+throughout, not mocked -- `parse_repeat_command`'s exact parsing rules
+(minimal, delay flag, indefinite count, zero-count rejection, missing/
+whitespace-only command rejection) tested standalone with no Qt at all;
+immediate-first-fire and count-limited completion (including the
+`[/repeat #N finished]` notice); real pacing with `-d` (confirmed a
+send genuinely doesn't happen before the delay elapses, not just that
+it eventually does); the same-pipeline-dispatch claim above; `/repeats`'
+listing and its remaining/total math; `/stoprepeat`'s real cancellation
+(no further sends after stopping) and its unknown-id/bad-syntax paths;
+per-tab independence (two tabs' repeat processes never see each
+other's); all four auto-cancel triggers (`disconnect_bridge`,
+`_on_connection_closed`, `_on_connection_failed`, `shutdown`); and the
+cancellation-race guard above. Full suite verified in the same batches
+Item 10 used (single full-process `pytest tests/` still hits the same
+pre-existing, already-documented interpreter-shutdown hang, unaffected
+by this item): 875 passing, zero failures (258 engine + 617 gui across
+five batches, including the known scripting/dialog/address-book trio
+run together).
+
+Not verified against a real desktop or a real MU* server this round --
+same honest gap as every GUI-facing change this session; real QTimer
+pacing/cancellation is proven exactly as it will actually run (this
+isn't mocked-timer territory), but a real server's reaction to a fast
+`/repeat` burst, and the on-screen feel of `/repeats`'/`/stoprepeat`'s
+output in a real window, haven't been. Rick can confirm when
+convenient. This completes the working todo/bugs list in full --
+nothing outstanding beyond real-world verification of recent items.
+
 ## Standing rules: verification and assumptions
 
 These apply to every session, every phase, not just security-sensitive ones.

@@ -74,6 +74,9 @@ COMMAND_HELP: List[Tuple[str, str]] = [
     ("tabs", "List every currently open tab"),
     ("vars", "List this tab's script variables (set_var()/get_var())"),
     ("recall", "Search this tab's own on-screen scrollback for a pattern: /recall [pattern]"),
+    ("repeat", "Send a command multiple times, optionally paced: /repeat [-d[seconds]] [count]|i [command]"),
+    ("repeats", "List this tab's active /repeat processes"),
+    ("stoprepeat", "Cancel an active /repeat process: /stoprepeat [id]"),
 ]
 
 
@@ -788,6 +791,41 @@ doesn't replicate that (see SPEC.md section 8).
 """
 
 
+def _render_repeat_processes(ctx: HelpContext) -> str:
+    del ctx
+    return """# Batch Sending (/repeat)
+
+`/repeat [-d[seconds]] [count]|i [command]` sends `[command]` multiple
+times, on its own background process -- loosely modeled on TinyFugue's
+real `/repeat`/`/ps`/`/kill` trio (renamed here to plain nouns:
+`/repeats`/`/stoprepeat`, matching `/tabs`/`/worlds`/`/vars`'s own
+naming rather than TF's Unix-y jargon).
+
+- `[count]` is a positive number, or `i` for an indefinite repeat (runs
+  until stopped).
+- `-d[seconds]` (optional) paces each send -- without it, every send
+  fires back-to-back as fast as the tab can process them. Example:
+  `/repeat -d2 5 wave` waves 5 times, 2 seconds apart.
+- The very first send happens immediately, not after the first delay.
+- `[command]` is processed exactly like a line typed into the primary
+  input box -- it can itself be a `/` command, not just plain text sent
+  to the server.
+
+`/repeats` lists this tab's active repeats (id, remaining count or
+"indefinite", the delay, and the command). `/stoprepeat [id]` cancels
+one by its id.
+
+**Repeats are per-tab**, not shared across tabs -- each tab has its own
+independent set, and `/repeats` only ever shows the current tab's own.
+
+**A repeat is automatically cancelled** if its tab disconnects or
+closes -- there's nothing left to send to, so leaving it "running"
+would just mean every future send silently goes nowhere. Reconnecting
+does not automatically restart a cancelled repeat; run `/repeat` again
+once reconnected if you still want it.
+"""
+
+
 def _render_ssh(ctx: HelpContext) -> str:
     del ctx
     return """# SSH Connections
@@ -1103,6 +1141,7 @@ TOPICS: List[HelpTopic] = [
     HelpTopic("commands", "Built-in Commands", _render_commands),
     HelpTopic("faq", "FAQ / Troubleshooting", _render_faq),
     HelpTopic("scripting", "Scripting", _render_scripting),
+    HelpTopic("repeat-processes", "Batch Sending (/repeat)", _render_repeat_processes),
     HelpTopic("file", "File Menu", _render_file_menu),
     HelpTopic("edit", "Edit Menu", _render_edit_menu),
     HelpTopic("view", "View Menu", _render_view_menu),
