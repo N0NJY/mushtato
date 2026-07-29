@@ -3,13 +3,13 @@
 
 Invoke from the repo root: `pyinstaller packaging/mushtato.spec`.
 
-Only bundles what gui/app.py's import graph actually reaches today --
-engine/scripting (RestrictedPython, google-re2) isn't wired into the
-GUI yet (see CLAUDE.md), so PyInstaller's static analysis doesn't
-include it in this build. Revisit hiddenimports here once a later
-phase wires scripting into the GUI; either of those two dependencies
-could plausibly need an explicit hiddenimports entry if PyInstaller's
-analysis doesn't follow their dynamic-loading paths automatically.
+Bundles what gui/app.py's import graph actually reaches -- as of Phase
+9, that includes engine/scripting (RestrictedPython, google-re2), since
+SessionTab now builds a ScriptWorld unconditionally for every tab (this
+comment previously said scripting wasn't wired in yet -- true before
+Phase 9, stale since; corrected 2026-07-29 while investigating build
+size, a real staleness bug found on sight rather than the thing being
+looked into).
 
 Icon/splash artwork (post-Phase-12, gui/assets/): `datas` bundles the
 whole gui/assets/ directory verbatim so gui/asset_paths.py's frozen-
@@ -64,6 +64,60 @@ a = Analysis(
     noarchive=False,
     optimize=0,
 )
+
+# Post-Analysis binary trim (2026-07-29, found while investigating a
+# real user report that the packaged build is large). PyInstaller's own
+# Qt hook table (PyInstaller.utils.hooks.qt._modules_info) associates
+# both the "imageformats" and "platforminputcontexts" plugin
+# *directories* with QtGui as a whole -- since MushTato genuinely uses
+# QtGui, the hook bundles every plugin in both directories
+# unconditionally, including two MushTato never touches: "qpdf" (loads
+# PDF files as images) and Qt Virtual Keyboard (an on-screen input
+# method, irrelevant for a desktop app with a physical keyboard).
+# Verified directly against the real built binaries (`ldd`, not
+# guessed) that dropping these two is safe: only
+# libqtvirtualkeyboardplugin.so depends on the whole Quick/QML/
+# VirtualKeyboard shared-library cluster, and only libqpdf.so depends
+# on libQt6Pdf.so -- nothing else this build actually uses (Widgets/
+# Gui/Core/Network/DBus, or any other retained plugin) references any
+# of them, so the plugin files and their now-orphaned private
+# dependency libraries can be dropped together. Real, measured saving
+# on the Linux build: ~20MB (confirmed via a real rebuild + real
+# `gui/app.py` launch under QT_QPA_PLATFORM=offscreen, not assumed safe
+# from the dependency analysis alone). Only verified on Linux this
+# session (no Windows/macOS build environment available here) -- the
+# keyword match below is written to also catch the equivalent .dll/
+# .dylib names, but Rick should confirm the Windows/macOS builds still
+# launch fine once this ships, same as any other can't-verify-cross-
+# platform-locally change in this project.
+_EXCLUDED_BINARY_KEYWORDS = (
+    "qtvirtualkeyboard",  # plugins/platforminputcontexts/*virtualkeyboard*
+    "virtualkeyboard",  # lib/*VirtualKeyboard*
+    "qml",  # lib/*Qml*, pulled in only by the virtual keyboard plugin
+    "quick",  # lib/*Quick*, pulled in only by the virtual keyboard plugin
+    "qpdf",  # plugins/imageformats/*qpdf* (PDF-as-image loading)
+    "qt6pdf",  # lib/*Pdf*, pulled in only by the qpdf plugin
+)
+a.binaries = [
+    entry
+    for entry in a.binaries
+    if not any(keyword in entry[0].lower() for keyword in _EXCLUDED_BINARY_KEYWORDS)
+]
+# The same libraries also show up a second time as separate SYMLINK-
+# typecode entries in a.datas (PyInstaller collects a Qt shared
+# library's on-disk versioned-symlink chain, e.g. libQt6Qml.so.6, as
+# data entries independently of the BINARY entry above) -- found by
+# rebuilding and noticing the excluded libraries were still present,
+# now as dangling/broken symlinks (confirmed with `file`, not assumed:
+# a real symlink pointing at a BINARY path that no longer exists after
+# the filter above). Filtering a.datas the same way removes those too,
+# so the build has no broken symlinks left behind.
+a.datas = [
+    entry
+    for entry in a.datas
+    if not any(keyword in entry[0].lower() for keyword in _EXCLUDED_BINARY_KEYWORDS)
+]
+
 pyz = PYZ(a.pure)
 
 exe = EXE(

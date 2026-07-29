@@ -4157,6 +4157,99 @@ output in a real window, haven't been. Rick can confirm when
 convenient. This completes the working todo/bugs list in full --
 nothing outstanding beyond real-world verification of recent items.
 
+**Post-1.9.0 fix (2026-07-29): packaged build size -- dropped unused Qt
+Virtual Keyboard/PDF plugins, shipped as 1.9.1.** `packaging/mushtato.spec`
+only.
+
+Raised by Rick reporting real user complaints that "MushTato is huge."
+Investigated with real numbers before proposing anything, not
+guesswork: downloaded the actual published `v1.9.0` Linux release
+asset and extracted it (88MB compressed, 218MB on disk) rather than
+reasoning from the dev venv alone. Breakdown, measured directly: Qt/
+PySide6 itself is 119MB (over half); the Python interpreter/stdlib is
+34MB (unavoidable for any PyInstaller build); `cryptography` (needed
+for SSH/TLS) is 14MB; assorted Linux system libraries (GTK/X11/cairo,
+bundled for portability across desktops) are ~15MB; **MushTato's own
+code (`engine/` + `gui/`, all Python source + icons) is 7.1MB** -- the
+overwhelming majority of the installed size is the Qt runtime, not
+anything this project wrote, a genuinely useful distinction to give
+Rick for responding to the complaints (a deliberate SPEC.md tech-stack
+trade-off -- a modern Qt GUI vs. TinyFugue's few-MB C binary or
+Potato's Tcl/Tk footprint -- not bloat in this codebase).
+
+**A real, concrete, verified-not-guessed finding, checkpointed before
+acting on it:** dug one level further into the 119MB, and found
+`libQt6Quick.so`/`libQt6Qml.so`/`libQt6QmlModels.so`/`libQt6Pdf.so`
+(~20MB combined) bundled despite MushTato only ever using plain Qt
+Widgets (confirmed: only `QtWidgets`/`QtGui`/`QtCore`/`QtNetwork`/
+`QtDBus` Python bindings are present at all -- no `QtQuick`/`QtQml`/
+`QtPdf` anywhere). Traced the real cause in PyInstaller's own hook
+source (`PyInstaller.utils.hooks.qt._modules_info`, not assumed from
+memory) rather than guessing: both `imageformats` and
+`platforminputcontexts` plugin *directories* are declared as belonging
+to `QtGui` as a whole in that table -- since MushTato genuinely needs
+`QtGui`, PyInstaller's hook collects every plugin file in both
+directories unconditionally, including two MushTato never touches:
+`libqpdf.so` (loads PDF files as images) and
+`libqtvirtualkeyboardplugin.so` (an on-screen virtual keyboard input
+method, irrelevant for a desktop app with a physical keyboard).
+Confirmed via `ldd` against the real built binaries (not assumed
+safe) that only those two plugin files depend on the whole Quick/
+QML/VirtualKeyboard/Pdf cluster -- nothing else this build actually
+uses references any of it.
+
+Checkpointed via `AskUserQuestion` before touching the spec file at
+all: investigate a real fix (the recommended, chosen option) vs. leave
+it as just a size explanation for responding to complaints.
+
+**Fix:** a real `pyinstaller` install (not present in this dev sandbox
+before now, added via `pip install pyinstaller` for this investigation)
+plus a real rebuild, iterated twice before landing on the correct
+mechanism. First attempt only filtered `a.binaries` by keyword
+(`qtvirtualkeyboard`/`virtualkeyboard`/`qml`/`quick`/`qpdf`/`qt6pdf`)
+right after `Analysis()` -- this correctly removed the two plugin files
+and shrank the build from 218MB to 174MB (measured, not estimated), but
+a second look at the rebuilt output found the same libraries still
+present, now as **broken/dangling symlinks** in `_internal/` (confirmed
+directly with `file`, not assumed -- a real symlink pointing at a
+`BINARY`-typecode path that no longer existed post-filter). Root cause:
+PyInstaller collects a Qt shared library's on-disk versioned-symlink
+chain as *separate* `SYMLINK`-typecode entries in `a.datas`,
+independent of the `BINARY` entry in `a.binaries` -- filtering only one
+TOC list left the other's symlink entries dangling. Fixed by applying
+the identical keyword filter to `a.datas` too. Re-verified clean:
+`find ... -xtype l` (broken-symlink check) and a keyword search for any
+of the six excluded terms both came back completely empty on the final
+rebuild.
+
+**Verified at the level this file's own standing rule 8 asks for, not
+just "the filter ran without error":** a real, full `pyinstaller
+packaging/mushtato.spec` rebuild (174MB, confirmed via `du`), a real
+launch of the actual built `./MushTato` binary under
+`QT_QPA_PLATFORM=offscreen` (both `--help` and a real no-args launch,
+confirmed the process starts and stays running with no missing-library
+or import errors -- the same platform-plugin warning every other
+offscreen verification in this project already produces, not a new
+one), and the existing `test_asset_paths.py`/`test_first_run.py` suite
+re-run clean (this change touches only the `.spec` file, no Python
+source, so a full re-run wasn't needed, but these two most relevant
+files were re-checked anyway). **Not verified:** the Windows/macOS
+builds -- no build environment for either available in this sandbox;
+the exclusion keywords are written to also match the equivalent
+`.dll`/`.dylib` names, but this is stated as unverified-on-those-
+platforms rather than assumed safe, matching every other can't-verify-
+cross-platform-locally change in this project. Rick can spot-check
+both once the next tagged release builds via the real CI pipeline.
+
+A real, unrelated staleness bug fixed in the same pass, found while
+reading the spec file's own docstring before touching it: the file
+still said "engine/scripting (RestrictedPython, google-re2) isn't
+wired into the GUI yet" -- true before Phase 9, false since (every
+`SessionTab` builds a `ScriptWorld` unconditionally). Fixed alongside
+rather than left for a future session to rediscover, matching this
+file's own established pattern of fixing an adjacent staleness bug on
+sight.
+
 ## Standing rules: verification and assumptions
 
 These apply to every session, every phase, not just security-sensitive ones.

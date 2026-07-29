@@ -12,6 +12,31 @@ and the About box) — bumped after each completed item on the working
 todo/bugs list, not per-commit: a patch bump (1.0.x) for a bug fix, a
 minor bump (1.x.0) for a new feature/behavior change.
 
+## 1.9.1 — Packaged build size: drop unused Qt Virtual Keyboard/PDF plugins (2026-07-29)
+
+- Investigated real user reports that the packaged build is large.
+  PyInstaller's own Qt hook table bundles the entire `imageformats` and
+  `platforminputcontexts` plugin directories whenever `QtGui` is used
+  (which MushTato genuinely needs) — including two plugins MushTato
+  never touches: `qpdf` (loads PDF files as images) and Qt Virtual
+  Keyboard (an on-screen input method, irrelevant with a physical
+  keyboard). Those two plugins in turn pull in the entire Qt Quick/QML/
+  VirtualKeyboard shared-library cluster.
+- Verified directly (via a real rebuild, `ldd` against the actual built
+  binaries, and a real launch of the trimmed build) that dropping both
+  plugins and their now-orphaned private dependency libraries is safe —
+  nothing else MushTato bundles (Widgets/Gui/Core/Network/DBus, or any
+  other retained Qt plugin) references any of them.
+- Real, measured result: the Linux build dropped from 218 MB to 174 MB
+  on disk (~44 MB / ~20% smaller). MushTato's own code (`engine/` +
+  `gui/`) is under 8 MB — nearly the entire installed size is the Qt
+  runtime itself, not MushTato's own code, which is worth knowing if
+  you're wondering where the size goes.
+- Only verified on Linux this round (no Windows/macOS build environment
+  available); the exclusion list is written to also match the
+  equivalent `.dll`/`.dylib` names, but the Windows/macOS builds should
+  be spot-checked on the next release once built by CI.
+
 ## 1.9.0 — Batch sending: /repeat, /repeats, /stoprepeat (2026-07-28)
 
 - `/repeat [-d[seconds]] [count]|i [command]` sends `[command]` multiple
