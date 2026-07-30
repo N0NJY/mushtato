@@ -4436,6 +4436,29 @@ repeating here: this is a well-sourced technical read of Qt's own
 published licensing terms, not a substitute for an actual lawyer if
 Rick or a future user needs certainty.
 
+**Pueblo/MXP support -- researched (2026-07-30), declined, not being
+pursued.** Rick asked whether "Pueblo-compatible" (a legacy MUD-client
+protocol embedding HTML tags in MUD output, from the mid-90s Chaco
+Communications client) was worth adding, research-only per his
+explicit instruction (no code touched). Traced the real mechanism in
+both the actual Pueblo client source and real PennMUSH server source,
+not from memory: it's a plain-text handshake, not real Telnet
+negotiation -- the server puts `pueblo` ... version ... `enhanced`
+somewhere in its output, the client scans for it and replies with a
+literal `PUEBLOCLIENT` line, and the server then emits inline HTML-ish
+tags for that connection. The one finding that mattered most: **Rick's
+own RhostMUSH doesn't support Pueblo at all**, confirmed directly in
+RhostMUSH's own docs (`FLAG_COMPARE.TXT`: "Rhost doesn't support
+Pueblo") -- so this would be unusable against his own server even if
+built. The wider MU* world has also mostly moved on: Pueblo itself is
+obsolete (the open-source successor repo has 10 commits and no
+releases), and MXP (a more rigorous, Telnet-option-based evolution of
+the same idea) is what modern clients like Mudlet/MUSHclient actually
+support instead. Rick's decision, after seeing this: not something
+MushTato will add or change. Recorded here so a future session doesn't
+re-research this from scratch -- same pattern as the Phase 13
+script-sharing deprecation note earlier in this file.
+
 ## Standing rules: verification and assumptions
 
 These apply to every session, every phase, not just security-sensitive ones.
