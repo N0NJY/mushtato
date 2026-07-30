@@ -122,6 +122,18 @@ the same thing.
 Full Python scripting (triggers, macros, gags, highlights, aliases,
 timers) is wired into every tab -- see the Scripting topic for the API.
 
+## Third-party components
+
+MushTato is built with PySide6 (Qt for Python), used under the GNU
+Lesser General Public License v3 (LGPLv3) and dynamically linked (Qt
+ships as separate library files alongside the MushTato executable,
+never compiled directly into it) -- which is what keeps MushTato's own
+code independently MIT-licensed. The full LGPLv3 license text ships
+with this build in a `THIRD-PARTY-LICENSES` folder inside the installed
+MushTato folder; see `THIRD-PARTY-LICENSES/README.md` (or CREDITS.md in
+the source repo) for the full detail, including where to get Qt's own
+source code.
+
 ## Author
 
 Written by Rick Donaldson, 2026 (aka Thoran Yo, aka Fletcher, aka

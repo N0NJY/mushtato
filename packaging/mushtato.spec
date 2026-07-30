@@ -69,6 +69,13 @@ a = Analysis(
     datas=[
         ("../gui/assets", "gui/assets"),
         ("../pyproject.toml", "."),
+        # LGPLv3 compliance (2026-07-30): Qt (via PySide6) is used under
+        # the LGPLv3, which requires the license text to travel with the
+        # distributed application, not just live in the git repo -- see
+        # THIRD-PARTY-LICENSES/README.md for the full reasoning. Bundled
+        # inside the installed MushTato folder (lands under _internal/,
+        # same as gui/assets and pyproject.toml above).
+        ("../THIRD-PARTY-LICENSES", "THIRD-PARTY-LICENSES"),
     ],
     hiddenimports=[],
     hookspath=[],

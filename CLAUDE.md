@@ -4336,6 +4336,83 @@ manual page lookup, not assumed), not run locally; Rick can confirm
 the next tagged release's real Windows/macOS asset sizes once CI
 builds them.
 
+**Post-1.9.2: Qt/LGPL licensing compliance check (2026-07-30) -- no
+version bump (documentation/compliance only, no behavior change).**
+New `THIRD-PARTY-LICENSES/` (`README.md`, `Qt-LGPL-3.0.txt`,
+`Qt-GPL-3.0.txt`), extended `packaging/mushtato.spec` (bundles that
+folder), `CREDITS.md`, `gui/help/topics.py`'s `_render_about`.
+
+Rick asked, separately from the size work above, whether MushTato's use
+of Qt raised any real licensing concern for an open-source project.
+Checked this against real sources rather than recalling from memory,
+per this file's own standing rule 1: fetched each actually-used Qt
+module's own official documentation page directly (`doc.qt.io`) rather
+than assuming from Qt's general reputation -- Qt Core, Qt Gui, Qt
+Widgets, Qt Network, and Qt D-Bus (every module MushTato reaches) are
+each confirmed LGPLv3-available (Qt's real dual-license model also
+offers GPLv2/GPLv3/commercial, but LGPLv3 is the option that lets
+MushTato's own code stay MIT). PySide6/shiboken6's own installed
+package metadata confirms the identical license expression. The other
+direct dependencies were checked the same way, not assumed permissive
+by reputation: RestrictedPython is Zope Public License 2.1 (verified
+via its real `LICENSE.txt`), google-re2 is BSD and platformdirs is MIT
+(both via PyPI's own classifier metadata), asyncssh is EPL-2.0/GPL-2.0
+dual (used here as an unmodified dependency under EPL-2.0).
+
+**A genuine, previously-unnoticed benefit of the unrelated 1.9.1 size
+trim, found while checking this:** Qt Virtual Keyboard -- already
+excluded from the packaged build purely for size reasons -- is
+confirmed on its own real Qt docs page to be **GPLv3-only, with no
+LGPL option at all**. Had that plugin still been bundled (it's pulled
+in unconditionally by PyInstaller's own Qt hook unless excluded, per
+1.9.1's own finding), distributing it would have arguably pulled the
+whole packaged application under GPLv3's much stronger copyleft terms.
+The size-driven trim happened to dodge a real licensing complication
+too, not just save space -- worth recording since it wasn't understood
+at the time.
+
+**The one real, fixable gap, found by reading Qt's own official LGPL
+obligations page (`qt.io/licensing/open-source-lgpl-obligations`)
+directly rather than assuming standard practice:** LGPLv3 requires (1)
+dynamic linking to keep the *application's* own code independent of
+LGPL -- already true; `packaging/mushtato.spec`'s `--onedir` build
+ships Qt as separate shared library files alongside the executable,
+never statically compiled in, confirmed by inspecting the actual built
+`dist/MushTato/_internal/` tree -- and (2) that the fact an LGPL
+library is used must not be hidden: the license text must be provided
+to the user, and a prominent notice given. `CREDITS.md` previously had
+only a passing "Built with PySide6" link -- not sufficient per Qt's own
+stated wording. Fixed by fetching the real, canonical LGPLv3 text
+(`gnu.org/licenses/lgpl-3.0.txt`) plus the GPLv3 text it incorporates
+by reference (the FSF distributes LGPLv3 as a short supplement layered
+on GPLv3, not a fully independent document -- confirmed by actually
+reading the fetched LGPLv3 text's own opening clause, not assumed),
+bundling both under a new `THIRD-PARTY-LICENSES/` folder wired into
+`packaging/mushtato.spec`'s `datas` (the same mechanism already
+bundling `gui/assets/`/`pyproject.toml` -- lands under
+`dist/MushTato/_internal/THIRD-PARTY-LICENSES/`, confirmed via a real
+rebuild, not assumed to land wherever intended), and adding an explicit
+LGPLv3 statement to both `CREDITS.md` and the in-app About/Credits Help
+topic (`gui/help/topics.py`'s `_render_about`) rather than leaving it
+only in `THIRD-PARTY-LICENSES/README.md` where a user would have no
+reason to look without already being prompted to.
+
+Verified per standing rule 7: a real rebuild confirmed the three new
+files land under `_internal/THIRD-PARTY-LICENSES/` (not silently
+dropped by the size-trim keyword filter, which was double-checked for
+accidental overlap -- none of `_EXCLUDED_BINARY_KEYWORDS` matches
+anything in the new path); a real launch test (`--help`, offscreen)
+confirmed no regression; `test_help_content.py` (17 tests, covering
+the About topic's rendering) re-run clean with the new section added,
+including that Qt's own docs page confirms the added text's central
+claim (LGPLv3, not GPL) rather than just asserting it renders.
+
+Explicitly **not legal advice** -- stated as such in both
+`THIRD-PARTY-LICENSES/README.md` and the in-app text, and worth
+repeating here: this is a well-sourced technical read of Qt's own
+published licensing terms, not a substitute for an actual lawyer if
+Rick or a future user needs certainty.
+
 ## Standing rules: verification and assumptions
 
 These apply to every session, every phase, not just security-sensitive ones.

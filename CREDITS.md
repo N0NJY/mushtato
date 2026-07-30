@@ -37,7 +37,22 @@ conventions with both projects, not code.
 ## Built with
 
 MushTato itself is built with [PySide6](https://doc.qt.io/qtforpython/)
-(Qt for Python), [RestrictedPython](https://restrictedpython.readthedocs.io/),
-[google-re2](https://github.com/google/re2), and
-[platformdirs](https://github.com/tox-dev/platformdirs) — see
-`pyproject.toml` for the full dependency list.
+(Qt for Python), used under the **GNU Lesser General Public License,
+version 3 (LGPLv3)**, plus
+[RestrictedPython](https://restrictedpython.readthedocs.io/) (Zope
+Public License 2.1), [google-re2](https://github.com/google/re2) (BSD),
+[platformdirs](https://github.com/tox-dev/platformdirs) (MIT), and
+[asyncssh](https://asyncssh.readthedocs.io/) (EPL-2.0/GPL-2.0, dual —
+used here under EPL-2.0) — see `pyproject.toml` for the full dependency
+list.
+
+MushTato's own code stays MIT-licensed; Qt is only used dynamically
+linked (shipped as separate library files alongside the `MushTato`
+executable, never statically compiled in), which is what keeps it
+independent of Qt's LGPLv3 terms. The full LGPLv3 license text (plus
+the GPLv3 text it incorporates by reference) ships with every packaged
+build in a `THIRD-PARTY-LICENSES` folder inside the installed MushTato
+folder — see
+`THIRD-PARTY-LICENSES/README.md` in this repo for the full detail,
+including a pointer to Qt's own publicly available source code. This
+is a good-faith technical summary, not legal advice.
