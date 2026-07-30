@@ -12,6 +12,30 @@ and the About box) — bumped after each completed item on the working
 todo/bugs list, not per-commit: a patch bump (1.0.x) for a bug fix, a
 minor bump (1.x.0) for a new feature/behavior change.
 
+## 1.9.3 — Qt/LGPLv3 licensing compliance (2026-07-30)
+
+- Checked MushTato's use of Qt (via PySide6) against real licensing
+  facts rather than assumption: every Qt module MushTato actually uses
+  (Core, Gui, Widgets, Network, D-Bus) is confirmed LGPLv3-available on
+  Qt's own documentation, keeping MushTato's own MIT license independent
+  since Qt is dynamically linked (shipped as separate library files),
+  never statically compiled in.
+- Found along the way that Qt Virtual Keyboard — already excluded from
+  the packaged build for unrelated size reasons in 1.9.1 — is actually
+  GPLv3-only with no LGPL option at all. That earlier size trim happened
+  to dodge a real licensing complication too.
+- The one real gap: LGPLv3 requires the license text be provided to
+  users and its use not hidden. Fixed by bundling the real LGPLv3 +
+  GPLv3 text (`THIRD-PARTY-LICENSES/`) into every packaged build, and
+  adding an explicit LGPLv3 statement to `CREDITS.md` and the in-app
+  About/Credits topic.
+- This same fix was also retroactively added to every existing GitHub
+  release (v1.7.1 through v1.9.2) as an attached asset plus a release-
+  notes update, rather than removing those older releases — real
+  download counts across all of them were near-zero, so deleting them
+  for a documentation gap wasn't judged worth breaking any existing
+  links over.
+
 ## 1.9.2 — Packaged download size: stronger archive compression + more unused Qt trim (2026-07-30)
 
 - Investigated a further real user report that the download itself

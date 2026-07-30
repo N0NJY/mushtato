@@ -4336,11 +4336,34 @@ manual page lookup, not assumed), not run locally; Rick can confirm
 the next tagged release's real Windows/macOS asset sizes once CI
 builds them.
 
-**Post-1.9.2: Qt/LGPL licensing compliance check (2026-07-30) -- no
-version bump (documentation/compliance only, no behavior change).**
-New `THIRD-PARTY-LICENSES/` (`README.md`, `Qt-LGPL-3.0.txt`,
-`Qt-GPL-3.0.txt`), extended `packaging/mushtato.spec` (bundles that
-folder), `CREDITS.md`, `gui/help/topics.py`'s `_render_about`.
+**Post-1.9.2: Qt/LGPL licensing compliance check (2026-07-30) -- landed
+on `main` with no version bump at first (documentation/compliance
+only, no behavior change), then actually shipped as 1.9.3 once Rick
+decided to cut a real release for it.** New `THIRD-PARTY-LICENSES/`
+(`README.md`, `Qt-LGPL-3.0.txt`, `Qt-GPL-3.0.txt`), extended
+`packaging/mushtato.spec` (bundles that folder), `CREDITS.md`,
+`gui/help/topics.py`'s `_render_about`.
+
+**Why the "no version bump" call above got reversed:** Rick separately
+asked whether the older releases lacking this fix should be removed.
+Checking real data first (`gh api repos/.../releases`) surfaced
+something neither of us had accounted for: the fix had only been pushed
+to `main` with no new tag, so **even the current "Latest" GitHub
+release (v1.9.2) didn't include it either** -- there was no compliant
+release to point anyone to yet. Real download counts across all five
+existing releases were near-zero (0-5 each), so deleting old releases
+for a documentation gap wasn't judged worth breaking any existing
+links over; Rick chose instead to (1) cut a fresh release so "Latest"
+actually has the fix, and (2) patch the existing releases in place
+(attach the license text as extra release assets + add a short notice
+to each release's own description) rather than delete or silently
+leave them as-is. Cutting a real release meant the earlier "no version
+bump" reasoning no longer held: a GitHub release is a git tag, and this
+project's own `/version`/About box reads its displayed version from
+`pyproject.toml` -- tagging a release without also bumping that field
+would have shipped a build that misreports its own version. Bumped to
+1.9.3 for exactly that reason, not a reversal of the original
+judgment that the change itself was behavior-neutral.
 
 Rick asked, separately from the size work above, whether MushTato's use
 of Qt raised any real licensing concern for an open-source project.
