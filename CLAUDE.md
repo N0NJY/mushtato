@@ -4250,6 +4250,92 @@ rather than left for a future session to rediscover, matching this
 file's own established pattern of fixing an adjacent staleness bug on
 sight.
 
+**Post-1.9.1: shipped as 1.9.2 (2026-07-30) -- a further download-size
+pass, including a real, checked-not-assumed rejection of an "install
+wizard downloads Qt" idea.** Extended `packaging/mushtato.spec`
+(`_EXCLUDED_BINARY_KEYWORDS`), `.github/workflows/build.yml`
+(compression flags for all three OSes), `INSTALL.md`.
+
+Rick reported the size complaints hadn't stopped and specifically asked
+about a different fix: ship a small installer wizard that downloads Qt
+at install time instead of bundling it. Checked this against real
+numbers before proposing anything, per this file's own standing rule
+1, rather than reasoning about it in the abstract -- and it reversed
+the premise: `pip install PySide6` unconditionally pulls in
+`PySide6-Addons` (161-316MB per platform, verified via PyPI's own JSON
+API -- QtWebEngine/Qt3D/QtMultimedia/QtCharts/etc., none of which
+MushTato uses, with no way to cherry-pick a smaller subset via pip)
+alongside `PySide6-Essentials` (74-105MB), because PyPI's own wheel
+packaging isn't as finely trimmed as PyInstaller's own per-app
+static-dependency analysis already is. A pip-based wizard would
+download 3-5x *more* than the current already-trimmed bundle, not
+less -- the opposite of the goal.
+
+**A genuine alternative was found and investigated properly, not
+dismissed after the first bad result:** Debian really does package
+PySide6 as small, system-Qt-linked modules
+(`python3-pyside6.{qtcore,qtgui,qtwidgets,qtnetwork,qtdbus}`, ~1-2MB
+each) rather than bundling private Qt copies, verified directly against
+Debian's own package pages (~15-20MB total including the underlying
+system `libqt6*` libs, versus the current ~80MB compressed Linux
+download). Checked whether this is actually usable before getting
+excited about it: confirmed via `apt-cache policy` on this project's
+own dev machine (Linux Mint 22.3, Ubuntu 24.04 base) and via Ubuntu's
+own package search that these packages exist in Debian and in Ubuntu's
+not-yet-stable "questing" (25.10) -- but are **absent from Ubuntu
+22.04/24.04 LTS**, the base the overwhelming majority of real desktop
+Ubuntu/Mint/derivative users (including Rick's own machine) actually
+run. Checkpointed via `AskUserQuestion` with this full picture; Rick
+chose to drop the wizard idea rather than build a second, Linux-only,
+narrow-benefit packaging pipeline for it.
+
+**What shipped instead, following the same "verify before excluding"
+discipline 1.9.1 established:** (1) none of the three platforms'
+packaging commands were requesting their own tool's maximum
+compression -- confirmed by checking each tool's actual documented
+flags (`ditto`'s own docs literally state it defaults to "the default
+compression level as defined by zlib," not 9) rather than assuming --
+switched Linux from `tar czf` (gzip) to `tar`+`xz -9e` (LZMA2, the same
+codec 7z's own `-mx9` uses), and added explicit `-mx9`/
+`--zlibCompressionLevel 9` to the Windows/macOS steps, with the archive
+format/tool choice on each platform otherwise unchanged (still zip on
+Windows, still `ditto`'s own resource-fork-preserving PKZip on macOS).
+(2) A second Qt trim pass: grepped `engine/`/`gui/` for
+`QTranslator`/`installTranslator` and for
+`QSsl`/`QNetworkAccessManager`/`QNetworkReply` (zero hits for either)
+*before* excluding Qt's own UI translation files (~6.7MB of `.qm`
+files -- dead weight with no `QTranslator` ever installed, since
+MushTato has no i18n framework in use) and its two TLS backend plugins
+(MushTato's own SSL/SSH work goes through Python's stdlib `ssl` and
+`asyncssh` directly, `engine/net/client.py`, never through QtNetwork's
+own `QSslSocket`). Deliberately did *not* touch `plugins/generic`/
+`wayland-*`/`egldeviceintegrations`/`xcbglintegrations`/
+`platformthemes` despite their modest combined size (~1.4MB) -- unlike
+translations/TLS, whether those are safe to drop depends on the real
+display server/window manager/compositor on an actual desktop, which
+this sandbox's offscreen-QPA-only environment can't verify and has a
+documented history of being wrong about (the `libxcb-cursor0` and
+theme-palette bugs earlier in this project) -- not worth that risk for
+so little size.
+
+Verified per standing rule 7/8: a real rebuild (174MB -> 167MB on
+disk), confirmed both new exclusions actually took effect (`find` for
+`*.qm` and the two TLS plugin filenames both came back empty) with no
+broken symlinks left behind (same check 1.9.1's own fix established);
+a real launch test under `QT_QPA_PLATFORM=offscreen` (`--help`, and a
+separate no-args launch confirmed still running after 3 seconds, not
+just that it started); and a real local `tar -cf ... --use-compress-
+program="xz -9e"` pass on the trimmed build, validated with `tar tJf`
+for archive integrity, measuring an actual 69MB (gzip) -> 49MB (xz)
+compressed-download reduction on the identical payload -- combined
+with 1.9.1's own on-disk trim, roughly 80MB -> 49MB total versus the
+pre-1.9.1 Linux download. Only verified on Linux this round, same
+honest gap as 1.9.1 -- the Windows/macOS compression flags are verified
+against each tool's own documented flag reference (a real `ditto`
+manual page lookup, not assumed), not run locally; Rick can confirm
+the next tagged release's real Windows/macOS asset sizes once CI
+builds them.
+
 ## Standing rules: verification and assumptions
 
 These apply to every session, every phase, not just security-sensitive ones.

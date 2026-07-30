@@ -18,7 +18,7 @@ Download the archive for your operating system from the latest release:
 |---------|--------------------------|
 | Windows | `MushTato-windows.zip`   |
 | macOS   | `MushTato-macos.zip`     |
-| Linux   | `MushTato-linux.tar.gz`  |
+| Linux   | `MushTato-linux.tar.xz`  |
 
 There's no installer — each archive contains a self-contained `MushTato`
 folder. Extract it anywhere and run the program inside; there's nothing
@@ -55,9 +55,9 @@ separate to "install" beyond extracting the archive.
 
 ## Linux
 
-1. Download `MushTato-linux.tar.gz` and extract it:
+1. Download `MushTato-linux.tar.xz` and extract it:
    ```
-   tar xzf MushTato-linux.tar.gz
+   tar xJf MushTato-linux.tar.xz
    ```
 2. Run it from inside the extracted folder:
    ```

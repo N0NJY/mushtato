@@ -12,6 +12,54 @@ and the About box) — bumped after each completed item on the working
 todo/bugs list, not per-commit: a patch bump (1.0.x) for a bug fix, a
 minor bump (1.x.0) for a new feature/behavior change.
 
+## 1.9.2 — Packaged download size: stronger archive compression + more unused Qt trim (2026-07-30)
+
+- Investigated a further real user report that the download itself
+  ("MushTato is huge") is too large, including whether a first-run
+  installer that fetches Qt separately at install time would help.
+  Checked this against real numbers rather than assumption: `pip
+  install PySide6` unconditionally pulls in `PySide6-Addons` (161–316 MB
+  per platform — QtWebEngine, Qt3D, QtMultimedia, etc., none of which
+  MushTato uses) alongside `PySide6-Essentials` (74–105 MB), because
+  PyPI's own packaging isn't as finely trimmed as PyInstaller's
+  per-app dependency analysis. A "wizard" using pip would download
+  3–5x *more* than the current bundle, not less. A genuine OS-package
+  alternative exists on Linux (Debian ships tiny, system-Qt-linked
+  `python3-pyside6.*` packages, ~15–20 MB total) but is verified absent
+  from Ubuntu 22.04/24.04 LTS — the base most real desktop Linux users
+  (including this project's own dev machine, Linux Mint) actually run —
+  so it was judged not worth pursuing as a second packaging pipeline
+  for that narrow a benefit right now.
+- Instead, two real, low-risk levers: (1) none of the three platforms'
+  packaging commands were requesting their tool's own maximum
+  compression (7z zip defaulted to "Normal", not "Ultra"; `ditto`
+  defaults to zlib's own default level, not 9; plain `tar czf` uses
+  gzip, weaker than LZMA/xz for this kind of binary-heavy payload at
+  the same effort) — switched Linux to `.tar.xz` (`xz -9e`) and added
+  explicit max-compression flags to the Windows (`7z -mx9`) and macOS
+  (`ditto --zlibCompressionLevel 9`) steps, same archive formats/tools
+  otherwise unchanged. (2) A further Qt trim pass, following 1.9.1's
+  exact method: grepped the codebase first (zero hits for
+  `QTranslator`/`installTranslator` and for `QSsl`/
+  `QNetworkAccessManager`/`QNetworkReply`) before excluding Qt's own UI
+  translation files (~6.7 MB, dead weight with no `QTranslator` ever
+  installed) and its unused TLS backend plugins (MushTato's own SSL/SSH
+  work goes through Python's stdlib `ssl` and `asyncssh` directly, never
+  QtNetwork's `QSslSocket`).
+- Real, measured result on Linux: on-disk size 174 MB → 167 MB (the
+  further Qt trim), and the actual compressed download 69 MB → 49 MB
+  just from the compression-codec switch on that same trimmed payload —
+  combined with 1.9.1, roughly 80 MB → 49 MB total versus the pre-1.9.1
+  build. Verified via a real rebuild, a real launch under
+  `QT_QPA_PLATFORM=offscreen` (both `--help` and a staying-alive no-args
+  launch), and a real `tar tJf` integrity check of the resulting
+  archive — not assumed safe from the exclusion list alone.
+- Only verified on Linux this round (no Windows/macOS build environment
+  available) — the `-mx9`/`--zlibCompressionLevel 9` flags are verified
+  against each tool's own documented flag reference, not run locally;
+  Rick can confirm the next tagged release's real Windows/macOS asset
+  sizes shrink too.
+
 ## 1.9.1 — Packaged build size: drop unused Qt Virtual Keyboard/PDF plugins (2026-07-29)
 
 - Investigated real user reports that the packaged build is large.

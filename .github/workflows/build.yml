@@ -64,7 +64,8 @@ jobs:
             libxcb-render-util0 \
             libxcb-shape0 \
             libxcb-xfixes0 \
-            libxcb-xinerama0
+            libxcb-xinerama0 \
+            xz-utils
 
       - name: Install dependencies
         run: |
@@ -79,29 +80,52 @@ jobs:
       # of a generic archiver. --onedir (this project's spec, not
       # --onefile) is more reliable for PySide6's Qt-plugin discovery
       # than a single-file build, at the cost of shipping a folder.
+      #
+      # Compression levels (2026-07-30, found investigating a real user
+      # report that the download itself is large): none of these three
+      # commands previously requested their tool's own maximum
+      # compression -- 7z's default for `-tzip` is its "Normal" level,
+      # not "Ultra"; ditto's own docs state it defaults to "the default
+      # compression level as defined by zlib" (not 9); plain `tar czf`
+      # uses gzip, which compresses this kind of binary-heavy payload
+      # meaningfully worse than LZMA/xz at the same effort. Switched
+      # Linux to `.tar.xz` (xz -9e, the same LZMA2 codec 7z's own -mx9
+      # uses) and added explicit maximum-compression flags to the
+      # other two -- same archive formats/tools/bundle-correctness
+      # behavior as before (zip for Windows, ditto's own PKZip+resource-
+      # fork handling for macOS), just not leaving real, free compression
+      # ratio on the table. Verified locally for Linux only (a real
+      # rebuild + `xz -9e` pass, confirmed via `tar tJf`/`file` that the
+      # resulting archive is valid and not corrupted) -- no
+      # Windows/macOS build environment available here, so `-mx9`/
+      # `--zlibCompressionLevel 9` are verified against each tool's own
+      # documented flag reference, not run locally; Rick can confirm the
+      # next tagged release's real Windows/macOS asset sizes shrink too,
+      # same as any other can't-verify-cross-platform-locally change in
+      # this project.
       - name: Package artifact (Windows)
         if: runner.os == 'Windows'
         shell: bash
         run: |
           cd dist
-          7z a ../${{ matrix.artifact_name }}.zip MushTato
+          7z a -tzip -mx9 ../${{ matrix.artifact_name }}.zip MushTato
       - name: Package artifact (Linux)
         if: runner.os == 'Linux'
         run: |
           cd dist
-          tar czf ../${{ matrix.artifact_name }}.tar.gz MushTato
+          tar -cf ../${{ matrix.artifact_name }}.tar.xz --use-compress-program="xz -9e" MushTato
       - name: Package artifact (macOS)
         if: runner.os == 'macOS'
         run: |
           cd dist
-          ditto -c -k --sequesterRsrc --keepParent MushTato ../${{ matrix.artifact_name }}.zip
+          ditto -c -k --sequesterRsrc --keepParent --zlibCompressionLevel 9 MushTato ../${{ matrix.artifact_name }}.zip
 
       - uses: actions/upload-artifact@v6
         with:
           name: ${{ matrix.artifact_name }}
           path: |
             ${{ matrix.artifact_name }}.zip
-            ${{ matrix.artifact_name }}.tar.gz
+            ${{ matrix.artifact_name }}.tar.xz
           if-no-files-found: ignore
 
   release:

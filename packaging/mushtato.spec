@@ -37,6 +37,20 @@ on a real tagged release; bundling the real source of truth directly
 is simpler than trying to make PyInstaller preserve install metadata
 that was never generated for an app that isn't pip-installed from a
 wheel in the first place.
+
+Build-size trimming (2026-07-29, extended 2026-07-30): see the comments
+around _EXCLUDED_BINARY_KEYWORDS below for what's excluded and why.
+Deliberately does NOT touch plugins/generic, plugins/wayland-*,
+plugins/egldeviceintegrations, plugins/xcbglintegrations, or
+plugins/platformthemes despite their modest combined size (~1.4MB) --
+unlike translations/tls (removed based on a plain grep showing zero
+usage anywhere in this codebase), whether those are safe to drop
+depends on the real display server/window manager/compositor
+combination on an actual end-user desktop, which this sandbox's
+offscreen-QPA-only environment cannot verify -- and this project has a
+documented history of being wrong about exactly that (the
+libxcb-cursor0 and theme-palette bugs earlier on). Not worth that risk
+for so little size.
 """
 
 import sys
@@ -97,6 +111,23 @@ _EXCLUDED_BINARY_KEYWORDS = (
     "quick",  # lib/*Quick*, pulled in only by the virtual keyboard plugin
     "qpdf",  # plugins/imageformats/*qpdf* (PDF-as-image loading)
     "qt6pdf",  # lib/*Pdf*, pulled in only by the qpdf plugin
+    # Second trim pass (2026-07-30), found investigating a further real
+    # user report that the packaged build is "huge". Confirmed by
+    # grepping engine/ and gui/ for QTranslator/installTranslator (zero
+    # hits) and QSsl/QNetworkAccessManager/QNetworkReply (zero hits)
+    # before excluding either of these -- MushTato has no i18n
+    # framework in use (English-only UI, no QTranslator ever
+    # installed), and its own SSL/TLS work (SSL-enabled MU* connections,
+    # SSH) goes through Python's stdlib `ssl` module and `asyncssh`
+    # directly (engine/net/client.py), never through QtNetwork's own
+    # QSslSocket -- so Qt's own TLS backend plugins serve no purpose
+    # here either.
+    "translations",  # PySide6/Qt/translations/*.qm -- ~6.7MB of Qt's own
+    # UI-string translations (Cancel/OK/etc in other languages), dead
+    # weight with no QTranslator ever installed.
+    "qcertonlybackend",  # plugins/tls/ -- Qt's own TLS backend plugins
+    "qopensslbackend",  # for QSslSocket, unused since MushTato's SSL/TLS
+    # traffic never goes through QtNetwork.
 )
 a.binaries = [
     entry
