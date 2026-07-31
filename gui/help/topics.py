@@ -134,6 +134,13 @@ MushTato folder; see `THIRD-PARTY-LICENSES/README.md` (or CREDITS.md in
 the source repo) for the full detail, including where to get Qt's own
 source code.
 
+## Support MushTato
+
+MushTato is free, always will be, and has no ads, license keys, or paid
+tiers. If you find it useful, donations are welcome but never required:
+GitHub Sponsors (https://github.com/sponsors/N0NJY) or PayPal
+(https://www.paypal.me/n0njy).
+
 ## Author
 
 Written by Rick Donaldson, 2026 (aka Thoran Yo, aka Fletcher, aka
