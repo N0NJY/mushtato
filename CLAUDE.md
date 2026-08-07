@@ -4535,9 +4535,9 @@ documented workaround for a real, unrelated segfault risk when too many
 thread-heavy test files share one process): zero regressions anywhere
 else in the app.
 
-Not verified against a real desktop this round -- same honest gap as
-every other GUI-facing change in this project's history; the real drag-
-to-reorder feel and multi-tab visual layout remain Rick's to confirm.
+**Real-desktop confirmation:** Rick tested the built package live and
+confirmed this is "working as expected" -- the drag-to-reorder feel and
+multi-tab visual layout are no longer an open verification gap.
 
 **Shipped as 1.11.0 (2026-08-07): multi-line paste in the dual input
 boxes (Potato parity).** New `gui/windows/history_line_edit.py`
@@ -4657,10 +4657,10 @@ class's real behavior at all. `tests/gui/test_dual_input.py` grew from
 tests, zero failures, including the known scripting/dialog/address-book
 segfault-risk trio run together, unaffected by any of this.
 
-Not verified against a real desktop this round -- same honest gap as
-every other GUI-facing change in this project's history; the real feel
-of pasting a multi-line command block and the Shift+Return escape hatch
-remain Rick's to confirm.
+**Real-desktop confirmation:** Rick tested the built package live and
+confirmed this is "working as expected" -- both the real feel of
+pasting a multi-line command block and the Shift+Return escape hatch
+are no longer an open verification gap.
 
 **Shipped as 1.12.0 (2026-08-07): tab labels show the logged-in
 Character.** New `gui/windows/two_line_tab_bar.py` (`TwoLineTabBar`),
