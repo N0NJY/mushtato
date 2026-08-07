@@ -12,6 +12,51 @@ and the About box) — bumped after each completed item on the working
 todo/bugs list, not per-commit: a patch bump (1.0.x) for a bug fix, a
 minor bump (1.x.0) for a new feature/behavior change.
 
+## 1.11.0 — Multi-line paste in the input boxes (Potato parity) (2026-08-07)
+
+- Pasting a block of several lines (e.g. commands meant to be sent one
+  at a time) into either input box now shows each line individually,
+  matching real Potato's own input window — not collapsed into one long
+  string like before. Pressing Enter sends every line in the box
+  separately, in order, then clears it, the same as a single typed line
+  always has.
+- The primary input box still applies its usual `/`-command and alias
+  processing to every line; the secondary (pose/says) box still bypasses
+  both entirely for every line — a pose line starting with `/` is never
+  reinterpreted, even in the middle of a multi-line paste.
+- A pasted block's trailing newline (routine when copying multiple
+  lines from elsewhere) doesn't send an extra blank line; a genuine
+  blank line in the middle of a paste still does.
+- New: **Shift+Return** inserts a literal newline, so a multi-line block
+  can be typed directly, not only pasted — an addition beyond Potato's
+  own real behavior (which has no such escape hatch).
+- Up/Down-arrow history recall is unaffected for ordinary single-line
+  use; it steps aside to normal cursor movement only when the box
+  actually holds multi-line content.
+
+## 1.10.0 — Text Editor: multiple tabs per window (2026-08-07)
+
+- Each Text Editor window (Tools → Editor / `Ctrl+Shift+E` / `/editor`)
+  now holds a real tab bar instead of a single file. **File → New Tab**
+  or **File → Open...** adds another file as its own tab in the same
+  window, without touching whatever's already open in the other tabs —
+  each tab keeps independent content, cursor position, modified state,
+  and its own Find bar. Tabs are closable and reorderable by dragging.
+- New never prompts to discard anything anymore (a deliberate
+  simplification over the old single-file design): it can't lose
+  another tab's content, since it only ever adds a new one alongside
+  what's already open. Discard prompts are still very much there, just
+  relocated to where content can actually be lost — closing a single
+  tab, or closing the whole window with any tab still unsaved (every
+  open tab is checked, not just one).
+- Opening a file reuses the current tab if it's still blank/untitled/
+  unmodified (avoids leaving a permanently-empty "Untitled" tab behind
+  after the first Open in a fresh window); otherwise it opens into a
+  new tab, leaving whatever's already open completely untouched.
+- Multiple *windows* (Rick's earlier explicit checkpoint choice) are
+  unchanged — Tools → Editor still opens a brand-new independent window
+  each time; this only adds tabs within a window.
+
 ## 1.9.3 — Qt/LGPLv3 licensing compliance (2026-07-30)
 
 - Checked MushTato's use of Qt (via PySide6) against real licensing

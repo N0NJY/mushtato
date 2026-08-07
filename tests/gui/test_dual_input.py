@@ -8,7 +8,7 @@ from PySide6.QtGui import QKeyEvent
 
 from engine.storage.address_book import WorldProfile
 from gui.windows.history_line_edit import HistoryLineEdit
-from gui.windows.session_tab import SessionTab
+from gui.windows.session_tab import SessionTab, _split_input_lines
 from tests.gui.test_main_window_smoke import FakeBridge
 
 
@@ -228,3 +228,154 @@ def test_primary_and_secondary_history_are_independent(qapp):
 
     _press(tab.secondary_input, Qt.Key.Key_Up)
     assert tab.secondary_input.text() == "smiles"
+
+
+# -- multi-line paste (Potato parity, pending-list item 12) ---------------
+#
+# Real Potato's own input window is a genuine multi-line Tk Text widget;
+# pasting several lines into it just shows several lines, inherent to any
+# multi-line widget -- confirmed against ~/git/potato/potato.vfs's real
+# source before implementing this. Return sends the *entire* box content,
+# split on newline, each line processed/sent separately, then clears the
+# box (real Potato's own send_mushage, matched here by
+# gui.windows.session_tab._split_input_lines +
+# SessionTab._on_primary_send/_on_secondary_send).
+
+
+def test_split_input_lines_single_line():
+    assert _split_input_lines("look") == ["look"]
+
+
+def test_split_input_lines_empty_box_is_one_blank_line():
+    # A single Return on a genuinely empty box must still behave exactly
+    # as it did before this feature existed -- one blank line, not zero.
+    assert _split_input_lines("") == [""]
+
+
+def test_split_input_lines_multiple_lines_no_trailing_newline():
+    assert _split_input_lines("north\nsouth\nlook") == ["north", "south", "look"]
+
+
+def test_split_input_lines_strips_exactly_one_trailing_newline():
+    # Routine after pasting a block copied from elsewhere, which commonly
+    # ends with its own trailing newline -- must not become an extra,
+    # unwanted blank send tacked onto the end.
+    assert _split_input_lines("north\nsouth\n") == ["north", "south"]
+
+
+def test_split_input_lines_keeps_an_interior_blank_line():
+    # A *real* blank line in the middle of a paste is a deliberate blank
+    # send, not a trailing-newline artifact -- must not be silently
+    # dropped the same way.
+    assert _split_input_lines("north\n\nsouth") == ["north", "", "south"]
+
+
+def test_split_input_lines_only_strips_one_trailing_newline_not_several():
+    assert _split_input_lines("north\n\n") == ["north", ""]
+
+
+def test_pasting_multiple_lines_shows_them_as_separate_visible_lines(qapp):
+    # The literal claim from the pending-list report: pasted content is
+    # genuinely visible as multiple lines, not collapsed into one long
+    # string -- proven via a real clipboard + a real .paste() call, not
+    # just calling setPlainText() directly.
+    tab = SessionTab("example.com", 4201, bridge=FakeBridge())
+    qapp.clipboard().setText("north\nsouth\nlook")
+
+    tab.input_line.paste()
+
+    assert tab.input_line.document().blockCount() == 3
+    assert tab.input_line.text() == "north\nsouth\nlook"
+
+
+def test_returning_a_pasted_multiline_block_sends_each_line_separately(qapp):
+    bridge = FakeBridge()
+    tab = SessionTab("example.com", 4201, bridge=bridge)
+    qapp.clipboard().setText("north\nsouth\nlook")
+    tab.input_line.paste()
+
+    tab.input_line.returnPressed.emit()
+
+    assert bridge.sent == ["north", "south", "look"]
+    assert tab.input_line.text() == ""  # box cleared after sending, same as single-line
+
+
+def test_pasted_trailing_newline_does_not_send_an_extra_blank_line(qapp):
+    bridge = FakeBridge()
+    tab = SessionTab("example.com", 4201, bridge=bridge)
+    qapp.clipboard().setText("north\nsouth\n")
+    tab.input_line.paste()
+
+    tab.input_line.returnPressed.emit()
+
+    assert bridge.sent == ["north", "south"]
+
+
+def test_secondary_input_multiline_paste_bypasses_commands_on_every_line(qapp):
+    # Same "never reinterpreted" guarantee the single-line secondary box
+    # already has (a pose starting with "/" is sent literally) -- proven
+    # here across every line of a multi-line paste, not just the first.
+    bridge = FakeBridge()
+    tab = SessionTab("example.com", 4201, bridge=bridge)
+    tab.secondary_input.setText("waves hello\n/quit\nsmiles")
+
+    tab.secondary_input.returnPressed.emit()
+
+    # If "/quit" had been reinterpreted as a real command it would never
+    # have reached the bridge at all (and would have closed the tab) --
+    # its literal presence here, third in order, proves it was sent as
+    # plain text on its own line, not executed.
+    assert bridge.sent == ["waves hello", "/quit", "smiles"]
+
+
+def test_multiline_paste_is_recorded_as_one_history_entry(qapp):
+    tab = SessionTab("example.com", 4201, bridge=FakeBridge())
+    tab.input_line.setText("north\nsouth")
+
+    tab.input_line.returnPressed.emit()
+    tab.input_line.setText("look")
+    tab.input_line.returnPressed.emit()
+
+    _press(tab.input_line, Qt.Key.Key_Up)
+    assert tab.input_line.text() == "look"
+    _press(tab.input_line, Qt.Key.Key_Up)
+    assert tab.input_line.text() == "north\nsouth"  # the whole block, one entry
+
+
+def test_up_down_move_cursor_normally_within_multiline_content(qapp):
+    # History recall only kicks in when the cursor is already on the
+    # first/last line -- with genuine multi-line content and the cursor
+    # in the middle, Up/Down must move the cursor, not replace the box's
+    # content with a history entry.
+    edit = HistoryLineEdit()
+    edit.setText("first")
+    edit.returnPressed.emit()
+    edit.setText("north\nsouth\nlook")
+    cursor = edit.textCursor()
+    cursor.movePosition(cursor.MoveOperation.Start)
+    cursor.movePosition(cursor.MoveOperation.NextBlock)  # onto the middle line ("south")
+    edit.setTextCursor(cursor)
+
+    _press(edit, Qt.Key.Key_Up)
+
+    assert edit.text() == "north\nsouth\nlook"  # unchanged -- not replaced by history
+    assert edit.textCursor().blockNumber() == 0  # cursor moved up a line instead
+
+
+def test_shift_return_inserts_a_literal_newline_instead_of_sending(qapp):
+    # Real QTest.keyClick dispatch (not a hand-built QKeyEvent passed
+    # directly to keyPressEvent) -- proves the base QPlainTextEdit's own
+    # real newline-insertion behavior actually fires when this class
+    # defers to it, not just that this class's own code chose to defer.
+    from PySide6.QtTest import QTest
+
+    tab = SessionTab("example.com", 4201, bridge=FakeBridge())
+    tab.input_line.setText("north")
+    sent = []
+    tab.input_line.returnPressed.connect(lambda: sent.append(1))
+
+    QTest.keyClick(tab.input_line, Qt.Key.Key_Return, Qt.KeyboardModifier.ShiftModifier)
+
+    assert sent == []
+    assert tab.input_line.document().blockCount() == 2
+    assert tab.input_line.text() == "north\n"

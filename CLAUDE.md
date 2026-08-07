@@ -4459,6 +4459,209 @@ MushTato will add or change. Recorded here so a future session doesn't
 re-research this from scratch -- same pattern as the Phase 13
 script-sharing deprecation note earlier in this file.
 
+**Shipped as 1.10.0 (2026-08-07): Text Editor gains multiple tabs per
+window.** `gui/windows/text_editor_window.py` extended: new
+`_EditorFileTab` (a per-tab `QWidget` owning one file's text widget,
+`current_file`, `is_modified`, and its own `FindBar`), `TextEditor`
+extended with a `QTabWidget`.
+
+Rick's own follow-up request, after the Phase 12a Text Editor shipped:
+"the ability to open multiple tabs if I have more than one file I need
+to edit." Checked the existing architecture before proposing anything
+(CLAUDE.md rule 6): Phase 12a's `TextEditor` was one file per window,
+with *multiple simultaneous windows* Rick's own earlier, explicit,
+non-default checkpoint choice. Kept that decision untouched -- Tools >
+Editor / the hotkey / `/editor` still opens a brand-new independent
+window every time, exactly as before -- and added tabs *within* a
+window as the additive, minimal-risk reading of the request, rather
+than rerouting that entry point to reuse an already-open window. Flagged
+this as an assumption for Rick to correct rather than silently deciding
+it was the only reasonable reading.
+
+**Architecture, following the exact "current tab" property-delegation
+pattern rather than renaming every existing caller:** `TextEditor` keeps
+`text_edit`/`current_file`/`is_modified`/`find_bar` as **properties**
+delegating to whichever tab is currently active in its `QTabWidget`,
+instead of renaming them to something tab-explicit everywhere. This
+wasn't laziness -- it was tested directly and confirmed to work: running
+the pre-existing 36-test suite against the new tabbed implementation
+before writing a single new test showed only the 4 tests exercising
+New's old discard-prompt behavior actually failed; all 32 others passed
+completely unchanged, since "the current tab" is a strict superset of
+"the only tab" every pre-existing caller ever dealt with.
+
+**A real, deliberate behavior simplification, not just a side effect of
+adding tabs:** New (renamed File > "New Tab") and Open no longer prompt
+to discard unsaved changes at all. Under the old single-file design this
+made sense (New/Open both replaced the one-and-only text in place); with
+tabs, neither operation can lose another tab's content anymore -- New
+just adds a blank tab alongside what's already open, and Open either
+reuses an already-blank/untitled/unmodified current tab (avoiding a
+permanently-empty "Untitled" tab piling up after the first real Open in
+a fresh window) or opens into a fresh tab, leaving an in-progress current
+tab's content completely untouched either way. The discard-confirmation
+mechanism itself is still very much in use -- just relocated to where
+content can genuinely still be lost: closing one tab (its own `[x]`
+button, or File > Close Tab), or closing the whole window, which now
+checks *every* open tab for unsaved changes, not just one, aborting the
+whole close if Cancel is chosen on any of them.
+
+View menu toggles (Line Numbers/Word Wrap) and Settings-driven font
+live-reload (`apply_font`) apply uniformly across every currently-open
+tab in a window, and become the starting point for any tab opened
+afterward -- there's only one View menu per window, not one per tab, so
+per-tab-independent toggles would have been the surprising choice, not
+the consistent one.
+
+Verified per this file's standing rule 7: the test suite grew from 36 to
+50 (the 4 obsolete discard-prompt tests for New replaced with tests
+matching its new never-prompts/preserves-other-tabs behavior; 14 new
+tests covering tab creation/switching/independent content, tab-label
+filename+modified-marker updates, window title/status bar following the
+active tab, Undo/Redo/Cut/Copy/Paste dispatch reaching only the active
+tab, per-tab Find bar independence, View-menu toggles and font reload
+applying to every tab, and every closing scenario -- a clean tab, a
+modified tab with Cancel/Yes/No, the last tab closing the whole window,
+and a window close correctly prompting only for the one modified tab
+among several while leaving the others alone). One real, environment-
+specific test-authoring bug caught and fixed while writing these, not
+shipped unnoticed: `QPlainTextEdit.setPlainText()`/`insertPlainText()`
+clear the undo stack, so a test asserting Undo's per-tab dispatch had to
+use `insertPlainText()` (an undoable edit) rather than `setPlainText()`
+to actually exercise anything -- caught by the test failing with the
+*wrong* content still present, not a hang or crash. Full GUI suite
+re-run in the established batches (this project's own pre-existing,
+documented workaround for a real, unrelated segfault risk when too many
+thread-heavy test files share one process): zero regressions anywhere
+else in the app.
+
+Not verified against a real desktop this round -- same honest gap as
+every other GUI-facing change in this project's history; the real drag-
+to-reorder feel and multi-tab visual layout remain Rick's to confirm.
+
+**Shipped as 1.11.0 (2026-08-07): multi-line paste in the dual input
+boxes (Potato parity).** New `gui/windows/history_line_edit.py`
+(`HistoryLineEdit` rebuilt on `QPlainTextEdit`, was `QLineEdit`),
+extended `gui/windows/session_tab.py` (`_split_input_lines`,
+`_on_primary_send`/`_on_secondary_send`).
+
+Rick's report: on real Potato, pasting a block of several lines (e.g.
+commands meant to be sent one at a time) into the input window shows
+each line individually, rather than collapsing into one long string --
+he wanted the same in MushTato. Logged first as a record-only pending-
+list item (2026-08-06, no code touched, per his explicit instruction),
+listing several genuinely open questions rather than guessing at
+answers -- all resolved the next day by reading Potato's own real
+source (`~/git/potato/potato.vfs/lib/potato.tcl`) before designing
+anything, per this file's own standing rule 1: Potato's input window is
+a genuine multi-line Tk `Text` widget (class `PotatoInput`); pasting
+into it is a completely generic clipboard insert (`textPaste`, no
+line-splitting logic anywhere) -- showing multiple lines is simply
+inherent multi-line-widget behavior, not a paste-specific feature.
+Return triggers `send_mushage`, which grabs the *entire* current box
+content, clears the box, and sends it via `process_input`, which splits
+on `\n` and sends/parses each resulting line separately. This
+definitively answered the pending item's central open question ("does
+the box need to become multi-line-capable, or can this be a paste-time-
+only interception?") -- a paste-time interception that never actually
+displayed multiple lines wouldn't have matched "I can see all the lines
+individually" at all, so the widget itself had to become genuinely
+multi-line-capable, not just smarter about what it does with clipboard
+content.
+
+**Compatibility-shim architecture, avoiding a much larger blast radius
+than the change actually needed:** rather than renaming `HistoryLineEdit`
+or its API, it keeps a small, deliberate QLineEdit-shaped compatibility
+surface (`text()`/`setText()`/`insert()`/`selectedText()`/
+`setCursorPosition()`, plus a synthesized `returnPressed` `Signal()` --
+`QPlainTextEdit` has no native equivalent) so every pre-existing single-
+line caller and test needed zero changes. Proven, not assumed: running
+the original 14-test `test_dual_input.py` suite against the rebuilt
+widget before writing anything new showed all 14 passing completely
+unchanged. Kept the class name unchanged too (despite no longer being a
+literal "line edit") for the same reason -- the practical contract
+("a box with history") didn't change, only its internals.
+
+`_split_input_lines()` (a standalone, Qt-free, directly-testable
+function in `session_tab.py`, matching this project's established
+`parse_repeat_command`/`parse_ssh_command`/`_is_authentication_failure`
+pattern) replicates Potato's real per-newline splitting *and* its subtler
+behavior verified in the same source read: a single trailing newline
+(routine after pasting a block copied elsewhere) isn't treated as its
+own extra blank send, matching Potato's own `process_input` loop, which
+naturally stops once the remaining text is empty rather than processing
+a dangling empty segment after the final real newline -- while a genuine
+*interior* blank line in a paste is still sent as its own blank line,
+and a lone Return on a truly empty box still sends exactly one blank
+line, unchanged from before this feature existed. `_on_primary_send`/
+`_on_secondary_send` now iterate every split line through the *exact
+same* per-line pipeline a single typed line already used (alias/command
+processing for the primary box, the established raw-bypass path for the
+secondary/pose box) -- not a parallel multi-line-specific send path,
+and proven per-line for both boxes, including that a pose line starting
+with `/quit` is still sent completely literally even when it's the
+second line of a three-line paste.
+
+History recall (Up/Down) only engages when the cursor is already on the
+first/last line of whatever the box currently holds -- reduces to the
+exact original single-line behavior whenever the box holds 0-1 lines
+(the overwhelming common case), and steps aside so Up/Down move the
+cursor normally between lines whenever genuine multi-line content is
+present instead. The whole multi-line block pasted before an Enter is
+recorded as **one** history entry (matching Potato's own
+`addToInputHistory $c $txt`, the whole box's text, not per-line), not
+one entry per line.
+
+**Deliberately added beyond Potato's own real behavior, flagged rather
+than silently included:** Shift+Return inserts a literal newline, so a
+multi-line block can be typed directly, not only pasted -- Potato itself
+has no such escape hatch (confirmed against its source; nothing binds
+Shift+Return there at all). Confirmed directly, not assumed, that plain
+`QPlainTextEdit` also has no default binding for Shift+Return (it does
+nothing at all by default) -- discovered via a real test failure, not
+predicted correctly the first time: the first implementation assumed the
+base class would insert a newline via `super().keyPressEvent(event)`
+the same way it does for a bare Return, and a real `QTest.keyClick`-
+driven test (not a hand-built `QKeyEvent` passed directly to the method,
+specifically chosen to exercise the base class's real default handling
+rather than just this class's own dispatch logic) caught that assumption
+being wrong immediately -- fixed by inserting the newline explicitly
+(`self.insertPlainText("\n")`) rather than delegating to a default that
+doesn't exist for this key combination.
+
+**A second real bug the same test caught, in the compatibility shim
+itself, not the multi-line logic:** real `QLineEdit.setText()` moves the
+cursor to the end of the new text (documented Qt behavior);
+`QPlainTextEdit.setPlainText()` does not (leaves it at position 0) --
+the Shift+Return test's resulting text came back as `"\nnorth"` instead
+of `"north\n"`, revealing that the `setText()` shim's naive
+`self.setPlainText(text)` would leave any subsequent typed/inserted text
+landing at the *start* of a programmatically-set string instead of
+continuing naturally after it, for any real caller, not just this test.
+Fixed in the shim itself (moves the cursor to the end after
+`setPlainText`), not worked around in the test.
+
+Verified per this file's standing rule 7: `_split_input_lines`'s exact
+trailing/interior-blank-line rules tested standalone with no Qt
+involvement at all; a real clipboard + a real `.paste()` call (not just
+`setPlainText()`) proving pasted content is genuinely visible as
+separate lines, matching Rick's own literal report; per-line send/bypass
+proof for both boxes including the `/quit`-mid-paste case; the whole-
+block-as-one-history-entry claim; normal cursor movement within
+multi-line content with history recall confirmed *not* firing; and the
+Shift+Return newline-insert proven via real `QTest.keyClick` dispatch,
+the same mechanism that caught both real bugs above rather than a
+simpler hand-built-event test that wouldn't have exercised the base
+class's real behavior at all. `tests/gui/test_dual_input.py` grew from
+14 to 27 tests. Full GUI suite re-run in the established batches: 620
+tests, zero failures, including the known scripting/dialog/address-book
+segfault-risk trio run together, unaffected by any of this.
+
+Not verified against a real desktop this round -- same honest gap as
+every other GUI-facing change in this project's history; the real feel
+of pasting a multi-line command block and the Shift+Return escape hatch
+remain Rick's to confirm.
+
 ## Standing rules: verification and assumptions
 
 These apply to every session, every phase, not just security-sensitive ones.

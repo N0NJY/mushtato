@@ -54,54 +54,37 @@ def test_cursor_position_label_updates(qapp, tmp_path: Path):
     assert editor.cursor_pos_label.text() == "Ln 2, Col 6"
 
 
-# -- file operations: New ---------------------------------------------------
+# -- file operations: New Tab ------------------------------------------------
+#
+# New Tab never prompts to discard anything -- unlike the old single-tab
+# design's New (which cleared the one-and-only text_edit in place), it
+# can't lose any other tab's content, since it only ever adds a new tab
+# alongside whatever's already open. See test_tabs.py-style coverage
+# further down for the actual multi-tab behavior.
 
 
-def test_new_file_clears_text_when_nothing_modified(qapp, tmp_path: Path):
+def test_new_tab_starts_blank_and_switches_to_it(qapp, tmp_path: Path):
     editor = make_editor(tmp_path)
-    editor.new_file()
-    assert editor.text_edit.toPlainText() == ""
+    editor.text_edit.setPlainText("existing content")
 
-
-def test_new_file_prompts_when_modified_and_yes_saves(qapp, tmp_path: Path, monkeypatch):
-    editor = make_editor(tmp_path)
-    editor.text_edit.setPlainText("draft content")
-
-    target = tmp_path / "saved.txt"
-    monkeypatch.setattr(
-        QFileDialog, "getSaveFileName", staticmethod(lambda *a, **k: (str(target), ""))
-    )
-    monkeypatch.setattr(
-        QMessageBox, "question", staticmethod(lambda *a, **k: QMessageBox.StandardButton.Yes)
-    )
-
-    editor.new_file()
-
-    assert target.read_text(encoding="utf-8") == "draft content"
-    assert editor.text_edit.toPlainText() == ""
-
-
-def test_new_file_prompts_when_modified_and_no_discards(qapp, tmp_path: Path, monkeypatch):
-    editor = make_editor(tmp_path)
-    editor.text_edit.setPlainText("draft content")
-    monkeypatch.setattr(
-        QMessageBox, "question", staticmethod(lambda *a, **k: QMessageBox.StandardButton.No)
-    )
-
-    editor.new_file()
+    editor.new_tab()
 
     assert editor.text_edit.toPlainText() == ""
 
 
-def test_new_file_prompts_when_modified_and_cancel_aborts(qapp, tmp_path: Path, monkeypatch):
+def test_new_tab_never_prompts_and_preserves_other_tabs(qapp, tmp_path: Path, monkeypatch):
     editor = make_editor(tmp_path)
     editor.text_edit.setPlainText("draft content")
     monkeypatch.setattr(
-        QMessageBox, "question", staticmethod(lambda *a, **k: QMessageBox.StandardButton.Cancel)
+        QMessageBox,
+        "question",
+        staticmethod(lambda *a, **k: (_ for _ in ()).throw(AssertionError("should not prompt"))),
     )
 
-    editor.new_file()
+    editor.new_tab()
 
+    assert editor.tab_widget.count() == 2
+    editor.tab_widget.setCurrentIndex(0)
     assert editor.text_edit.toPlainText() == "draft content"
 
 
@@ -191,13 +174,18 @@ def test_open_file_cancelled_dialog_does_nothing(qapp, tmp_path: Path, monkeypat
     assert editor.text_edit.toPlainText() == "existing"
 
 
-def test_open_file_prompts_when_modified(qapp, tmp_path: Path, monkeypatch):
+def test_open_file_with_unsaved_current_tab_opens_a_new_tab_instead(qapp, tmp_path: Path, monkeypatch):
+    # Never prompts: the current tab's unsaved content is left completely
+    # untouched in its own tab rather than discarded, and the opened file
+    # lands in a fresh tab alongside it.
     source = tmp_path / "macro.txt"
     source.write_text("new content", encoding="utf-8")
     editor = make_editor(tmp_path)
     editor.text_edit.setPlainText("unsaved draft")
     monkeypatch.setattr(
-        QMessageBox, "question", staticmethod(lambda *a, **k: QMessageBox.StandardButton.No)
+        QMessageBox,
+        "question",
+        staticmethod(lambda *a, **k: (_ for _ in ()).throw(AssertionError("should not prompt"))),
     )
     monkeypatch.setattr(
         QFileDialog, "getOpenFileName", staticmethod(lambda *a, **k: (str(source), ""))
@@ -205,6 +193,23 @@ def test_open_file_prompts_when_modified(qapp, tmp_path: Path, monkeypatch):
 
     editor.open_file()
 
+    assert editor.tab_widget.count() == 2
+    assert editor.text_edit.toPlainText() == "new content"  # the new, now-active tab
+    editor.tab_widget.setCurrentIndex(0)
+    assert editor.text_edit.toPlainText() == "unsaved draft"  # untouched
+
+
+def test_open_file_reuses_a_blank_untitled_current_tab(qapp, tmp_path: Path, monkeypatch):
+    source = tmp_path / "macro.txt"
+    source.write_text("new content", encoding="utf-8")
+    editor = make_editor(tmp_path)
+    monkeypatch.setattr(
+        QFileDialog, "getOpenFileName", staticmethod(lambda *a, **k: (str(source), ""))
+    )
+
+    editor.open_file()
+
+    assert editor.tab_widget.count() == 1  # reused, not a second tab
     assert editor.text_edit.toPlainText() == "new content"
 
 
@@ -258,6 +263,195 @@ def test_close_with_no_unsaved_changes_closes_cleanly(qapp, tmp_path: Path):
     editor.close()
 
     assert closed == [1]
+
+
+# -- multiple tabs in one window --------------------------------------------
+
+
+def test_starts_with_exactly_one_tab(qapp, tmp_path: Path):
+    editor = make_editor(tmp_path)
+    assert editor.tab_widget.count() == 1
+
+
+def test_new_tab_adds_a_second_tab_labeled_untitled(qapp, tmp_path: Path):
+    editor = make_editor(tmp_path)
+    editor.new_tab()
+    assert editor.tab_widget.count() == 2
+    assert editor.tab_widget.tabText(1) == "Untitled"
+
+
+def test_tabs_hold_independent_content(qapp, tmp_path: Path):
+    editor = make_editor(tmp_path)
+    editor.text_edit.setPlainText("first file")
+    editor.new_tab()
+    editor.text_edit.setPlainText("second file")
+
+    editor.tab_widget.setCurrentIndex(0)
+    assert editor.text_edit.toPlainText() == "first file"
+    editor.tab_widget.setCurrentIndex(1)
+    assert editor.text_edit.toPlainText() == "second file"
+
+
+def test_tab_label_shows_filename_and_modified_marker(qapp, tmp_path: Path):
+    editor = make_editor(tmp_path)
+    assert editor.tab_widget.tabText(0) == "Untitled"
+
+    editor.text_edit.setPlainText("hello")
+    assert editor.tab_widget.tabText(0) == "Untitled*"
+
+    editor.current_file = tmp_path / "notes.txt"
+    editor.is_modified = False
+    assert editor.tab_widget.tabText(0) == "notes.txt"
+
+
+def test_window_title_and_status_bar_follow_the_active_tab(qapp, tmp_path: Path):
+    editor = make_editor(tmp_path)
+    editor.text_edit.setPlainText("one two three")
+    editor.new_tab()
+    editor.text_edit.setPlainText("four five")
+
+    assert editor.windowTitle() == "Text Editor — Untitled*"
+    assert editor.word_count_label.text() == "Words: 2"
+
+    editor.tab_widget.setCurrentIndex(0)
+    assert editor.windowTitle() == "Text Editor — Untitled*"
+    assert editor.word_count_label.text() == "Words: 3"
+
+
+def test_undo_redo_cut_copy_paste_dispatch_to_the_active_tab_only(qapp, tmp_path: Path):
+    editor = make_editor(tmp_path)
+    editor.text_edit.setPlainText("tab one")
+    editor.new_tab()
+    editor.text_edit.insertPlainText("tab two")  # setPlainText clears the undo stack, unlike insert
+
+    editor.undo_action.trigger()  # should only affect the active (second) tab
+
+    assert editor.text_edit.toPlainText() == ""
+    editor.tab_widget.setCurrentIndex(0)
+    assert editor.text_edit.toPlainText() == "tab one"
+
+
+def test_find_bar_is_independent_per_tab(qapp, tmp_path: Path):
+    editor = make_editor(tmp_path)
+    editor.find_action.trigger()
+    assert editor.find_bar.isHidden() is False
+
+    editor.new_tab()
+    assert editor.find_bar.isHidden() is True  # the new tab's own, untouched find bar
+
+    editor.tab_widget.setCurrentIndex(0)
+    assert editor.find_bar.isHidden() is False  # the first tab's find bar is still open
+
+
+def test_line_numbers_and_word_wrap_toggles_apply_to_every_open_tab(qapp, tmp_path: Path):
+    editor = make_editor(tmp_path)
+    editor.new_tab()
+
+    editor.line_numbers_action.setChecked(False)
+    editor.word_wrap_action.setChecked(False)
+
+    for i in range(editor.tab_widget.count()):
+        tab = editor.tab_widget.widget(i)
+        assert tab.text_edit.line_number_area_width() == 0
+        assert tab.text_edit.lineWrapMode() == QPlainTextEdit.LineWrapMode.NoWrap
+
+
+def test_apply_font_changes_every_open_tab(qapp, tmp_path: Path):
+    editor = make_editor(tmp_path)
+    editor.new_tab()
+
+    editor.apply_font("Courier New", 18)
+
+    for i in range(editor.tab_widget.count()):
+        tab = editor.tab_widget.widget(i)
+        assert tab.text_edit.font().family() == "Courier New"
+        assert tab.text_edit.font().pointSize() == 18
+
+
+def test_closing_a_tab_with_no_unsaved_changes_removes_it(qapp, tmp_path: Path):
+    editor = make_editor(tmp_path)
+    editor.new_tab()
+    assert editor.tab_widget.count() == 2
+
+    editor.close_tab_at(1)
+
+    assert editor.tab_widget.count() == 1
+
+
+def test_closing_a_modified_tab_prompts_and_cancel_keeps_it_open(qapp, tmp_path: Path, monkeypatch):
+    editor = make_editor(tmp_path)
+    editor.new_tab()
+    editor.text_edit.setPlainText("unsaved")
+    monkeypatch.setattr(
+        QMessageBox, "question", staticmethod(lambda *a, **k: QMessageBox.StandardButton.Cancel)
+    )
+
+    editor.close_tab_at(1)
+
+    assert editor.tab_widget.count() == 2
+
+
+def test_closing_a_tab_never_affects_other_tabs_content(qapp, tmp_path: Path, monkeypatch):
+    editor = make_editor(tmp_path)
+    editor.text_edit.setPlainText("keep me")
+    editor.new_tab()
+    editor.text_edit.setPlainText("throwaway")
+    monkeypatch.setattr(
+        QMessageBox, "question", staticmethod(lambda *a, **k: QMessageBox.StandardButton.No)
+    )
+
+    editor.close_tab_at(1)
+
+    assert editor.tab_widget.count() == 1
+    assert editor.text_edit.toPlainText() == "keep me"
+
+
+def test_closing_the_last_tab_closes_the_whole_window(qapp, tmp_path: Path):
+    editor = make_editor(tmp_path)
+    closed = []
+    editor.closed.connect(lambda: closed.append(1))
+
+    editor.close_tab_at(0)
+
+    assert closed == [1]
+
+
+def test_closing_window_with_one_unsaved_tab_among_several_prompts_only_for_that_one(
+    qapp, tmp_path: Path, monkeypatch
+):
+    editor = make_editor(tmp_path)
+    editor.new_tab()
+    editor.text_edit.setPlainText("unsaved")
+    prompted = []
+
+    def fake_question(*a, **k):
+        prompted.append(1)
+        return QMessageBox.StandardButton.No
+
+    monkeypatch.setattr(QMessageBox, "question", staticmethod(fake_question))
+
+    closed = []
+    editor.closed.connect(lambda: closed.append(1))
+    editor.close()
+
+    assert prompted == [1]  # only the one modified tab, not the clean one
+    assert closed == [1]
+
+
+def test_closing_window_cancel_on_any_tab_aborts_the_whole_close(qapp, tmp_path: Path, monkeypatch):
+    editor = make_editor(tmp_path)
+    editor.new_tab()
+    editor.text_edit.setPlainText("unsaved")
+    monkeypatch.setattr(
+        QMessageBox, "question", staticmethod(lambda *a, **k: QMessageBox.StandardButton.Cancel)
+    )
+
+    closed = []
+    editor.closed.connect(lambda: closed.append(1))
+    editor.close()
+
+    assert closed == []
+    assert editor.tab_widget.count() == 2  # nothing was torn down
 
 
 # -- line numbers / word wrap -----------------------------------------------

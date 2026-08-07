@@ -17,17 +17,46 @@ window's own text widget in real use, despite an external planning
 doc's "existing implementation already handles focus, so should work
 automatically" claim -- that claim does not hold, confirmed directly
 rather than assumed either way. This window therefore owns its own
-independent Edit menu, hardcoded directly to its own QPlainTextEdit's
-methods -- not a parallel implementation of the same *mechanism* in the
-sense CLAUDE.md rule 6 warns against, since there's only ever one
-editable widget in this whole window (no focus-dispatch is even needed
-the way MainWindow needs it across three different widgets). Same
-reasoning for Find: a real, separate ``FindBar`` instance (verified
+independent Edit menu, dispatching to whichever tab is currently active
+-- not a parallel implementation of the same *mechanism* in the sense
+CLAUDE.md rule 6 warns against, since a window's own tab_widget already
+knows exactly which tab is showing, unlike MainWindow's need to poll
+QApplication-wide focus across three different widgets. Same reasoning
+for Find: each tab gets its own real ``FindBar`` instance (verified
 compatible with ``QPlainTextEdit`` directly -- ``FindBar`` only relies
 on ``document()``/``setTextCursor()``/``ensureCursorVisible()``/
 ``setExtraSelections()``, all of which QPlainTextEdit implements with
 the same signatures QTextEdit does, confirmed with a real script before
 writing this module).
+
+Multiple *tabs* per window (added later, on top of the above -- Rick's
+own follow-up request): each open file is an independent ``_EditorFileTab``
+(its own text widget, current_file, is_modified, and its own FindBar --
+the same "per-tab, not shared" precedent SessionTab already established
+for FindBar in Phase 11) held in a ``QTabWidget``. ``TextEditor`` keeps
+``text_edit``/``current_file``/``is_modified``/``find_bar`` as properties
+delegating to whichever tab is currently active, rather than renaming
+them everywhere -- this is deliberate, not laziness: every pre-existing
+caller/test that only ever dealt with one tab per window keeps working
+unchanged, since "the current tab" is a strict superset of "the only
+tab." New/Open no longer need an unsaved-changes prompt at all (a real,
+deliberate simplification over the old single-tab design, not an
+oversight) -- neither one can destroy another tab's content anymore,
+since each file gets its own tab; the discard-confirmation prompt is
+still very much used, just relocated to where content can actually be
+lost: closing a single tab, or closing the whole window with any tab
+still unsaved.
+
+MainWindow's own multi-*window* behavior (Tools > Editor / the hotkey /
+`/editor` always opening a brand-new independent TextEditor window) is
+deliberately left untouched by this -- adding tabs to what's already an
+open window is the literal, minimal-risk reading of "the ability to
+open multiple tabs if I have more than one file," and doesn't relitigate
+Rick's earlier, explicit multiple-windows checkpoint choice. Worth a
+second look together once this is reviewed, in case the intent was
+actually for a second file to land in an *already-open* editor window
+rather than a new one -- flagging this assumption explicitly rather
+than silently deciding it.
 """
 
 from __future__ import annotations
@@ -43,6 +72,7 @@ from PySide6.QtWidgets import (
     QMainWindow,
     QMessageBox,
     QPlainTextEdit,
+    QTabWidget,
     QVBoxLayout,
     QWidget,
 )
@@ -51,6 +81,8 @@ from engine.storage import drafts_dir
 
 from ..fonts import resolve_editor_font
 from .find_bar import FindBar
+
+_FILE_DIALOG_FILTER = "Text files (*.txt);;Macro files (*.macro);;All files (*)"
 
 
 class _LineNumberArea(QWidget):
@@ -133,6 +165,56 @@ class _EditorTextEdit(QPlainTextEdit):
             block_number += 1
 
 
+class _EditorFileTab(QWidget):
+    """One open file's editing state within a tabbed TextEditor window:
+    its own text widget, current file path, modified flag, and its own
+    FindBar. Deliberately dumb -- it tracks its own text/modified state
+    but has no idea it's inside a tab widget at all; TextEditor (the
+    thing that actually owns the QTabWidget) is what reacts to changes
+    here and updates tab labels/window title/status bar accordingly.
+    """
+
+    def __init__(
+        self,
+        parent: Optional[QWidget] = None,
+        *,
+        font_family: str = "",
+        font_size: int = 0,
+        line_numbers: bool = True,
+        word_wrap: bool = True,
+    ) -> None:
+        super().__init__(parent)
+        self.current_file: Optional[Path] = None
+        self.is_modified: bool = False
+
+        self.text_edit = _EditorTextEdit(self)
+        self.text_edit.setFont(resolve_editor_font(font_family, font_size))
+        self.text_edit.setLineWrapMode(
+            QPlainTextEdit.LineWrapMode.WidgetWidth if word_wrap else QPlainTextEdit.LineWrapMode.NoWrap
+        )
+        self.text_edit.set_line_numbers_enabled(line_numbers)
+        self.text_edit.textChanged.connect(self._on_text_changed)
+
+        # A real, independent FindBar per tab -- same "per-tab, not
+        # shared" precedent as SessionTab.find_bar (Phase 11), so
+        # searching in one open file never touches another's highlight
+        # state.
+        self.find_bar = FindBar(self.text_edit, self)
+
+        layout = QVBoxLayout(self)
+        layout.setContentsMargins(0, 0, 0, 0)
+        layout.addWidget(self.find_bar)
+        layout.addWidget(self.text_edit)
+
+    def _on_text_changed(self) -> None:
+        self.is_modified = True
+
+    def display_name(self) -> str:
+        name = self.current_file.name if self.current_file else "Untitled"
+        marker = "*" if self.is_modified else ""
+        return f"{name}{marker}"
+
+
 class TextEditor(QMainWindow):
     closed = Signal()
 
@@ -150,33 +232,34 @@ class TextEditor(QMainWindow):
     ) -> None:
         super().__init__()
         self.host_window = host_window
-        self.current_file: Optional[Path] = None
-        self.is_modified = False
         self._last_dir = last_dir
         self._drafts_dir_override = drafts_dir_override
+        # Shared starting point for every tab in *this* window -- View
+        # menu toggles and Settings-driven font changes apply to every
+        # currently-open tab uniformly (see _on_line_numbers_toggled/
+        # _on_word_wrap_toggled/apply_font), and to any tab opened
+        # afterward, matching how there's only one View menu for the
+        # whole window, not one per tab.
+        self._font_family = font_family
+        self._font_size = font_size
+        self._line_numbers_enabled = line_numbers
+        self._word_wrap_enabled = word_wrap
 
-        self.text_edit = _EditorTextEdit(self)
-        self.text_edit.setFont(resolve_editor_font(font_family, font_size))
-        self.text_edit.setLineWrapMode(
-            QPlainTextEdit.LineWrapMode.WidgetWidth if word_wrap else QPlainTextEdit.LineWrapMode.NoWrap
-        )
-        self.text_edit.set_line_numbers_enabled(line_numbers)
-        self.text_edit.textChanged.connect(self._on_text_changed)
-        self.text_edit.cursorPositionChanged.connect(self._update_status)
-
-        # A real, independent FindBar (see this module's docstring for
-        # why MainWindow's own tab-scoped find_action can't reach here).
-        self.find_bar = FindBar(self.text_edit, self)
-
-        central = QWidget(self)
-        layout = QVBoxLayout(central)
-        layout.setContentsMargins(0, 0, 0, 0)
-        layout.addWidget(self.find_bar)
-        layout.addWidget(self.text_edit)
-        self.setCentralWidget(central)
+        self.tab_widget = QTabWidget(self)
+        self.tab_widget.setTabsClosable(True)
+        self.tab_widget.setMovable(True)
+        self.tab_widget.tabCloseRequested.connect(self.close_tab_at)
+        self.tab_widget.currentChanged.connect(self._on_current_tab_changed)
+        self.setCentralWidget(self.tab_widget)
 
         self._build_menu(line_numbers, word_wrap)
         self._build_status_bar()
+
+        # Every window starts with exactly one blank tab -- there's
+        # always something to edit/type into the moment the window
+        # opens, same as the pre-tabs design's single always-present
+        # text_edit.
+        self.new_tab()
 
         if geometry and len(geometry) == 4:
             self.setGeometry(*geometry)
@@ -186,13 +269,63 @@ class TextEditor(QMainWindow):
         self._update_title()
         self._update_status()
 
+    # -- current-tab convenience properties -------------------------------
+    #
+    # Every pre-tabs caller (this module's own file-operation methods,
+    # MainWindow, and most of the existing test suite) only ever dealt
+    # with one tab per window and addressed it as editor.text_edit /
+    # .current_file / .is_modified / .find_bar directly. Rather than
+    # rename all of that to go through "the current tab" explicitly,
+    # these delegate to whichever tab is active -- "the current tab" is
+    # a strict superset of "the only tab," so every such caller keeps
+    # working unchanged.
+
+    def _current_tab(self) -> Optional[_EditorFileTab]:
+        return self.tab_widget.currentWidget()
+
+    @property
+    def text_edit(self) -> _EditorTextEdit:
+        tab = self._current_tab()
+        assert tab is not None, "TextEditor always has at least one tab"
+        return tab.text_edit
+
+    @property
+    def find_bar(self) -> FindBar:
+        tab = self._current_tab()
+        assert tab is not None, "TextEditor always has at least one tab"
+        return tab.find_bar
+
+    @property
+    def current_file(self) -> Optional[Path]:
+        tab = self._current_tab()
+        return tab.current_file if tab is not None else None
+
+    @current_file.setter
+    def current_file(self, value: Optional[Path]) -> None:
+        tab = self._current_tab()
+        if tab is not None:
+            tab.current_file = value
+            self._refresh_tab_label(tab)
+
+    @property
+    def is_modified(self) -> bool:
+        tab = self._current_tab()
+        return tab.is_modified if tab is not None else False
+
+    @is_modified.setter
+    def is_modified(self, value: bool) -> None:
+        tab = self._current_tab()
+        if tab is not None:
+            tab.is_modified = value
+            self._refresh_tab_label(tab)
+
     # -- menu ---------------------------------------------------------
 
     def _build_menu(self, line_numbers: bool, word_wrap: bool) -> None:
         menu_bar = self.menuBar()
 
         file_menu = menu_bar.addMenu("&File")
-        self.new_action = file_menu.addAction("New", self.new_file)
+        self.new_action = file_menu.addAction("New Tab", self.new_tab)
         self.new_action.setShortcut(QKeySequence(QKeySequence.StandardKey.New))
         self.open_action = file_menu.addAction("Open...", self.open_file)
         self.open_action.setShortcut(QKeySequence(QKeySequence.StandardKey.Open))
@@ -201,23 +334,25 @@ class TextEditor(QMainWindow):
         self.save_as_action = file_menu.addAction("Save As...", self.save_file_as)
         self.save_as_action.setShortcut(QKeySequence(QKeySequence.StandardKey.SaveAs))
         file_menu.addSeparator()
-        self.close_action = file_menu.addAction("Close", self.close)
+        self.close_action = file_menu.addAction("Close Tab", self.close_current_tab)
         self.close_action.setShortcut(QKeySequence(QKeySequence.StandardKey.Close))
+        self.close_window_action = file_menu.addAction("Close Window", self.close)
+        self.close_window_action.setShortcut(QKeySequence("Ctrl+Shift+W"))
 
         edit_menu = menu_bar.addMenu("&Edit")
-        self.undo_action = edit_menu.addAction("Undo", self.text_edit.undo)
+        self.undo_action = edit_menu.addAction("Undo", self._dispatch_undo)
         self.undo_action.setShortcut(QKeySequence(QKeySequence.StandardKey.Undo))
-        self.redo_action = edit_menu.addAction("Redo", self.text_edit.redo)
+        self.redo_action = edit_menu.addAction("Redo", self._dispatch_redo)
         self.redo_action.setShortcut(QKeySequence(QKeySequence.StandardKey.Redo))
         edit_menu.addSeparator()
-        self.cut_action = edit_menu.addAction("Cut", self.text_edit.cut)
+        self.cut_action = edit_menu.addAction("Cut", self._dispatch_cut)
         self.cut_action.setShortcut(QKeySequence(QKeySequence.StandardKey.Cut))
-        self.copy_action = edit_menu.addAction("Copy", self.text_edit.copy)
+        self.copy_action = edit_menu.addAction("Copy", self._dispatch_copy)
         self.copy_action.setShortcut(QKeySequence(QKeySequence.StandardKey.Copy))
-        self.paste_action = edit_menu.addAction("Paste", self.text_edit.paste)
+        self.paste_action = edit_menu.addAction("Paste", self._dispatch_paste)
         self.paste_action.setShortcut(QKeySequence(QKeySequence.StandardKey.Paste))
         edit_menu.addSeparator()
-        self.select_all_action = edit_menu.addAction("Select All", self.text_edit.selectAll)
+        self.select_all_action = edit_menu.addAction("Select All", self._dispatch_select_all)
         self.select_all_action.setShortcut(QKeySequence(QKeySequence.StandardKey.SelectAll))
         edit_menu.addSeparator()
         self.find_action = edit_menu.addAction("Find...", self._toggle_find)
@@ -245,16 +380,128 @@ class TextEditor(QMainWindow):
         bar.addPermanentWidget(self.cursor_pos_label)
 
     def _toggle_find(self) -> None:
+        tab = self._current_tab()
+        if tab is None:
+            return
         # isHidden(), not isVisible() -- the exact same real bug already
         # found and fixed in SessionTab.toggle_find_bar() (Phase 11):
         # isVisible() depends on the whole ancestor chain actually being
         # on-screen, which headless tests (and, in principle, a
         # minimized window) would make false even when the bar is
         # logically "open."
-        if self.find_bar.isHidden():
-            self.find_bar.open_bar()
+        if tab.find_bar.isHidden():
+            tab.find_bar.open_bar()
         else:
-            self.find_bar.close_bar()
+            tab.find_bar.close_bar()
+
+    # -- Edit menu dispatch: whichever tab is currently showing -----------
+    #
+    # Unlike MainWindow (three different widgets, needs real
+    # QApplication-wide focus tracking to know which one to act on),
+    # this window always knows exactly which tab is active via its own
+    # tab_widget -- no focus polling needed.
+
+    def _dispatch_undo(self) -> None:
+        tab = self._current_tab()
+        if tab is not None:
+            tab.text_edit.undo()
+
+    def _dispatch_redo(self) -> None:
+        tab = self._current_tab()
+        if tab is not None:
+            tab.text_edit.redo()
+
+    def _dispatch_cut(self) -> None:
+        tab = self._current_tab()
+        if tab is not None:
+            tab.text_edit.cut()
+
+    def _dispatch_copy(self) -> None:
+        tab = self._current_tab()
+        if tab is not None:
+            tab.text_edit.copy()
+
+    def _dispatch_paste(self) -> None:
+        tab = self._current_tab()
+        if tab is not None:
+            tab.text_edit.paste()
+
+    def _dispatch_select_all(self) -> None:
+        tab = self._current_tab()
+        if tab is not None:
+            tab.text_edit.selectAll()
+
+    # -- tabs -----------------------------------------------------------
+
+    def _add_tab(self) -> _EditorFileTab:
+        tab = _EditorFileTab(
+            self.tab_widget,
+            font_family=self._font_family,
+            font_size=self._font_size,
+            line_numbers=self._line_numbers_enabled,
+            word_wrap=self._word_wrap_enabled,
+        )
+        tab.text_edit.textChanged.connect(lambda t=tab: self._on_tab_text_changed(t))
+        tab.text_edit.cursorPositionChanged.connect(lambda t=tab: self._on_tab_cursor_changed(t))
+        self.tab_widget.addTab(tab, tab.display_name())
+        return tab
+
+    def new_tab(self) -> _EditorFileTab:
+        """Add a blank tab and switch to it.
+
+        Deliberately never prompts to discard anything -- unlike the
+        old single-tab design's New (which cleared the one-and-only
+        text_edit in place), this can't lose any other tab's content,
+        since it only ever adds a new one alongside whatever's already
+        open.
+        """
+        tab = self._add_tab()
+        self.tab_widget.setCurrentWidget(tab)
+        return tab
+
+    def close_current_tab(self) -> None:
+        index = self.tab_widget.currentIndex()
+        if index != -1:
+            self.close_tab_at(index)
+
+    def close_tab_at(self, index: int) -> None:
+        """Close one tab (e.g. its own [x] button, or Close Tab),
+        prompting to save first if it has unsaved changes. Closing the
+        last remaining tab closes the whole window -- an editor window
+        with zero tabs open isn't a useful state to leave sitting
+        around, unlike MainWindow's own host window, which deliberately
+        stays open at zero session tabs as the persistent root of the
+        app; this window isn't that, it's a satellite document window.
+        """
+        tab = self.tab_widget.widget(index)
+        if tab is None:
+            return
+        if not self._confirm_discard_if_modified(tab, "closing this tab"):
+            return
+        self.tab_widget.removeTab(index)
+        tab.deleteLater()
+        if self.tab_widget.count() == 0:
+            self.close()
+
+    def _on_current_tab_changed(self, _index: int) -> None:
+        self._update_title()
+        self._update_status()
+
+    def _on_tab_text_changed(self, tab: _EditorFileTab) -> None:
+        self._refresh_tab_label(tab)
+        if tab is self._current_tab():
+            self._update_status()
+
+    def _on_tab_cursor_changed(self, tab: _EditorFileTab) -> None:
+        if tab is self._current_tab():
+            self._update_status()
+
+    def _refresh_tab_label(self, tab: _EditorFileTab) -> None:
+        index = self.tab_widget.indexOf(tab)
+        if index != -1:
+            self.tab_widget.setTabText(index, tab.display_name())
+        if tab is self._current_tab():
+            self._update_title()
 
     # -- file operations ------------------------------------------------
 
@@ -278,12 +525,14 @@ class TextEditor(QMainWindow):
         if self.host_window is not None:
             self.host_window.record_editor_last_dir(directory)
 
-    def _confirm_discard_if_modified(self, action_description: str) -> bool:
-        """True if it's OK to proceed (nothing unsaved, or the user
-        chose Save/Discard); False if the caller should abort (Cancel).
+    def _confirm_discard_if_modified(self, tab: _EditorFileTab, action_description: str) -> bool:
+        """True if it's OK to proceed (nothing unsaved on this tab, or
+        the user chose Save/Discard); False if the caller should abort
+        (Cancel).
         """
-        if not self.is_modified:
+        if not tab.is_modified:
             return True
+        self.tab_widget.setCurrentWidget(tab)  # bring it into view so the prompt is contextual
         reply = QMessageBox.question(
             self,
             "Unsaved Changes",
@@ -293,25 +542,23 @@ class TextEditor(QMainWindow):
             | QMessageBox.StandardButton.Cancel,
         )
         if reply == QMessageBox.StandardButton.Yes:
-            return self.save_file()
+            return self._save_tab(tab)
         return reply == QMessageBox.StandardButton.No
 
-    def new_file(self) -> None:
-        if not self._confirm_discard_if_modified("creating a new file"):
-            return
-        self.text_edit.clear()
-        self.current_file = None
-        self.is_modified = False
-        self._update_title()
-
     def open_file(self) -> None:
-        if not self._confirm_discard_if_modified("opening another file"):
-            return
+        """Open a file into a tab.
+
+        Reuses the current tab if it's still blank/untitled/unmodified
+        (the common "just opened this window, haven't typed anything
+        yet" case) rather than always adding a new tab -- otherwise
+        every window would accumulate a permanently-empty leftover
+        "Untitled" tab the first time you use Open. Never prompts to
+        discard anything: an already-in-use current tab is left
+        completely untouched, and the file opens into a fresh tab
+        instead.
+        """
         filepath, _ = QFileDialog.getOpenFileName(
-            self,
-            "Open File",
-            self._default_dialog_dir(),
-            "Text files (*.txt);;Macro files (*.macro);;All files (*)",
+            self, "Open File", self._default_dialog_dir(), _FILE_DIALOG_FILTER
         )
         if not filepath:
             return
@@ -320,10 +567,16 @@ class TextEditor(QMainWindow):
         except OSError as exc:
             QMessageBox.critical(self, "Error", f"Failed to open file: {exc}")
             return
-        self.text_edit.setPlainText(content)
-        self.current_file = Path(filepath)
-        self.is_modified = False
-        self._update_title()
+        current = self._current_tab()
+        if current is not None and current.current_file is None and not current.is_modified:
+            tab = current
+        else:
+            tab = self._add_tab()
+        tab.text_edit.setPlainText(content)
+        tab.current_file = Path(filepath)
+        tab.is_modified = False
+        self.tab_widget.setCurrentWidget(tab)
+        self._refresh_tab_label(tab)
         self._remember_dir(filepath)
 
     def save_file(self) -> bool:
@@ -332,30 +585,39 @@ class TextEditor(QMainWindow):
         callers needing to know whether it's safe to proceed (e.g.
         ``_confirm_discard_if_modified``) check this.
         """
-        if self.current_file is None:
-            return self.save_file_as()
+        tab = self._current_tab()
+        if tab is None:
+            return True
+        return self._save_tab(tab)
+
+    def save_file_as(self) -> bool:
+        tab = self._current_tab()
+        if tab is None:
+            return False
+        return self._save_tab_as(tab)
+
+    def _save_tab(self, tab: _EditorFileTab) -> bool:
+        if tab.current_file is None:
+            return self._save_tab_as(tab)
         try:
-            self.current_file.parent.mkdir(parents=True, exist_ok=True)
-            self.current_file.write_text(self.text_edit.toPlainText(), encoding="utf-8")
+            tab.current_file.parent.mkdir(parents=True, exist_ok=True)
+            tab.current_file.write_text(tab.text_edit.toPlainText(), encoding="utf-8")
         except OSError as exc:
             QMessageBox.critical(self, "Error", f"Failed to save file: {exc}")
             return False
-        self.is_modified = False
-        self._update_title()
-        self.statusBar().showMessage(f"Saved: {self.current_file}", 2000)
+        tab.is_modified = False
+        self._refresh_tab_label(tab)
+        self.statusBar().showMessage(f"Saved: {tab.current_file}", 2000)
         return True
 
-    def save_file_as(self) -> bool:
+    def _save_tab_as(self, tab: _EditorFileTab) -> bool:
         filepath, _ = QFileDialog.getSaveFileName(
-            self,
-            "Save As",
-            self._default_dialog_dir(),
-            "Text files (*.txt);;Macro files (*.macro);;All files (*)",
+            self, "Save As", self._default_dialog_dir(), _FILE_DIALOG_FILTER
         )
         if not filepath:
             return False
-        self.current_file = Path(filepath)
-        saved = self.save_file()
+        tab.current_file = Path(filepath)
+        saved = self._save_tab(tab)
         if saved:
             self._remember_dir(filepath)
         return saved
@@ -363,46 +625,59 @@ class TextEditor(QMainWindow):
     # -- status / title --------------------------------------------------
 
     def _update_title(self) -> None:
-        name = self.current_file.name if self.current_file else "Untitled"
-        marker = "*" if self.is_modified else ""
-        self.setWindowTitle(f"Text Editor — {name}{marker}")
-
-    def _on_text_changed(self) -> None:
-        self.is_modified = True
-        self._update_title()
-        self._update_status()
+        tab = self._current_tab()
+        if tab is None:
+            self.setWindowTitle("Text Editor")
+            return
+        self.setWindowTitle(f"Text Editor — {tab.display_name()}")
 
     def _update_status(self) -> None:
-        text = self.text_edit.toPlainText()
+        tab = self._current_tab()
+        if tab is None:
+            self.word_count_label.setText("Words: 0")
+            self.line_count_label.setText("Lines: 1")
+            self.char_count_label.setText("Chars: 0")
+            self.cursor_pos_label.setText("Ln 1, Col 1")
+            return
+        text = tab.text_edit.toPlainText()
         words = len(text.split())
         lines = text.count("\n") + 1 if text else 1
         chars = len(text)
         self.word_count_label.setText(f"Words: {words}")
         self.line_count_label.setText(f"Lines: {lines}")
         self.char_count_label.setText(f"Chars: {chars}")
-        cursor = self.text_edit.textCursor()
+        cursor = tab.text_edit.textCursor()
         self.cursor_pos_label.setText(f"Ln {cursor.blockNumber() + 1}, Col {cursor.columnNumber() + 1}")
 
     # -- view toggles / live settings ------------------------------------
 
     def _on_line_numbers_toggled(self, checked: bool) -> None:
-        self.text_edit.set_line_numbers_enabled(checked)
+        self._line_numbers_enabled = checked
+        for i in range(self.tab_widget.count()):
+            self.tab_widget.widget(i).text_edit.set_line_numbers_enabled(checked)
         if self.host_window is not None:
             self.host_window.record_editor_line_numbers(checked)
 
     def _on_word_wrap_toggled(self, checked: bool) -> None:
-        self.text_edit.setLineWrapMode(
-            QPlainTextEdit.LineWrapMode.WidgetWidth if checked else QPlainTextEdit.LineWrapMode.NoWrap
-        )
+        self._word_wrap_enabled = checked
+        mode = QPlainTextEdit.LineWrapMode.WidgetWidth if checked else QPlainTextEdit.LineWrapMode.NoWrap
+        for i in range(self.tab_widget.count()):
+            self.tab_widget.widget(i).text_edit.setLineWrapMode(mode)
         if self.host_window is not None:
             self.host_window.record_editor_word_wrap(checked)
 
     def apply_font(self, family: str, size: int) -> None:
         """Live-reload hook, same pattern as SessionTab.apply_fonts --
         called by MainWindow when Settings' Editor Font changes while
-        this window is already open.
+        this window is already open. Applies to every currently-open
+        tab in this window, and becomes the starting font for any tab
+        opened afterward.
         """
-        self.text_edit.setFont(resolve_editor_font(family, size))
+        self._font_family = family
+        self._font_size = size
+        font = resolve_editor_font(family, size)
+        for i in range(self.tab_widget.count()):
+            self.tab_widget.widget(i).text_edit.setFont(font)
 
     # -- geometry persistence --------------------------------------------
 
@@ -420,8 +695,10 @@ class TextEditor(QMainWindow):
             self.host_window.record_editor_geometry([g.x(), g.y(), g.width(), g.height()])
 
     def closeEvent(self, event) -> None:  # noqa: N802 -- Qt override
-        if not self._confirm_discard_if_modified("closing"):
-            event.ignore()
-            return
+        for i in range(self.tab_widget.count()):
+            tab = self.tab_widget.widget(i)
+            if not self._confirm_discard_if_modified(tab, "closing"):
+                event.ignore()
+                return
         self.closed.emit()
         super().closeEvent(event)

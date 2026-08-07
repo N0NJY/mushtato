@@ -175,6 +175,30 @@ def parse_ssh_command(args: str) -> Optional[Tuple[str, int, str]]:
     return match.group("host"), port, match.group("user")
 
 
+def _split_input_lines(text: str) -> List[str]:
+    """Split an input box's entire current content into individual
+    lines to send, one call per Enter press -- matches real Potato's
+    own ``send_mushage`` (grabs the whole box, splits on newline, sends
+    each line separately, then clears the box), verified against its
+    real source before writing this rather than assumed.
+
+    A single trailing newline (routine when pasting a block copied
+    elsewhere, which commonly ends with one) is not treated as its own
+    extra blank line to send -- matches Potato's own real
+    ``process_input`` loop, which naturally stops once the remaining
+    text is empty rather than processing a dangling empty segment after
+    the final real newline. A genuine *interior* blank line (a real
+    blank line in the middle of a paste) is still sent as its own blank
+    line, and a single Enter on a genuinely empty box still sends one
+    blank line, exactly as before this feature existed -- neither case
+    is "a trailing newline," so neither is stripped.
+    """
+    lines = text.split("\n")
+    if len(lines) > 1 and lines[-1] == "":
+        lines = lines[:-1]
+    return lines
+
+
 def _is_authentication_failure(message: str) -> bool:
     """True if ``message`` (as built by SshBridge's generic-exception
     handler, ``f"{type(exc).__name__}: {exc}"``) names asyncssh's real
@@ -344,12 +368,22 @@ class SessionTab(QWidget):
         # Dual input (Phase 6): two independent boxes, both sending to
         # this same connection, each with its own recall history.
         # `input_line` (primary) is for ordinary commands -- it's the
-        # only one that checks for built-in "/" commands (Phase 7c) or
-        # will apply alias expansion once scripting is wired into the
-        # GUI (still deferred). `secondary_input` is for longer
-        # free-form text (poses/says); it bypasses *both* -- a pose
-        # starting with "/" or a word that happens to match an alias
-        # must never be silently reinterpreted, same reasoning for both.
+        # only one that checks for built-in "/" commands (Phase 7c) and
+        # applies alias expansion (`_process_typed_line` ->
+        # `_send_to_bridge(apply_aliases=True)` -> `AliasEngine.expand()`).
+        # `secondary_input` is for longer free-form text (poses/says); it
+        # bypasses *both* -- a pose starting with "/" or a word that
+        # happens to match an alias must never be silently reinterpreted,
+        # same reasoning for both. Both boxes are multi-line-capable
+        # (HistoryLineEdit, Potato-parity multi-line paste -- see that
+        # module's own docstring) -- on Return, whichever box's
+        # `_on_primary_send`/`_on_secondary_send` handler fires splits
+        # the box's *entire* current content into individual lines
+        # (`_split_input_lines`) and runs each one through the exact
+        # same per-line pipeline a single typed line already used,
+        # matching real Potato's own send_mushage exactly (grab the
+        # whole box, split on newline, send each line separately, then
+        # clear the box) rather than a parallel multi-line-specific path.
         input_font = resolve_input_font(input_font_family, input_font_size)
 
         self.input_line = HistoryLineEdit(self)
@@ -1084,7 +1118,8 @@ class SessionTab(QWidget):
     def _on_primary_send(self) -> None:
         text = self.input_line.text()
         self.input_line.clear()
-        self._process_typed_line(text)
+        for line in _split_input_lines(text):
+            self._process_typed_line(line)
 
     def _process_typed_line(self, text: str) -> None:
         # Factored out of _on_primary_send (Item 11) so a /repeat's
@@ -1100,10 +1135,12 @@ class SessionTab(QWidget):
 
     def _on_secondary_send(self) -> None:
         # Always bypasses command processing entirely -- a pose
-        # starting with "/" must never be silently reinterpreted.
+        # starting with "/" must never be silently reinterpreted, for
+        # every line of a multi-line paste, not just the first.
         text = self.secondary_input.text()
         self.secondary_input.clear()
-        self._send_to_bridge(text, apply_aliases=False)
+        for line in _split_input_lines(text):
+            self._send_to_bridge(line, apply_aliases=False)
 
     def toggle_find_bar(self) -> None:
         """Show the find bar (focused, ready to type) if hidden, or
