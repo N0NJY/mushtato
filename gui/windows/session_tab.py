@@ -300,7 +300,25 @@ class SessionTab(QWidget):
         # this default only ever activates via the new open_blank_tab().
         self.host = host
         self.port = port
-        self.name = name or (f"{host}:{port}" if host else "New Tab")
+        # Falls back to world.name before host:port -- every real call
+        # site (AddressBookWindow) already passes name=world.name
+        # explicitly too, but this closes off the same gap for any
+        # caller that doesn't remember to: whenever a world is known,
+        # its own address-book name should always win over a bare
+        # host:port, not just when a caller happens to also pass it
+        # separately.
+        self.name = name or (world.name if world is not None else None) or (
+            f"{host}:{port}" if host else "New Tab"
+        )
+        # Set once a Character login line actually fires (_send_autosends
+        # -> _set_character_name) -- empty for a tab with no resolved
+        # Character (no default_character, no explicit Log In as choice,
+        # or an SSH/blank tab, none of which have a MU* Character
+        # concept at all). Deliberately never cleared on disconnect --
+        # auto-reconnect commonly succeeds again with the same Character
+        # moments later, and flickering the tab label off and back on
+        # for that would be more distracting than useful.
+        self.character_name: str = ""
         self.host_window = host_window
         self.world = world
         self._script_store_path_override = script_store_path
@@ -979,6 +997,7 @@ class SessionTab(QWidget):
             self._send_autosend_block(self.world.autosend_connect)
         character = self._resolve_login_character()
         if character is not None:
+            self._set_character_name(character.name)
             self._send_login_line(character)
         if self.world.autosend_login:
             self._send_autosend_block(self.world.autosend_login)
@@ -997,6 +1016,23 @@ class SessionTab(QWidget):
         for line in block.splitlines():
             if line:
                 self._send_to_bridge(line, apply_aliases=False)
+
+    def _tab_label(self) -> str:
+        """The tab bar's label for this tab -- ``name`` alone, or
+        ``name`` plus a second line naming the logged-in Character once
+        one's known. Rendered as two real lines by
+        ``gui.windows.two_line_tab_bar.TwoLineTabBar`` (plain QTabBar
+        text with an embedded newline doesn't grow tab height to fit a
+        second line, confirmed directly -- see that module).
+        """
+        if self.character_name:
+            return f"{self.name}\n{self.character_name}"
+        return self.name
+
+    def _set_character_name(self, name: str) -> None:
+        if self.character_name != name:
+            self.character_name = name
+            self.titleChanged.emit(self._tab_label())
 
     def _resolve_login_character(self) -> Optional[CharacterProfile]:
         # An explicit "Log In as" choice from the address book always
@@ -1439,7 +1475,7 @@ class SessionTab(QWidget):
         book's Connect button, for a tab with no saved world at all.
         """
         self.name = f"{host}:{port}"
-        self.titleChanged.emit(self.name)
+        self.titleChanged.emit(self._tab_label())
         self._start_bridge(TelnetBridge(host, port), host, port, f"Connecting to {host}:{port} ...\n")
 
     def _cmd_ssh(self, args: str) -> Optional[str]:
@@ -1462,7 +1498,7 @@ class SessionTab(QWidget):
 
     def _connect_ssh(self, host: str, port: int, username: str, password: str) -> None:
         self.name = f"{username}@{host}"
-        self.titleChanged.emit(self.name)
+        self.titleChanged.emit(self._tab_label())
         bridge = SshBridge(host, port, username, password, self._host_key_store())
         self._start_bridge(
             bridge, host, port, f"Connecting via SSH to {username}@{host}:{port} ...\n"

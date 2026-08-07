@@ -4662,6 +4662,124 @@ every other GUI-facing change in this project's history; the real feel
 of pasting a multi-line command block and the Shift+Return escape hatch
 remain Rick's to confirm.
 
+**Shipped as 1.12.0 (2026-08-07): tab labels show the logged-in
+Character.** New `gui/windows/two_line_tab_bar.py` (`TwoLineTabBar`),
+extended `gui/windows/session_tab.py` (`character_name`, `_tab_label`,
+`_set_character_name`), extended `gui/windows/main_window.py` (installs
+`TwoLineTabBar` on the host's `tab_widget`).
+
+Rick recalled this had been requested and logged somewhere, but it
+wasn't in this project's own tracking file or anywhere in this file --
+traced to a real, previously-unknown gap rather than assumed lost:
+found in `/home/rick/.claude/projects/-home-rick-Rhost/memory/
+mushtato_pending_bugs.md`, a memory file written by a *different*
+Claude Code project session (working directory `/home/rick/Rhost`,
+debugging an unrelated RhostMUSH `+ai` bridge issue) that happened to
+also record MushTato feature requests Rick mentioned in passing, never
+synced into this project's own `todo_and_bugs.txt`. That file's item 3
+gave the original ask ("tabs should show connected server + character,"
+example phrasing `<server-name : Thoran>`, needing to look "neat and
+clean" rather than match that exact punctuation) -- Rick's own
+follow-up in this session refined it precisely: two real lines (not one
+line with punctuation), connection name on top, Character name
+underneath in smaller text, nothing extra.
+
+**A real rendering finding, confirmed directly before designing around
+it, not assumed:** plain `QTabWidget.setTabText(index, "line1\nline2")`
+does not grow a tab's height to fit the second line under Fusion (this
+project's own forced style, `gui/theme.py`) -- `tabSizeHint()` comes
+back the same height regardless of how many `\n` characters a tab's
+text contains, confirmed with a real isolated script comparing 1-line/
+2-line/4-line tabs before writing any class around the assumption that
+multi-line tab text would "just work." This ruled out the simplest
+possible implementation and required a genuinely custom-painted
+`QTabBar`.
+
+**Architecture, chosen specifically to avoid risking two already-
+shipped, separately-tested features:** MainWindow's tab-activity-flash
+(post-8b, orange) and active-tab-highlight (post-12b, cyan) both work
+by calling plain `QTabBar.setTabTextColor()` on the *existing* tab bar
+-- a naive full custom-paint replacement risks silently breaking both
+unless it's built to cooperate with that exact mechanism. `TwoLineTabBar`
+delegates all of a tab's shape/background/border/hover/selected-state
+painting to the real style (`QStyle.drawControl(CE_TabBarTabShape,
+...)`, the same primitive Qt's own default painting uses) and only
+takes over the *text* -- reading `tabTextColor(index)` for whatever
+color to draw each line in, rather than hardcoding one, so both
+pre-existing color mechanisms keep working completely unchanged with
+zero changes to either of their own call sites. Proven, not assumed:
+a dedicated test sets a tab's text color via the exact same
+`setTabTextColor()` call `MainWindow`'s own activity-flash code already
+uses and confirms it's still readable back correctly.
+
+`SessionTab` gained `character_name` (empty until a Character login
+line actually fires, in `_send_autosends` right where the resolved
+`CharacterProfile` is already available) and `_tab_label()` (returns
+just `name`, or `f"{name}\n{character_name}"` once known) --
+`titleChanged` now emits `_tab_label()` instead of the bare name at
+every site that already emitted it, so a tab that starts single-line
+(no Character known yet) grows a second line live once login completes,
+without any special-casing needed at the call sites. Deliberately never
+cleared on disconnect -- auto-reconnect commonly succeeds again with the
+same Character moments later, and flickering the label off and back on
+for that would be more distracting than informative. Deliberately not
+extended to SSH sessions' `ssh_username` -- Rick's request was
+specifically about the MU* Character login system; SSH auto-sends/login
+are already skipped entirely for non-Telnet worlds (Phase-post-13 SSH
+work), and the tab label correctly follows that same boundary rather
+than inventing a parallel "identity" concept for SSH that wasn't asked
+for.
+
+**A second real bug, found by the new tests themselves, not by
+inspection:** `SessionTab.name` only ever picked up `world.name` when a
+caller *also* separately passed `name=world.name` -- it had no fallback
+to `world.name` on its own, defaulting straight to plain `host:port`
+otherwise. Every real call site in the app (`AddressBookWindow`'s three
+`open_tab()` calls) already passes both, so this never surfaced in
+practice, but it's exactly the kind of latent footgun CLAUDE.md rule 7
+exists to catch -- confirmed for real: the first draft of this session's
+own new tests (constructing tabs via `host.open_tab(host, port,
+bridge=..., world=world)`, matching this test file's own established
+convention of never passing `name=` separately) failed immediately with
+`host:port` where `world.name` was expected. Fixed at the source in
+`SessionTab.__init__` (falls back to `world.name` before `host:port`
+whenever a `world` is given), not by changing the tests to match the
+gap.
+
+Verified per this file's standing rule 7: `tests/gui/
+test_two_line_tab_bar.py` (7 new tests) covers `TwoLineTabBar` in
+isolation -- the size-hint-grows-for-two-lines claim, the tab-text-color
+compatibility claim, and (going beyond just checking the code runs) a
+real pixel-sampling check that grabs the rendered tab bar as a pixmap
+and confirms non-background pixels actually appear in *both* the
+top-line and bottom-line regions of a two-line tab, the same rigor this
+project has applied to rendering claims since the Phase 7d/7 dark-theme
+scrollback investigations. `tests/gui/test_autosends.py` gained 7 tests
+covering `SessionTab`'s side end-to-end through a real `MainWindow` +
+`FakeBridge` + the real `login_delay` timer (not mocked) -- single-line
+before login, two-line after, the explicit "Log In as" character
+winning over the default, staying single-line with no default character
+set, SSH worlds never gaining a character line, `titleChanged` firing
+with the combined label, and `MainWindow`'s own `tab_widget.tabText()`
+reflecting it end-to-end, not just the `SessionTab`-level signal in
+isolation. Full suite re-verified in the established batches: 892 tests
+(258 engine + 634 GUI), zero failures, including the known scripting/
+dialog/address-book segfault-risk trio run together.
+
+Also verified with a real rendered screenshot (`QWidget.grab()` through
+an actual constructed `MainWindow`, two tabs, one with a resolved
+Character and one without, both shown together) -- confirmed visually
+that "Estrellita" renders above a smaller "Thoran," and the single-line
+"Silvren" tab correctly shares the same (taller) row height as its
+neighbor with its one line vertically centered, matching ordinary tab-
+bar behavior rather than looking mismatched. Not verified against a
+real desktop/window manager/compositor this round -- same honest gap as
+every other GUI-facing change in this project's history, though this
+one specifically also carries the added, not-yet-confirmed risk of a
+custom `QStyle.drawControl` call rendering slightly differently across
+real platforms/styles than it does under the offscreen QPA platform's
+Fusion rendering used for all verification so far.
+
 ## Standing rules: verification and assumptions
 
 These apply to every session, every phase, not just security-sensitive ones.

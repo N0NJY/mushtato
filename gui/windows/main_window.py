@@ -57,6 +57,7 @@ from .error_log_window import ErrorLogWindow
 from ..version import mushtato_version
 from .session_tab import SessionTab
 from .telnet_bridge import TelnetBridge
+from .two_line_tab_bar import TwoLineTabBar
 
 __all__ = ["MainWindow", "mushtato_version"]
 
@@ -213,6 +214,14 @@ class MainWindow(QMainWindow):
         self._text_editor_windows: List[TextEditor] = []
 
         self.tab_widget = QTabWidget(self)
+        # Two-line tab labels (post-1.11.0 addition): connection name on
+        # top, logged-in Character name underneath -- see
+        # two_line_tab_bar.py's own docstring for why plain QTabBar text
+        # with an embedded newline doesn't work (its sizeHint doesn't
+        # grow to fit a second line). Set before anything else touches
+        # the tab bar (setTabsClosable/setMovable/addTab), same as any
+        # QTabWidget.setTabBar() call needs to happen early.
+        self.tab_widget.setTabBar(TwoLineTabBar(self.tab_widget))
         self.tab_widget.setTabsClosable(False)
         # Phase 11: Qt's own native drag-to-reorder -- session-only per
         # checkpoint (tabs are live connections, not documents; nothing

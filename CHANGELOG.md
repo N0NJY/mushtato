@@ -12,6 +12,21 @@ and the About box) — bumped after each completed item on the working
 todo/bugs list, not per-commit: a patch bump (1.0.x) for a bug fix, a
 minor bump (1.x.0) for a new feature/behavior change.
 
+## 1.12.0 — Tab labels show the logged-in Character (2026-08-07)
+
+- Each tab's label now shows the connection name (as listed in the
+  Address Book) and, once known, a second smaller line underneath
+  naming the Character logged in on it — e.g. "Estrellita" with
+  "Thoran" underneath. A tab with no resolved Character (no default
+  set, no explicit "Log In as" choice, or an SSH/blank tab) stays
+  single-line, unchanged from before.
+- A real bug this fix also closed: a tab's display name could
+  previously fall back to plain `host:port` instead of the world's own
+  saved name if a caller passed a `world` without also separately
+  passing its name — every real path in the app already passed both,
+  but this is now correct by construction rather than by every caller
+  remembering to.
+
 ## 1.11.0 — Multi-line paste in the input boxes (Potato parity) (2026-08-07)
 
 - Pasting a block of several lines (e.g. commands meant to be sent one

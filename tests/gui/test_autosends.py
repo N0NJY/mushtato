@@ -303,3 +303,121 @@ def test_open_tab_falls_back_to_the_global_default_when_the_world_has_no_saved_s
 
     scrollback_size, input_size = tab.splitter.sizes()
     assert input_size > scrollback_size
+
+
+# -- tab label: connection name + logged-in Character (post-1.11.0) -------
+
+
+def test_tab_label_is_just_the_world_name_before_any_character_is_known(qapp, tmp_path: Path):
+    world = make_world(
+        name="Estrellita",
+        characters=[CharacterProfile(name="Thoran", password="pw")],
+        default_character="Thoran",
+    )
+    host = MainWindow(address_book_storage_path=tmp_path / "ab.json", scripts_dir=tmp_path / "scripts")
+    tab = host.open_tab("example.com", 4201, bridge=FakeBridge(), world=world)
+
+    assert tab._tab_label() == "Estrellita"
+    assert tab.character_name == ""
+
+
+def test_tab_label_gains_the_character_name_once_login_fires(qapp, tmp_path: Path):
+    world = make_world(
+        name="Estrellita",
+        characters=[CharacterProfile(name="Thoran", password="pw")],
+        default_character="Thoran",
+    )
+    host = MainWindow(address_book_storage_path=tmp_path / "ab.json", scripts_dir=tmp_path / "scripts")
+    bridge = FakeBridge()
+    tab = host.open_tab("example.com", 4201, bridge=bridge, world=world)
+
+    bridge.connected.emit()
+    QTest.qWait(50)
+
+    assert tab.character_name == "Thoran"
+    assert tab._tab_label() == "Estrellita\nThoran"
+
+
+def test_tab_label_reflects_the_explicit_log_in_as_character_not_the_default(qapp, tmp_path: Path):
+    thoran = CharacterProfile(name="Thoran", password="pw")
+    alt = CharacterProfile(name="Alt", password="altpw")
+    world = make_world(name="Estrellita", characters=[thoran, alt], default_character="Thoran")
+    host = MainWindow(address_book_storage_path=tmp_path / "ab.json", scripts_dir=tmp_path / "scripts")
+    bridge = FakeBridge()
+    tab = host.open_tab("example.com", 4201, bridge=bridge, world=world, character=alt)
+
+    bridge.connected.emit()
+    QTest.qWait(50)
+
+    assert tab._tab_label() == "Estrellita\nAlt"
+
+
+def test_tab_label_stays_single_line_with_no_default_character(qapp, tmp_path: Path):
+    world = make_world(name="Estrellita", autosend_connect="look")
+    host = MainWindow(address_book_storage_path=tmp_path / "ab.json", scripts_dir=tmp_path / "scripts")
+    bridge = FakeBridge()
+    tab = host.open_tab("example.com", 4201, bridge=bridge, world=world)
+
+    bridge.connected.emit()
+    QTest.qWait(50)
+
+    assert tab._tab_label() == "Estrellita"
+    assert tab.character_name == ""
+
+
+def test_ssh_world_never_gets_a_character_name_on_the_tab_label(qapp, tmp_path: Path):
+    # Auto-sends/character login are skipped entirely for SSH worlds
+    # (see test_ssh_protocol_world_skips_autosends_and_login... above) --
+    # the tab label must correctly stay single-line for the same reason.
+    world = make_world(
+        name="MyShell",
+        protocol="ssh",
+        ssh_username="rick",
+        characters=[CharacterProfile(name="Guest", password="x")],
+        default_character="Guest",
+    )
+    host = MainWindow(address_book_storage_path=tmp_path / "ab.json", scripts_dir=tmp_path / "scripts")
+    bridge = FakeBridge()
+    tab = host.open_tab("example.com", 4201, bridge=bridge, world=world)
+
+    bridge.connected.emit()
+    QTest.qWait(50)
+
+    assert tab._tab_label() == "MyShell"
+
+
+def test_titlechanged_fires_with_the_two_line_label_once_a_character_is_known(qapp, tmp_path: Path):
+    world = make_world(
+        name="Estrellita",
+        characters=[CharacterProfile(name="Thoran", password="pw")],
+        default_character="Thoran",
+    )
+    host = MainWindow(address_book_storage_path=tmp_path / "ab.json", scripts_dir=tmp_path / "scripts")
+    bridge = FakeBridge()
+    tab = host.open_tab("example.com", 4201, bridge=bridge, world=world)
+    titles = []
+    tab.titleChanged.connect(titles.append)
+
+    bridge.connected.emit()
+    QTest.qWait(50)
+
+    assert "Estrellita\nThoran" in titles
+
+
+def test_tab_widget_s_own_visible_tab_text_gains_the_character_line_too(qapp, tmp_path: Path):
+    # End-to-end through MainWindow's own titleChanged wiring
+    # (_on_tab_title_changed -> tab_widget.setTabText), not just the
+    # SessionTab-level signal in isolation.
+    world = make_world(
+        name="Estrellita",
+        characters=[CharacterProfile(name="Thoran", password="pw")],
+        default_character="Thoran",
+    )
+    host = MainWindow(address_book_storage_path=tmp_path / "ab.json", scripts_dir=tmp_path / "scripts")
+    bridge = FakeBridge()
+    host.open_tab("example.com", 4201, bridge=bridge, world=world)
+
+    bridge.connected.emit()
+    QTest.qWait(50)
+
+    assert host.tab_widget.tabText(0) == "Estrellita\nThoran"
