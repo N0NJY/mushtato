@@ -4772,13 +4772,16 @@ Character and one without, both shown together) -- confirmed visually
 that "Estrellita" renders above a smaller "Thoran," and the single-line
 "Silvren" tab correctly shares the same (taller) row height as its
 neighbor with its one line vertically centered, matching ordinary tab-
-bar behavior rather than looking mismatched. Not verified against a
-real desktop/window manager/compositor this round -- same honest gap as
-every other GUI-facing change in this project's history, though this
-one specifically also carries the added, not-yet-confirmed risk of a
-custom `QStyle.drawControl` call rendering slightly differently across
-real platforms/styles than it does under the offscreen QPA platform's
-Fusion rendering used for all verification so far.
+bar behavior rather than looking mismatched.
+
+**Real-desktop confirmation, same day:** Rick downloaded the built
+1.12.0 package and tested it live -- "It looks good and exactly as I
+envisioned it." This closes the one specific risk flagged above (the
+custom `QStyle.drawControl` call rendering differently on a real
+platform/style than under the offscreen QPA platform's Fusion
+rendering used for every verification step up to that point) -- the
+real desktop is what actually confirmed it, not just this session's own
+headless pixel-sampling and screenshot.
 
 ## Standing rules: verification and assumptions
 
